@@ -32,15 +32,14 @@ class BladeYOLOBackbone(nn.Module):
         return self.backbone(x)
 
 class GetIndex(nn.Module):
-    """Extracts a specific tensor from a list output and projects it to the expected channels."""
+    """Extracts a specific tensor from a list output."""
     def __init__(self, c1, c2, index):
         super().__init__()
         self.index = index
-        # The DINO3Backbone outputs 384 channels. Project them to c2 (e.g., 256, 512, 1024)
-        self.proj = nn.Conv2d(384, c2, kernel_size=1, bias=False) if 384 != c2 else nn.Identity()
+        print(f'GetIndex initialized with c1={c1}, c2={c2}, index={index}')
         
     def forward(self, x):
-        return self.proj(x[self.index])
+        return x[self.index]
 
 
 # 3. Dynamically inject into Ultralytics namespace!

@@ -179,11 +179,15 @@ class DINO3Backbone(nn.Module):
                 state_dict = None
 
 
+
         try:
             model = self._create_matching_architecture(self.model_name, state_dict)
 
+            # Ensure the model knows about aqua_style_layers (since official dinov3 ignores it in kwargs)
+            model.aqua_style_layers = self.aqua_style_layers
+
             # --- DYNAMIC INJECTION FOR DINOV3 OFFICIAL COMPATIBILITY ---
-            if self.use_aqua_style and hasattr(model, 'aqua_style_layers'):
+            if self.use_aqua_style:
                 from .style_injection import SelfAttentionBlock
                 print("Dynamically injecting Style Injectors into official DINOv3 blocks...")
                 for layer_idx in model.aqua_style_layers:
@@ -191,7 +195,7 @@ class DINO3Backbone(nn.Module):
                         old_blk = model.blocks[layer_idx]
                         new_blk = SelfAttentionBlock(
                             dim=self.model_spec['embed_dim'],
-                            num_heads=self.model_spec['num_heads'],
+                            num_heads=getattr(old_blk.attn, 'num_heads', 6 if 'vits' in self.model_name else 12),
                             use_aqua_style=True
                         ).to(self.device)
                         
@@ -207,9 +211,14 @@ class DINO3Backbone(nn.Module):
                 # Monkey-patch get_intermediate_layers to accept style_vec
                 import types
                 def patched_get_intermediate_layers(self_model, x, n=1, reshape=False, return_class_token=False, norm=False, style_vec=None):
-                    # Prepare tokens (standard DINO operation)
+                    rope_sincos = None
                     if hasattr(self_model, 'prepare_tokens_with_masks'):
-                        x = self_model.prepare_tokens_with_masks(x)
+                        out = self_model.prepare_tokens_with_masks(x)
+                        if isinstance(out, tuple):
+                            x = out[0]
+                            hw_tuple = out[1]
+                            if hasattr(self_model, 'rope_embed') and self_model.rope_embed is not None:
+                                rope_sincos = self_model.rope_embed(H=hw_tuple[0], W=hw_tuple[1])
                     else:
                         x = self_model.patch_embed(x)
                         x = torch.cat((self_model.cls_token.expand(x.shape[0], -1, -1), x), dim=1)
@@ -218,9 +227,9 @@ class DINO3Backbone(nn.Module):
                     outputs = []
                     for i, blk in enumerate(self_model.blocks):
                         if hasattr(blk, 'use_aqua_style') and blk.use_aqua_style:
-                            x = blk(x, style_vec=style_vec)
+                            x = blk(x, rope_or_rope_list=rope_sincos, style_vec_or_list=style_vec)
                         else:
-                            x = blk(x)
+                            x = blk(x, rope_or_rope_list=rope_sincos)
                         if i in n:
                             outputs.append(x)
                             
@@ -228,13 +237,15 @@ class DINO3Backbone(nn.Module):
                         outputs = [self_model.norm(out) for out in outputs]
                         
                     if not return_class_token:
-                        outputs = [out[:, 1:] for out in outputs]
+                        num_extra = getattr(self_model, 'n_storage_tokens', 0) + 1
+                        outputs = [out[:, num_extra:] for out in outputs]
                         
                     return outputs
 
                 model.get_intermediate_layers = types.MethodType(patched_get_intermediate_layers, model)
 
-            if self.use_aqua_style and hasattr(model, 'aqua_style_layers'):
+            if self.use_aqua_style:
+
 
                 print("Initializing Style Injector parameters...")
                 for layer_idx in model.aqua_style_layers:
@@ -254,7 +265,7 @@ class DINO3Backbone(nn.Module):
             if self.freeze_backbone:
                 for p in self.dino_model.parameters():
                     p.requires_grad = False
-                if self.use_aqua_style and hasattr(self.dino_model, 'aqua_style_layers'):
+                if self.use_aqua_style and True:
                     for layer_idx in self.dino_model.aqua_style_layers:
                         if 0 <= layer_idx < len(self.dino_model.blocks):
                             blk = self.dino_model.blocks[layer_idx]
@@ -392,7 +403,7 @@ class DINO3Backbone(nn.Module):
         if self.dino_model is not None:
             for p in self.dino_model.parameters():
                 p.requires_grad = True
-            if self.use_aqua_style and hasattr(self.dino_model, 'aqua_style_layers'):
+            if self.use_aqua_style and True:
                 for layer_idx in self.dino_model.aqua_style_layers:
                     if 0 <= layer_idx < len(self.dino_model.blocks):
                         blk = self.dino_model.blocks[layer_idx]
@@ -405,7 +416,7 @@ class DINO3Backbone(nn.Module):
         if self.dino_model is not None:
             for p in self.dino_model.parameters():
                 p.requires_grad = False
-            if self.use_aqua_style and hasattr(self.dino_model, 'aqua_style_layers'):
+            if self.use_aqua_style and True:
                 for layer_idx in self.dino_model.aqua_style_layers:
                     if 0 <= layer_idx < len(self.dino_model.blocks):
                         blk = self.dino_model.blocks[layer_idx]
@@ -424,7 +435,7 @@ class DINO3Backbone(nn.Module):
         if getattr(self, "freeze_backbone", True) and self.dino_model is not None:
             self.dino_model.eval()
 
-            if use_aqua_style and hasattr(self.dino_model, 'aqua_style_layers'):
+            if use_aqua_style and True:
                 for layer_idx in self.dino_model.aqua_style_layers:
                     if 0 <= layer_idx < len(self.dino_model.blocks):
                         blk = self.dino_model.blocks[layer_idx]
@@ -434,7 +445,7 @@ class DINO3Backbone(nn.Module):
             for p in self.dino_model.parameters():
                 p.requires_grad = False
 
-            if use_aqua_style and hasattr(self.dino_model, 'aqua_style_layers'):
+            if use_aqua_style and True:
                 for layer_idx in self.dino_model.aqua_style_layers:
                     if 0 <= layer_idx < len(self.dino_model.blocks):
                         blk = self.dino_model.blocks[layer_idx]

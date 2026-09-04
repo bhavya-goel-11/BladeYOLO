@@ -1,0 +1,3 @@
+import inspect
+from dinov3.models.vision_transformer import DinoVisionTransformer
+print(inspect.getsource(DinoVisionTransformer.forward_features))
