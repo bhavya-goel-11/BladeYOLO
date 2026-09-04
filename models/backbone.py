@@ -2,6 +2,9 @@ import os
 from typing import List, Optional
 
 from dinov3.models.vision_transformer import DinoVisionTransformer
+from .style_injection import AquaStyleExtractor
+from .demb import MultiReceptiveFieldBranch
+from .cross_mamba import CrossScaleStateBlock
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
