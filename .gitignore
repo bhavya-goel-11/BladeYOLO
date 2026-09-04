@@ -1,0 +1,56 @@
+# Datasets
+WTBlade-Defect/
+WindSurface-Defect/
+datasets/
+data/
+
+# Documents & Large files
+*.pdf
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C/C++ / CUDA Build Artifacts (for selective_scan extensions)
+*.so
+*.o
+*.obj
+build/
+dist/
+*.egg-info/
+
+# Model weights & Checkpoints
+*.pt
+*.pth
+*.pwf
+*.bin
+*.onnx
+*.engine
+*.tflite
+
+# Training outputs & logs
+runs/
+wandb/
+logs/
+*.log
+
+# Environments
+.venv/
+venv/
+env/
+ENV/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Operating System & IDE files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Scratchpads and Visualizations
+stem_all_channels.md
+wtconv_explanation.md
+*.png
