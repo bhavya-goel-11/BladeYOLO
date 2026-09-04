@@ -55,7 +55,7 @@ class DINO3Backbone(nn.Module):
         self._initialized = False
 
         mrf_channels = int(mrf_channels) if mrf_channels is not None else 16
-        self.device = device if device is not None else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = device
 
         print(f"[初始化日志] use_aqua_style = {use_aqua_style}")
         print(f"[初始化日志] aqua_style_layers = {aqua_style_layers}")
@@ -152,8 +152,7 @@ class DINO3Backbone(nn.Module):
         if not hasattr(self, "_initialized"):
             self._initialized = False
 
-        if not hasattr(self, "device") or self.device is None:
-            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
 
     def _initialize_model(self):
         if self._initialized:
@@ -197,7 +196,7 @@ class DINO3Backbone(nn.Module):
                             dim=self.model_spec['embed_dim'],
                             num_heads=getattr(old_blk.attn, 'num_heads', 6 if 'vits' in self.model_name else 12),
                             use_aqua_style=True
-                        ).to(self.device)
+                        )
                         
                         # Copy weights if available
                         try:
@@ -273,7 +272,7 @@ class DINO3Backbone(nn.Module):
                                 for p in blk.style_injector.parameters():
                                     p.requires_grad = True
 
-            self.dino_model.to(self.device)
+            
             self._initialized = True
             if state_dict:
                 print("Successfully loaded DINOv3 pretrained weights.")
@@ -289,7 +288,7 @@ class DINO3Backbone(nn.Module):
             'pos_embed_rope_base': 10000.0,
             'untie_cls_and_patch_norms': False,
             'untie_global_and_local_cls_norm': False,
-            'device': self.device,
+            'device': 'cpu',
             'aqua_style_layers': self.aqua_style_layers,
         }
 
@@ -346,8 +345,11 @@ class DINO3Backbone(nn.Module):
 
     def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
         self._initialize_model()
+        # Ensure dino_model is on the same device as input x
+        if hasattr(self, 'dino_model') and self.dino_model is not None:
+            self.dino_model.to(x.device)
+            
         B, C, H, W = x.shape
-        x = x.to(self.device)
 
         if x.max() > 1.0:
             x = x / 255.0
