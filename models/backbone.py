@@ -178,10 +178,64 @@ class DINO3Backbone(nn.Module):
                 print(f"Warning: Failed to load DINOv3 model weights: {str(e)}. Proceeding with random weights.")
                 state_dict = None
 
+
         try:
             model = self._create_matching_architecture(self.model_name, state_dict)
 
+            # --- DYNAMIC INJECTION FOR DINOV3 OFFICIAL COMPATIBILITY ---
             if self.use_aqua_style and hasattr(model, 'aqua_style_layers'):
+                from .style_injection import SelfAttentionBlock
+                print("Dynamically injecting Style Injectors into official DINOv3 blocks...")
+                for layer_idx in model.aqua_style_layers:
+                    if 0 <= layer_idx < len(model.blocks):
+                        old_blk = model.blocks[layer_idx]
+                        new_blk = SelfAttentionBlock(
+                            dim=self.model_spec['embed_dim'],
+                            num_heads=self.model_spec['num_heads'],
+                            use_aqua_style=True
+                        ).to(self.device)
+                        
+                        # Copy weights if available
+                        try:
+                            new_blk.load_state_dict(old_blk.state_dict(), strict=False)
+                        except Exception:
+                            pass
+                            
+                        # Replace the block
+                        model.blocks[layer_idx] = new_blk
+
+                # Monkey-patch get_intermediate_layers to accept style_vec
+                import types
+                def patched_get_intermediate_layers(self_model, x, n=1, reshape=False, return_class_token=False, norm=False, style_vec=None):
+                    # Prepare tokens (standard DINO operation)
+                    if hasattr(self_model, 'prepare_tokens_with_masks'):
+                        x = self_model.prepare_tokens_with_masks(x)
+                    else:
+                        x = self_model.patch_embed(x)
+                        x = torch.cat((self_model.cls_token.expand(x.shape[0], -1, -1), x), dim=1)
+                        x = x + self_model.interpolate_pos_encoding(x, x.shape[1], x.shape[2])
+
+                    outputs = []
+                    for i, blk in enumerate(self_model.blocks):
+                        if hasattr(blk, 'use_aqua_style') and blk.use_aqua_style:
+                            x = blk(x, style_vec=style_vec)
+                        else:
+                            x = blk(x)
+                        if i in n:
+                            outputs.append(x)
+                            
+                    if norm and hasattr(self_model, 'norm'):
+                        outputs = [self_model.norm(out) for out in outputs]
+                        
+                    if not return_class_token:
+                        outputs = [out[:, 1:] for out in outputs]
+                        
+                    return outputs
+
+                model.get_intermediate_layers = types.MethodType(patched_get_intermediate_layers, model)
+
+            if self.use_aqua_style and hasattr(model, 'aqua_style_layers'):
+
                 print("Initializing Style Injector parameters...")
                 for layer_idx in model.aqua_style_layers:
                     if 0 <= layer_idx < len(model.blocks):
