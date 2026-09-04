@@ -62,6 +62,16 @@ def main():
     if not os.path.exists(data_path):
         raise FileNotFoundError(f"Dataset YAML not found at: {data_path}")
         
+    # --- DYNAMICALLY FIX DATASET PATH ---
+    # Ultralytics needs the absolute path in data.yaml, so we rewrite it at runtime
+    import yaml
+    with open(data_path, 'r') as f:
+        data_cfg = yaml.safe_load(f)
+    data_cfg['path'] = os.path.dirname(data_path)
+    with open(data_path, 'w') as f:
+        yaml.dump(data_cfg, f, default_flow_style=False)
+    # ------------------------------------
+        
     print(f"===========================================================")
     print(f" Initializing BladeYOLO via: {yaml_path}")
     print(f" Target Dataset: {data_path}")
