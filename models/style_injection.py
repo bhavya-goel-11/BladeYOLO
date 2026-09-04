@@ -6,9 +6,14 @@ import torch.fft as fft
 
 from dinov3.utils import cat_keep_shapes, uncat_with_shapes
 
-from .attention import CausalSelfAttention, SelfAttention
-from .ffn_layers import Mlp
-from .layer_scale import LayerScale
+try:
+    from dinov3.layers.attention import CausalSelfAttention, SelfAttention
+    from dinov3.layers.mlp import Mlp
+    from dinov3.layers.layer_scale import LayerScale
+except ImportError:
+    from dinov3.layers.attention import CausalSelfAttention, SelfAttention
+    from dinov3.layers.ffn_layers import Mlp
+    from dinov3.layers.layer_scale import LayerScale
 
 torch._dynamo.config.automatic_dynamic_shapes = False
 torch._dynamo.config.accumulated_cache_size_limit = 1024

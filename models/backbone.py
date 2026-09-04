@@ -1,6 +1,7 @@
 import os
 from typing import List, Optional
 
+from dinov3.models.vision_transformer import DinoVisionTransformer
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

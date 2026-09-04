@@ -8,8 +8,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.init import constant_, xavier_uniform_
 
-from .conv import Conv
-from .utils import _get_clones, inverse_sigmoid, multi_scale_deformable_attn_pytorch
+from ultralytics.nn.modules.conv import Conv
+from ultralytics.nn.modules.utils import _get_clones, inverse_sigmoid, multi_scale_deformable_attn_pytorch
 
 __all__ = (
     "TransformerEncoderLayer",
@@ -31,7 +31,7 @@ class TransformerEncoderLayer(nn.Module):
     def __init__(self, c1, cm=2048, num_heads=8, dropout=0.0, act=nn.GELU(), normalize_before=False):
         """Initialize the TransformerEncoderLayer with specified parameters."""
         super().__init__()
-        from ...utils.torch_utils import TORCH_1_9
+        from ultralytics.utils.torch_utils import TORCH_1_9
 
         if not TORCH_1_9:
             raise ModuleNotFoundError(
