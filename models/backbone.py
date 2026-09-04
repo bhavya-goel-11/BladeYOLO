@@ -158,24 +158,31 @@ class DINO3Backbone(nn.Module):
     def _initialize_model(self):
         if self._initialized:
             return
+
+        state_dict = None
         if not self.local_model_path or not os.path.exists(self.local_model_path):
-            raise FileNotFoundError(f"模型路径不存在: {self.local_model_path}，请检查权重文件路径")
+            print(f"Warning: DINOv3 pretrained weights not found (path: {self.local_model_path}). Initializing architecture with random weights for dry-run/training.")
+        else:
+            try:
+                state_dict = torch.load(self.local_model_path, map_location='cpu', weights_only=True)
+                if isinstance(state_dict, dict) and 'state_dict' in state_dict:
+                    state_dict = state_dict['state_dict']
+                if isinstance(state_dict, dict) and 'model' in state_dict:
+                    state_dict = state_dict['model']
+                if not isinstance(state_dict, dict):
+                    print("Warning: Loaded weights are not a state_dict. Proceeding with random weights.")
+                    state_dict = None
+                else:
+                    state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
+            except Exception as e:
+                print(f"Warning: Failed to load DINOv3 model weights: {str(e)}. Proceeding with random weights.")
+                state_dict = None
 
         try:
-            state_dict = torch.load(self.local_model_path, map_location='cpu', weights_only=True)
-            if isinstance(state_dict, dict) and 'state_dict' in state_dict:
-                state_dict = state_dict['state_dict']
-            if isinstance(state_dict, dict) and 'model' in state_dict:
-                state_dict = state_dict['model']
-            if not isinstance(state_dict, dict):
-                raise RuntimeError("加载到的权重不是 state_dict 字典，请确认你传入的是权重文件而不是序列化的整模型对象。")
-
-            state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
-
             model = self._create_matching_architecture(self.model_name, state_dict)
 
             if self.use_aqua_style and hasattr(model, 'aqua_style_layers'):
-                print("初始化AquaStyle注入器参数...")
+                print("Initializing Style Injector parameters...")
                 for layer_idx in model.aqua_style_layers:
                     if 0 <= layer_idx < len(model.blocks):
                         blk = model.blocks[layer_idx]
@@ -186,9 +193,10 @@ class DINO3Backbone(nn.Module):
                             nn.init.zeros_(blk.style_injector.style_ff_adapter[-1].bias)
                             print(f"  Zero-initialized output projections of StyleInjector at layer {layer_idx}")
 
-            model.load_state_dict(state_dict, strict=False)
-            self.dino_model = model
+            if state_dict:
+                model.load_state_dict(state_dict, strict=False)
 
+            self.dino_model = model
             if self.freeze_backbone:
                 for p in self.dino_model.parameters():
                     p.requires_grad = False
@@ -202,10 +210,10 @@ class DINO3Backbone(nn.Module):
 
             self.dino_model.to(self.device)
             self._initialized = True
-            print("成功加载DINOv3预训练权重）")
-
+            if state_dict:
+                print("Successfully loaded DINOv3 pretrained weights.")
         except Exception as e:
-            raise RuntimeError(f"加载DINOv3模型失败: {str(e)}")
+            raise RuntimeError(f"Failed to build or load DINOv3 model architecture: {str(e)}")
 
     def _create_matching_architecture(self, model_name: str, state_dict: dict = None):
         spec = self.dinov3_specs[model_name]
