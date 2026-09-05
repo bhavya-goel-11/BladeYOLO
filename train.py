@@ -83,21 +83,52 @@ def main():
     # Detect dual GPUs (Kaggle T4x2 uses indices 0 and 1)
     num_gpus = torch.cuda.device_count()
     
-    # --- DISTRIBUTED DATA PARALLEL (DDP) SCOPING FIX ---
-    # Ultralytics natively spawns a temporary file for DDP which bypasses our 
-    # monkey-patched modules in train.py. To fix this, if we have multiple GPUs, 
-    # we relaunch train.py via torchrun directly so ALL processes receive the patches!
-    if num_gpus >= 2 and os.environ.get("LOCAL_RANK") is None:
-        print(f"Dual GPUs detected! Relaunching train.py via torchrun across {num_gpus} GPUs...")
-        import subprocess
-        cmd = [sys.executable, "-m", "torch.distributed.run", "--nproc_per_node", str(num_gpus), sys.argv[0]]
-        subprocess.run(cmd, check=True)
-        sys.exit(0)
+    # --- DISTRIBUTED DATA PARALLEL (DDP) NATIVE FIX ---
+    # Because Ultralytics spawns a separate temp file for DDP, dynamic runtime 
+    # patches are lost. We permanently inject our custom modules into the pip 
+    # installation on disk for the duration of this Kaggle session.
+    import ultralytics.nn.tasks as tasks_module
+    tasks_file = tasks_module.__file__
+    
+    with open(tasks_file, 'r', encoding='utf-8') as f:
+        tasks_content = f.read()
         
-    if os.environ.get("LOCAL_RANK") is not None:
-        devices = [int(os.environ["LOCAL_RANK"])]
-    else:
-        devices = [0, 1] if num_gpus >= 2 else (0 if num_gpus == 1 else 'cpu')
+    patch_code = f"""
+# --- BLADEYOLO CUSTOM MODULE INJECTION ---
+import sys
+if '{ROOT_DIR}' not in sys.path:
+    sys.path.append('{ROOT_DIR}')
+try:
+    from models.backbone import DINO3Backbone
+    import torch.nn as nn
+    class BladeYOLOBackbone(nn.Module):
+        def __init__(self, *args, **kwargs):
+            super().__init__()
+            self.backbone = DINO3Backbone(use_mrf=True, use_cross_scale=True, use_aqua_style=True)
+        def forward(self, x):
+            return self.backbone(x)
+
+    class GetIndex(nn.Module):
+        def __init__(self, c1, c2, index):
+            super().__init__()
+            self.index = index
+            self.proj = nn.Conv2d(384, c2, kernel_size=1, bias=False) if 384 != c2 else nn.Identity()
+        def forward(self, x):
+            return self.proj(x[self.index])
+            
+    # Explicitly add to module globals so parse_model() can find them via globals()[m]
+    globals()['BladeYOLOBackbone'] = BladeYOLOBackbone
+    globals()['GhostConv'] = GetIndex
+except Exception as e:
+    print(f"BladeYOLO DDP Injection warning: {{e}}")
+# ------------------------------------------
+"""
+    if "# --- BLADEYOLO CUSTOM MODULE INJECTION ---" not in tasks_content:
+        print(f"Injecting BladeYOLO modules into Ultralytics core: {tasks_file}")
+        with open(tasks_file, 'a', encoding='utf-8') as f:
+            f.write("\n" + patch_code)
+
+    devices = [0, 1] if num_gpus >= 2 else (0 if num_gpus == 1 else 'cpu')
 
     # Start Training (strictly following IEEE TGRS 2026 params)
     results = model.train(
