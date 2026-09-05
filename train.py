@@ -21,11 +21,18 @@ class BladeYOLOBackbone(nn.Module):
     def __init__(self, *args, **kwargs):
         super().__init__()
         # Initialize with paper's default architectural settings
+        weight_path = None
+        for p in ['dinov3_vits16.pth', '/kaggle/input/dinov3/dinov3_vits16.pth', '/kaggle/input/models/shamskarib/dinov3-vits/pytorch/default/1/dinov3_vits16_pretrain_lvd1689m-08c60483.pth']:
+            import os
+            if os.path.exists(p):
+                weight_path = p
+                break
         self.backbone = DINO3Backbone(
             use_mrf=True, 
             use_cross_scale=True, 
-            use_aqua_style=True
-        )
+            use_aqua_style=True,
+            model_path=weight_path
+        ).to(torch.float32)  # Force FP32 to prevent BFloat16 EMA crashes
         
     def forward(self, x):
         # Outputs [F3_enh, F4_enh, F5] (or equivalent P3, P4, P5 scales)
@@ -104,7 +111,14 @@ try:
     class BladeYOLOBackbone(nn.Module):
         def __init__(self, *args, **kwargs):
             super().__init__()
-            self.backbone = DINO3Backbone(use_mrf=True, use_cross_scale=True, use_aqua_style=True)
+            # Look for weights in the current directory or a standard Kaggle dataset path
+            weight_path = None
+            for p in ['dinov3_vits16.pth', '/kaggle/input/dinov3/dinov3_vits16.pth', '/kaggle/input/models/shamskarib/dinov3-vits/pytorch/default/1/dinov3_vits16_pretrain_lvd1689m-08c60483.pth']:
+                import os
+                if os.path.exists(p):
+                    weight_path = p
+                    break
+            self.backbone = DINO3Backbone(use_mrf=True, use_cross_scale=True, use_aqua_style=True, model_path=weight_path)
         def forward(self, x):
             return self.backbone(x)
 

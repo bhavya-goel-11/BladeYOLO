@@ -162,8 +162,14 @@ class DINO3Backbone(nn.Module):
         if not self.local_model_path or not os.path.exists(self.local_model_path):
             print(f"Warning: DINOv3 pretrained weights not found (path: {self.local_model_path}). Initializing architecture with random weights for dry-run/training.")
         else:
+
             try:
-                state_dict = torch.load(self.local_model_path, map_location='cpu', weights_only=True)
+                if self.local_model_path.endswith('.safetensors'):
+                    from safetensors.torch import load_file
+                    state_dict = load_file(self.local_model_path)
+                else:
+                    state_dict = torch.load(self.local_model_path, map_location='cpu', weights_only=True)
+
                 if isinstance(state_dict, dict) and 'state_dict' in state_dict:
                     state_dict = state_dict['state_dict']
                 if isinstance(state_dict, dict) and 'model' in state_dict:
