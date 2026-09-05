@@ -118,7 +118,7 @@ try:
                 if os.path.exists(p):
                     weight_path = p
                     break
-            self.backbone = DINO3Backbone(use_mrf=True, use_cross_scale=True, use_aqua_style=True, model_path=weight_path)
+            self.backbone = DINO3Backbone(use_mrf=True, use_cross_scale=True, use_aqua_style=True, model_path=weight_path).to(torch.float32)
         def forward(self, x):
             return self.backbone(x)
 

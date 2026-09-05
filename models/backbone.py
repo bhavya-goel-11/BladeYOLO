@@ -53,6 +53,7 @@ class DINO3Backbone(nn.Module):
 
         self.dino_model = None
         self._initialized = False
+        self._initialize_model()
 
         mrf_channels = int(mrf_channels) if mrf_channels is not None else 16
         self.device = device
@@ -151,6 +152,7 @@ class DINO3Backbone(nn.Module):
             self.dino_model = None
         if not hasattr(self, "_initialized"):
             self._initialized = False
+        self._initialize_model()
 
         
 
@@ -169,6 +171,10 @@ class DINO3Backbone(nn.Module):
                     state_dict = load_file(self.local_model_path)
                 else:
                     state_dict = torch.load(self.local_model_path, map_location='cpu', weights_only=True)
+                
+                # Force all loaded weights to float32 to prevent c10::BFloat16 EMA crashes
+                if state_dict is not None:
+                    state_dict = {k: v.to(torch.float32) if isinstance(v, torch.Tensor) else v for k, v in state_dict.items()}
 
                 if isinstance(state_dict, dict) and 'state_dict' in state_dict:
                     state_dict = state_dict['state_dict']
