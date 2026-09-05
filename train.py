@@ -137,7 +137,7 @@ except Exception as e:
         batch=10,             # Splits to 5 per GPU if dual T4
         imgsz=640,
         device=devices,
-        amp=True,             # Mixed precision (essential for fitting in VRAM)
+        amp=False,            # Disabled to prevent NaN losses in DINOv3 Attention             # Mixed precision (essential for fitting in VRAM)
         
         # Optimizer Params
         optimizer='SGD',
