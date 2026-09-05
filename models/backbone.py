@@ -53,7 +53,6 @@ class DINO3Backbone(nn.Module):
 
         self.dino_model = None
         self._initialized = False
-        self._initialize_model()
 
         mrf_channels = int(mrf_channels) if mrf_channels is not None else 16
         self.device = device
@@ -139,6 +138,9 @@ class DINO3Backbone(nn.Module):
         if self.use_cross_scale:
             self.cross_scale_block = CrossScaleStateBlock(in_channels=output_channels)
 
+        # Initialize DINOv3 model after all configs are set
+        self._initialize_model()
+
     def __setstate__(self, state: dict):
         self.__dict__.update(state)
 
@@ -152,7 +154,6 @@ class DINO3Backbone(nn.Module):
             self.dino_model = None
         if not hasattr(self, "_initialized"):
             self._initialized = False
-        self._initialize_model()
 
         
 
