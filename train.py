@@ -82,7 +82,22 @@ def main():
 
     # Detect dual GPUs (Kaggle T4x2 uses indices 0 and 1)
     num_gpus = torch.cuda.device_count()
-    devices = [0, 1] if num_gpus >= 2 else (0 if num_gpus == 1 else 'cpu')
+    
+    # --- DISTRIBUTED DATA PARALLEL (DDP) SCOPING FIX ---
+    # Ultralytics natively spawns a temporary file for DDP which bypasses our 
+    # monkey-patched modules in train.py. To fix this, if we have multiple GPUs, 
+    # we relaunch train.py via torchrun directly so ALL processes receive the patches!
+    if num_gpus >= 2 and os.environ.get("LOCAL_RANK") is None:
+        print(f"Dual GPUs detected! Relaunching train.py via torchrun across {num_gpus} GPUs...")
+        import subprocess
+        cmd = [sys.executable, "-m", "torch.distributed.run", "--nproc_per_node", str(num_gpus), sys.argv[0]]
+        subprocess.run(cmd, check=True)
+        sys.exit(0)
+        
+    if os.environ.get("LOCAL_RANK") is not None:
+        devices = [int(os.environ["LOCAL_RANK"])]
+    else:
+        devices = [0, 1] if num_gpus >= 2 else (0 if num_gpus == 1 else 'cpu')
 
     # Start Training (strictly following IEEE TGRS 2026 params)
     results = model.train(
