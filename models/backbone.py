@@ -1,7 +1,42 @@
 import os
 from typing import List, Optional
 
+import torch
 from dinov3.models.vision_transformer import DinoVisionTransformer
+
+def patched_get_intermediate_layers(self_model, x, n=1, reshape=False, return_class_token=False, norm=False, style_vec=None):
+    rope_sincos = None
+    if hasattr(self_model, 'prepare_tokens_with_masks'):
+        out = self_model.prepare_tokens_with_masks(x)
+        if isinstance(out, tuple):
+            x = out[0]
+            hw_tuple = out[1]
+            if hasattr(self_model, 'rope_embed') and self_model.rope_embed is not None:
+                rope_sincos = self_model.rope_embed(H=hw_tuple[0], W=hw_tuple[1])
+    else:
+        x = self_model.patch_embed(x)
+        x = torch.cat((self_model.cls_token.expand(x.shape[0], -1, -1), x), dim=1)
+        x = x + self_model.interpolate_pos_encoding(x, x.shape[1], x.shape[2])
+
+    outputs = []
+    for i, blk in enumerate(self_model.blocks):
+        if hasattr(blk, 'use_aqua_style') and blk.use_aqua_style:
+            x = blk(x, rope_or_rope_list=rope_sincos, style_vec_or_list=style_vec)
+        else:
+            x = blk(x, rope_or_rope_list=rope_sincos)
+        if i in n:
+            outputs.append(x)
+            
+    if norm and hasattr(self_model, 'norm'):
+        outputs = [self_model.norm(out) for out in outputs]
+        
+    if not return_class_token:
+        num_extra = getattr(self_model, 'n_storage_tokens', 0) + 1
+        outputs = [out[:, num_extra:] for out in outputs]
+        
+    return outputs
+
+DinoVisionTransformer.patched_get_intermediate_layers = patched_get_intermediate_layers
 from .style_injection import AquaStyleExtractor
 from .demb import MultiReceptiveFieldBranch
 from .cross_mamba import CrossScaleStateBlock
@@ -220,40 +255,7 @@ class DINO3Backbone(nn.Module):
                         # Replace the block
                         model.blocks[layer_idx] = new_blk
 
-                # Monkey-patch get_intermediate_layers to accept style_vec
                 import types
-                def patched_get_intermediate_layers(self_model, x, n=1, reshape=False, return_class_token=False, norm=False, style_vec=None):
-                    rope_sincos = None
-                    if hasattr(self_model, 'prepare_tokens_with_masks'):
-                        out = self_model.prepare_tokens_with_masks(x)
-                        if isinstance(out, tuple):
-                            x = out[0]
-                            hw_tuple = out[1]
-                            if hasattr(self_model, 'rope_embed') and self_model.rope_embed is not None:
-                                rope_sincos = self_model.rope_embed(H=hw_tuple[0], W=hw_tuple[1])
-                    else:
-                        x = self_model.patch_embed(x)
-                        x = torch.cat((self_model.cls_token.expand(x.shape[0], -1, -1), x), dim=1)
-                        x = x + self_model.interpolate_pos_encoding(x, x.shape[1], x.shape[2])
-
-                    outputs = []
-                    for i, blk in enumerate(self_model.blocks):
-                        if hasattr(blk, 'use_aqua_style') and blk.use_aqua_style:
-                            x = blk(x, rope_or_rope_list=rope_sincos, style_vec_or_list=style_vec)
-                        else:
-                            x = blk(x, rope_or_rope_list=rope_sincos)
-                        if i in n:
-                            outputs.append(x)
-                            
-                    if norm and hasattr(self_model, 'norm'):
-                        outputs = [self_model.norm(out) for out in outputs]
-                        
-                    if not return_class_token:
-                        num_extra = getattr(self_model, 'n_storage_tokens', 0) + 1
-                        outputs = [out[:, num_extra:] for out in outputs]
-                        
-                    return outputs
-
                 model.get_intermediate_layers = types.MethodType(patched_get_intermediate_layers, model)
 
             if self.use_aqua_style:
