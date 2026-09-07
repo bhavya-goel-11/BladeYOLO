@@ -60,6 +60,10 @@ setattr(tasks, 'BladeYOLOBackbone', BladeYOLOBackbone)
 setattr(modules, 'GhostConv', GetIndex)
 setattr(tasks, 'GhostConv', GetIndex)
 
+# Also expose GetIndex directly so the PyTorch unpickler can find it when loading last.pt
+setattr(modules, 'GetIndex', GetIndex)
+setattr(tasks, 'GetIndex', GetIndex)
+
 
 def main():
     # Relative paths for robust Kaggle execution
