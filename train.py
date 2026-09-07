@@ -80,12 +80,21 @@ def main():
     # ------------------------------------
         
     print(f"===========================================================")
-    print(f" Initializing BladeYOLO via: {yaml_path}")
     print(f" Target Dataset: {data_path}")
     print(f"===========================================================")
 
-    # Initialize the model using our custom YAML structure
-    model = YOLO(yaml_path)
+    # Prioritize the uploaded Kaggle dataset path, fallback to local
+    kaggle_last_pt = "/kaggle/input/datasets/beegee11/wind-surface-defect/runs/runs/detect/BladeYOLO_WindSurface/tgrs_paper_reproduction/weights/last.pt"
+    local_last_pt = os.path.join(ROOT_DIR, "runs", "detect", "BladeYOLO_WindSurface", "tgrs_paper_reproduction", "weights", "last.pt")
+    
+    last_pt = kaggle_last_pt if os.path.exists(kaggle_last_pt) else local_last_pt
+    
+    if os.path.exists(last_pt):
+        print(f"Found checkpoint! Resuming training from: {last_pt}")
+        model = YOLO(last_pt)
+    else:
+        print(f"No checkpoint found. Initializing new model from: {yaml_path}")
+        model = YOLO(yaml_path)
 
     # Detect dual GPUs (Kaggle T4x2 uses indices 0 and 1)
     num_gpus = torch.cuda.device_count()
@@ -145,30 +154,34 @@ except Exception as e:
     devices = [0, 1] if num_gpus >= 2 else (0 if num_gpus == 1 else 'cpu')
 
     # Start Training (strictly following IEEE TGRS 2026 params)
-    results = model.train(
-        data=data_path,
-        epochs=300,
-        batch=10,             # Splits to 5 per GPU if dual T4
-        imgsz=640,
-        device=devices,
-        amp=False,            # Disabled to prevent NaN losses in DINOv3 Attention             # Mixed precision (essential for fitting in VRAM)
-        
-        # Optimizer Params
-        optimizer='SGD',
-        lr0=0.01,
-        cos_lr=True,
-        
-        # Augmentations (No complex tricks, just standard augmentations)
-        fliplr=0.5,
-        flipud=0.5,
-        hsv_v=0.2,            # Random brightness
-        mosaic=0.0,           # Disable default Ultralytics mosaic
-        mixup=0.0,            # Disable default Ultralytics mixup
-        copy_paste=0.0,
-        
-        project='BladeYOLO_WindSurface',
-        name='tgrs_paper_reproduction'
-    )
+    if os.path.exists(last_pt):
+        results = model.train(resume=True)
+    else:
+        results = model.train(
+            data=data_path,
+            epochs=300,
+            batch=10,             # Splits to 5 per GPU if dual T4
+            imgsz=640,
+            device=devices,
+            amp=False,            # Disabled to prevent NaN losses in DINOv3 Attention
+            
+            # Optimizer Params
+            optimizer='SGD',
+            lr0=0.01,
+            cos_lr=True,
+            
+            # Augmentations (No complex tricks, just standard augmentations)
+            fliplr=0.5,
+            flipud=0.5,
+            hsv_v=0.2,            # Random brightness
+            mosaic=0.0,           # Disable default Ultralytics mosaic
+            mixup=0.0,            # Disable default Ultralytics mixup
+            copy_paste=0.0,
+            
+            project='BladeYOLO_WindSurface',
+            name='tgrs_paper_reproduction'
+        )
+
     
     print("Training successfully completed.")
 
