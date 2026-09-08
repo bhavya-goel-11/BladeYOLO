@@ -67,18 +67,29 @@ setattr(tasks, 'GetIndex', GetIndex)
 
 def main():
     # Relative paths for robust Kaggle execution
-    data_path = os.path.join(ROOT_DIR, 'WindSurface-Defect', 'data.yaml')
-    yaml_path = os.path.join(ROOT_DIR, 'bladeyolo.yaml')
+    # Prioritize Kaggle input path for dataset
+    kaggle_data_path = "/kaggle/input/datasets/beegee11/wind-surface-defect/data.yaml"
+    local_data_path = os.path.join(ROOT_DIR, 'WindSurface-Defect', 'data.yaml')
     
-    if not os.path.exists(data_path):
-        raise FileNotFoundError(f"Dataset YAML not found at: {data_path}")
+    is_kaggle = os.path.exists(kaggle_data_path)
+    original_data_path = kaggle_data_path if is_kaggle else local_data_path
+    
+    if not os.path.exists(original_data_path):
+        raise FileNotFoundError(f"Dataset YAML not found at: {original_data_path}")
         
     # --- DYNAMICALLY FIX DATASET PATH ---
-    # Ultralytics needs the absolute path in data.yaml, so we rewrite it at runtime
+    # Ultralytics needs the absolute path in data.yaml. 
+    # If on Kaggle, the input directory is read-only, so we copy it to a writable temp file.
     import yaml
-    with open(data_path, 'r') as f:
+    import shutil
+    
+    with open(original_data_path, 'r') as f:
         data_cfg = yaml.safe_load(f)
-    data_cfg['path'] = os.path.dirname(data_path)
+        
+    data_cfg['path'] = os.path.dirname(original_data_path)
+    
+    # Write to a local writable file
+    data_path = os.path.join(ROOT_DIR, 'active_data.yaml')
     with open(data_path, 'w') as f:
         yaml.dump(data_cfg, f, default_flow_style=False)
     # ------------------------------------
