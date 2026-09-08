@@ -95,99 +95,26 @@ def main():
     
     if os.path.exists(last_pt):
         print(f"Found checkpoint! Resuming training from: {last_pt}")
-        model = YOLO(last_pt)
+        results = model.train(resume=last_pt) # explicitly pass last_pt to be safe
     else:
-        print(f"No checkpoint found. Initializing new model from: {yaml_path}")
-        model = YOLO(yaml_path)
-
-    # Detect dual GPUs (Kaggle T4x2 uses indices 0 and 1)
-    num_gpus = torch.cuda.device_count()
-    
-    # --- DISTRIBUTED DATA PARALLEL (DDP) NATIVE FIX ---
-    # Because Ultralytics spawns a separate temp file for DDP, dynamic runtime 
-    # patches are lost. We permanently inject our custom modules into the pip 
-    # installation on disk for the duration of this Kaggle session.
-    import ultralytics.nn.tasks as tasks_module
-    tasks_file = tasks_module.__file__
-    
-    with open(tasks_file, 'r', encoding='utf-8') as f:
-        tasks_content = f.read()
-        
-    patch_code = f"""
-# --- BLADEYOLO CUSTOM MODULE INJECTION ---
-import sys
-if '{ROOT_DIR}' not in sys.path:
-    sys.path.append('{ROOT_DIR}')
-try:
-    from models.backbone import DINO3Backbone
-    import torch.nn as nn
-    class BladeYOLOBackbone(nn.Module):
-        def __init__(self, *args, **kwargs):
-            super().__init__()
-            # Look for weights in the current directory or a standard Kaggle dataset path
-            weight_path = None
-            for p in ['dinov3_vits16.pth', '/kaggle/input/dinov3/dinov3_vits16.pth', '/kaggle/input/models/shamskarib/dinov3-vits/pytorch/default/1/dinov3_vits16_pretrain_lvd1689m-08c60483.pth']:
-                import os
-                if os.path.exists(p):
-                    weight_path = p
-                    break
-            self.backbone = DINO3Backbone(use_mrf=True, use_cross_scale=True, use_aqua_style=True, model_path=weight_path).to(torch.float32)
-        def forward(self, x):
-            return self.backbone(x)
-
-    class GetIndex(nn.Module):
-        def __init__(self, c1, c2, index):
-            super().__init__()
-            self.index = index
-            self.proj = nn.Conv2d(384, c2, kernel_size=1, bias=False) if 384 != c2 else nn.Identity()
-        def forward(self, x):
-            return self.proj(x[self.index])
-            
-    # Explicitly add to module globals so parse_model() can find them via globals()[m]
-    globals()['BladeYOLOBackbone'] = BladeYOLOBackbone
-    globals()['GhostConv'] = GetIndex
-except Exception as e:
-    print(f"BladeYOLO DDP Injection warning: {{e}}")
-# ------------------------------------------
-"""
-    if "# --- BLADEYOLO CUSTOM MODULE INJECTION ---" not in tasks_content:
-        print(f"Injecting BladeYOLO modules into Ultralytics core: {tasks_file}")
-        with open(tasks_file, 'a', encoding='utf-8') as f:
-            f.write("\n" + patch_code)
-
-    devices = [0, 1] if num_gpus >= 2 else (0 if num_gpus == 1 else 'cpu')
-
-    # Start Training (strictly following IEEE TGRS 2026 params)
-    if os.path.exists(last_pt):
-        results = model.train(resume=True)
-    else:
+        print("No checkpoint found. Starting fresh training run...")
         results = model.train(
             data=data_path,
             epochs=300,
             batch=10,             # Splits to 5 per GPU if dual T4
             imgsz=640,
             device=devices,
-            amp=False,            # Disabled to prevent NaN losses in DINOv3 Attention
-            
-            # Optimizer Params
             optimizer='SGD',
             lr0=0.01,
             cos_lr=True,
             
-            # Augmentations (No complex tricks, just standard augmentations)
-            fliplr=0.5,
-            flipud=0.5,
-            hsv_v=0.2,            # Random brightness
-            mosaic=0.0,           # Disable default Ultralytics mosaic
-            mixup=0.0,            # Disable default Ultralytics mixup
+            # Augmentations
+            mosaic=1.0,           # Re-enabled to boost small object detection
+            mixup=0.15,           # Re-enabled to match paper
             copy_paste=0.0,
             
             project='BladeYOLO_WindSurface',
             name='tgrs_paper_reproduction'
         )
-
-    
-    print("Training successfully completed.")
-
 if __name__ == '__main__':
     main()
