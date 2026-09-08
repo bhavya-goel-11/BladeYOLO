@@ -68,6 +68,7 @@ setattr(tasks, 'GetIndex', GetIndex)
 def main():
     # Relative paths for robust Kaggle execution
     # Prioritize Kaggle input path for dataset
+    yaml_path = os.path.join(ROOT_DIR, 'bladeyolo.yaml')
     kaggle_data_path = "/kaggle/input/datasets/beegee11/wind-surface-defect/data.yaml"
     local_data_path = os.path.join(ROOT_DIR, 'WindSurface-Defect', 'data.yaml')
     
