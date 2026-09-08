@@ -93,11 +93,16 @@ def main():
     
     last_pt = kaggle_last_pt if os.path.exists(kaggle_last_pt) else local_last_pt
     
+    devices = '0,1' if torch.cuda.device_count() > 1 else '0'
+
     if os.path.exists(last_pt):
         print(f"Found checkpoint! Resuming training from: {last_pt}")
-        results = model.train(resume=last_pt) # explicitly pass last_pt to be safe
+        model = YOLO(last_pt)
+        results = model.train(resume=True)
     else:
         print("No checkpoint found. Starting fresh training run...")
+        model = YOLO(yaml_path)
+        
         results = model.train(
             data=data_path,
             epochs=300,
@@ -114,7 +119,9 @@ def main():
             copy_paste=0.0,
             
             project='BladeYOLO_WindSurface',
-            name='tgrs_paper_reproduction'
+            name='tgrs_paper_reproduction',
+            
+            amp=False             # MUST be False to prevent cuFFT crashes on Kaggle T4
         )
 if __name__ == '__main__':
     main()
