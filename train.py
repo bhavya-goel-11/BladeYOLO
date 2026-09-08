@@ -11,6 +11,67 @@ sys.path.append(ROOT_DIR)
 from ultralytics import YOLO
 from ultralytics.nn import modules, tasks
 
+# --- KAGGLE DDP FIX ---
+# DDP creates fresh python subprocesses that don't inherit dynamic monkey-patches.
+# We must inject our custom classes directly into the installed ultralytics tasks.py file.
+import ultralytics.nn.tasks as tasks
+import ultralytics.nn.modules as modules
+import os
+
+tasks_file = tasks.__file__
+with open(tasks_file, 'r') as f:
+    tasks_code = f.read()
+
+if "BladeYOLOBackbone" not in tasks_code:
+    print(f"Injecting BladeYOLO modules into Ultralytics core: {tasks_file}")
+    inject_code = """
+import sys
+import torch
+import torch.nn as nn
+sys.path.append("/kaggle/working/BladeYOLO")
+try:
+    from models.backbone import DINO3Backbone
+    
+    class BladeYOLOBackbone(nn.Module):
+        def __init__(self, *args, **kwargs):
+            super().__init__()
+            weight_path = None
+            for p in ['dinov3_vits16.pth', '/kaggle/input/dinov3/dinov3_vits16.pth', '/kaggle/input/models/shamskarib/dinov3-vits/pytorch/default/1/dinov3_vits16_pretrain_lvd1689m-08c60483.pth']:
+                import os
+                if os.path.exists(p):
+                    weight_path = p
+                    break
+            self.backbone = DINO3Backbone(
+                use_mrf=True, 
+                use_cross_scale=True, 
+                use_aqua_style=True,
+                model_path=weight_path
+            ).to(torch.float32)
+            
+        def forward(self, x):
+            return self.backbone(x)
+
+    class GetIndex(nn.Module):
+        def __init__(self, c1, c2, index):
+            super().__init__()
+            self.index = index
+            self.proj = nn.Conv2d(384, c2, kernel_size=1, bias=False) if 384 != c2 else nn.Identity()
+            
+        def forward(self, x):
+            return self.proj(x[self.index])
+
+    import ultralytics.nn.modules as modules
+    import ultralytics.nn.tasks as tasks
+    setattr(modules, 'GhostConv', GetIndex)
+    setattr(tasks, 'GhostConv', GetIndex)
+except Exception as e:
+    print(f"Failed to load BladeYOLO dependencies in DDP subprocess: {e}")
+"""
+    with open(tasks_file, 'a') as f:
+        f.write(inject_code)
+# ----------------------
+
+
 # Import our custom restructured modules
 from models.backbone import DINO3Backbone
 
