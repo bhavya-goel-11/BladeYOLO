@@ -73,7 +73,7 @@ class DINO3Backbone(nn.Module):
                  interaction_layers: List[int] = None,
                  use_cross_scale: bool = False,
                  use_aqua_style: bool = False,
-                 aqua_style_layers: List[int] = [4, 8, 12],
+                 aqua_style_layers: List[int] = [3, 7, 11],
                  device: Optional[torch.device] = None):
         super().__init__()
 
@@ -98,7 +98,7 @@ class DINO3Backbone(nn.Module):
         if not isinstance(aqua_style_layers, (list, tuple)):
             print(f"警告: aqua_style_layers 应为 list/tuple，但收到 {type(aqua_style_layers)}")
             if use_aqua_style:
-                aqua_style_layers = [4, 8, 12]
+                aqua_style_layers = [3, 7, 11]
             else:
                 aqua_style_layers = []
         else:
@@ -115,7 +115,7 @@ class DINO3Backbone(nn.Module):
         print(f"   注入层索引: {self.aqua_style_layers}")
         print(f"   状态: {'已关闭' if not self.use_aqua_style else f'已开启，将在第{self.aqua_style_layers}层注入'}")
 
-        self.interaction_layers = interaction_layers if interaction_layers else [4, 8, 12]
+        self.interaction_layers = interaction_layers if interaction_layers else [3, 7, 11]
 
         self.dinov3_specs = {
             'dinov3_vit_tiny16': {'embed_dim': 192, 'patch_size': 16},
