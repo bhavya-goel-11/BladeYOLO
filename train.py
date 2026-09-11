@@ -136,6 +136,9 @@ setattr(tasks, 'GetIndex', GetIndex)
 
 
 
+
+
+
 # --- DDP SURVIVAL PATCH FOR FREEZING ---
 import ultralytics.engine.trainer as trainer_mod
 trainer_file = trainer_mod.__file__
@@ -144,18 +147,20 @@ with open(trainer_file, 'r') as f:
 
 if "✅ [BladeYOLO]" not in trainer_code:
     print(f"Injecting BladeYOLO freeze patch into Ultralytics core: {trainer_file}")
-    import re
-    # Match def build_optimizer(...) regardless of its default arguments
-    pattern = r"(def build_optimizer\([^{:]+\):)"
     
-    replacement = r'''\1
-        # [BladeYOLO DDP Patch] Re-apply freezing logic after Ultralytics unfreezes
-        if hasattr(model, 'model') and hasattr(model.model[0], 'backbone'):
-            model.model[0].backbone.freeze_backbone_layers()
+    # We will inject the re-freezing logic right after Ultralytics unfreezes everything in _setup_train
+    target_string = "if not any(v.requires_grad for v in self.model.parameters()):"
+    
+    replacement = '''
+        # [BladeYOLO DDP Patch] Re-apply freezing logic after Ultralytics _setup_train unfreezes it
+        if hasattr(self.model, 'model') and hasattr(self.model.model[0], 'backbone'):
+            self.model.model[0].backbone.freeze_backbone_layers()
             print("✅ [BladeYOLO] Re-applied DINOv3 freezing logic inside DDP subprocess.")
+            
+        if not any(v.requires_grad for v in self.model.parameters()):
 '''
-    if re.search(pattern, trainer_code):
-        trainer_code = re.sub(pattern, replacement, trainer_code)
+    if target_string in trainer_code:
+        trainer_code = trainer_code.replace(target_string, replacement)
         with open(trainer_file, 'w') as f:
             f.write(trainer_code)
 # ---------------------------------------
@@ -167,8 +172,8 @@ def main():
     kaggle_data_path = "/kaggle/input/datasets/beegee11/wind-surface-defect/data.yaml"
     local_data_path = os.path.join(ROOT_DIR, 'WindSurface-Defect', 'data.yaml')
     
-    is_kaggle = os.path.exists(kaggle_data_path)
-    original_data_path = kaggle_data_path if is_kaggle else local_data_path
+    # If the user copied the dataset locally, prioritize the local writable directory!
+    original_data_path = local_data_path if os.path.exists(local_data_path) else kaggle_data_path
     
     if not os.path.exists(original_data_path):
         raise FileNotFoundError(f"Dataset YAML not found at: {original_data_path}")
