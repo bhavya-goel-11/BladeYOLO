@@ -127,21 +127,31 @@ setattr(tasks, 'GetIndex', GetIndex)
 
 
 
-# --- MONKEY PATCH ULTRALYTICS FREEZE LOGIC ---
-from ultralytics.engine.trainer import BaseTrainer
-old_build_optimizer = BaseTrainer.build_optimizer
 
-def custom_build_optimizer(self, model, name, lr, momentum, decay, iterations):
-    # Ultralytics forcibly unfreezes all custom frozen layers right before this.
-    # We intercept it here and re-apply our custom BladeYOLO freezing logic
-    # so the optimizer ignores the DINOv3 weights.
-    if hasattr(model, 'model') and hasattr(model.model[0], 'backbone'):
-        model.model[0].backbone.freeze_backbone_layers()
-        print("✅ [BladeYOLO] Re-applied DINOv3 freezing logic before optimizer creation.")
-    return old_build_optimizer(self, model, name, lr, momentum, decay, iterations)
 
-BaseTrainer.build_optimizer = custom_build_optimizer
-# ---------------------------------------------
+
+# --- DDP SURVIVAL PATCH FOR FREEZING ---
+# We must physically patch ultralytics.engine.trainer to survive DDP subprocesses
+import ultralytics.engine.trainer as trainer_mod
+trainer_file = trainer_mod.__file__
+with open(trainer_file, 'r') as f:
+    trainer_code = f.read()
+
+if "BladeYOLO" not in trainer_code and "custom_build_optimizer" not in trainer_code:
+    print(f"Injecting BladeYOLO freeze patch into Ultralytics core: {trainer_file}")
+    
+    old_def = "def build_optimizer(self, model, name, lr, momentum, decay, iterations):"
+    new_def = '''def build_optimizer(self, model, name, lr, momentum, decay, iterations):
+        # [BladeYOLO DDP Patch] Re-apply freezing logic after Ultralytics unfreezes
+        if hasattr(model, 'model') and hasattr(model.model[0], 'backbone'):
+            model.model[0].backbone.freeze_backbone_layers()
+            print("✅ [BladeYOLO] Re-applied DINOv3 freezing logic inside DDP subprocess.")
+'''
+    if old_def in trainer_code:
+        trainer_code = trainer_code.replace(old_def, new_def)
+        with open(trainer_file, 'w') as f:
+            f.write(trainer_code)
+# ---------------------------------------
 
 def main():
     # Relative paths for robust Kaggle execution
