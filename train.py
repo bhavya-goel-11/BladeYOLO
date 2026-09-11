@@ -130,25 +130,32 @@ setattr(tasks, 'GetIndex', GetIndex)
 
 
 
+
+
+
+
+
+
 # --- DDP SURVIVAL PATCH FOR FREEZING ---
-# We must physically patch ultralytics.engine.trainer to survive DDP subprocesses
 import ultralytics.engine.trainer as trainer_mod
 trainer_file = trainer_mod.__file__
 with open(trainer_file, 'r') as f:
     trainer_code = f.read()
 
-if "BladeYOLO" not in trainer_code and "custom_build_optimizer" not in trainer_code:
+if "✅ [BladeYOLO]" not in trainer_code:
     print(f"Injecting BladeYOLO freeze patch into Ultralytics core: {trainer_file}")
+    import re
+    # Match def build_optimizer(...) regardless of its default arguments
+    pattern = r"(def build_optimizer\([^{:]+\):)"
     
-    old_def = "def build_optimizer(self, model, name, lr, momentum, decay, iterations):"
-    new_def = '''def build_optimizer(self, model, name, lr, momentum, decay, iterations):
+    replacement = r'''\1
         # [BladeYOLO DDP Patch] Re-apply freezing logic after Ultralytics unfreezes
         if hasattr(model, 'model') and hasattr(model.model[0], 'backbone'):
             model.model[0].backbone.freeze_backbone_layers()
             print("✅ [BladeYOLO] Re-applied DINOv3 freezing logic inside DDP subprocess.")
 '''
-    if old_def in trainer_code:
-        trainer_code = trainer_code.replace(old_def, new_def)
+    if re.search(pattern, trainer_code):
+        trainer_code = re.sub(pattern, replacement, trainer_code)
         with open(trainer_file, 'w') as f:
             f.write(trainer_code)
 # ---------------------------------------
