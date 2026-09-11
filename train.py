@@ -187,8 +187,8 @@ def main():
             cos_lr=True,
             
             # Augmentations
-            mosaic=1.0,           # Re-enabled to boost small object detection
-            mixup=0.15,           # Re-enabled to match paper
+            mosaic=0.0,           # Disabled to recreate the 77.7% run
+            mixup=0.0,            # Disabled to recreate the 77.7% run
             copy_paste=0.0,
             
             project='BladeYOLO_WindSurface',
