@@ -137,7 +137,7 @@ def selective_scan_pytorch(u, delta, A, B, C, D=None, z=None,
 def _selective_scan(u, delta, A, B, C, D=None, z=None,
                     delta_bias=None, delta_softplus=False):
     """Dispatch to CUDA or PyTorch selective scan."""
-    if HAS_CUDA_SELECTIVE_SCAN:
+    if HAS_CUDA_SELECTIVE_SCAN and u.is_cuda:
         return selective_scan_fn(
             u, delta, A, B, C,
             D=D, z=z, delta_bias=delta_bias,
