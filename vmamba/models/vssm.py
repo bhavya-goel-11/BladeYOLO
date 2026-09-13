@@ -98,28 +98,22 @@ def selective_scan_pytorch(u, delta, A, B, C, D=None, z=None,
     B_batch, D_total, L = u.shape
     N = A.shape[1]
     
-    # Handle mamba_ssm standard 3D inputs (B, N, L) by adding group dim (B, 1, N, L)
-    if B.dim() == 3:
-        B = B.unsqueeze(1)
-    if C.dim() == 3:
-        C = C.unsqueeze(1)
-        
-    G = B.shape[1]
-    D_per_g = D_total // G
-
     if delta_bias is not None:
         delta = delta + delta_bias.unsqueeze(0).unsqueeze(-1)
     if delta_softplus:
         delta = F.softplus(delta)
-
-    # Expand grouped B / C → full D channels
-    if G < D_total:
-        B_exp = B.unsqueeze(1).expand(-1, D_total, -1, -1) \
-                 .reshape(B_batch, D_total, N, L)
-        C_exp = C.unsqueeze(1).expand(-1, D_total, -1, -1) \
-                 .reshape(B_batch, D_total, N, L)
+        
+    # Handle expansion to (B_batch, D_total, N, L) for both 3D and 4D inputs
+    if B.dim() == 3:
+        # Input is (B_batch, N, L), i.e., G=1
+        B_exp = B.unsqueeze(1).expand(-1, D_total, -1, -1)
+        C_exp = C.unsqueeze(1).expand(-1, D_total, -1, -1)
     else:
-        B_exp, C_exp = B.unsqueeze(1).expand(-1, D_total, -1, -1), C.unsqueeze(1).expand(-1, D_total, -1, -1)
+        # Input is (B_batch, G, N, L)
+        G = B.shape[1]
+        D_per_g = D_total // G
+        B_exp = B.unsqueeze(2).expand(-1, -1, D_per_g, -1, -1).reshape(B_batch, D_total, N, L)
+        C_exp = C.unsqueeze(2).expand(-1, -1, D_per_g, -1, -1).reshape(B_batch, D_total, N, L)
 
     # Sequential scan
     h = torch.zeros(B_batch, D_total, N, device=u.device, dtype=u.dtype)
