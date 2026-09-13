@@ -32,8 +32,10 @@ class WTConv2d(nn.Module):
         self.stride = stride
         self.dilation = 1
 
-        self.wt_filter = nn.Parameter(torch.rand(4, 1, 2, 2).repeat(self.in_channels, 1, 1, 1), requires_grad=False)
-        self.iwt_filter = nn.Parameter(torch.rand(4, 1, 2, 2).repeat(self.in_channels, 1, 1, 1), requires_grad=False)
+        from .util.wavelet import create_2d_wavelet_filter
+        wt_filter, iwt_filter = create_2d_wavelet_filter(wt_type, self.in_channels, self.in_channels, type=torch.float)
+        self.wt_filter = nn.Parameter(wt_filter, requires_grad=False)
+        self.iwt_filter = nn.Parameter(iwt_filter, requires_grad=False)
 
         self.base_conv = nn.Conv2d(self.in_channels, self.in_channels, kernel_size, padding='same', stride=1, dilation=1, groups=self.in_channels, bias=bias)
         self.base_scale = _ScaleModule([1,self.in_channels,1,1])
@@ -72,7 +74,8 @@ class WTConv2d(nn.Module):
                 curr_pads = (0, curr_shape[3] % 2, 0, curr_shape[2] % 2)
                 curr_x_ll = F.pad(curr_x_ll, curr_pads)
 
-            curr_x = torch.zeros(curr_x_ll.shape[0], curr_x_ll.shape[1], 4, curr_x_ll.shape[2]//2, curr_x_ll.shape[3]//2).to(curr_x_ll.device)
+            from .util.wavelet import wavelet_2d_transform
+            curr_x = wavelet_2d_transform(curr_x_ll, self.wt_filter)
 
             curr_x_ll = curr_x[:,:,0,:,:]
 
@@ -95,7 +98,8 @@ class WTConv2d(nn.Module):
 
             curr_x = torch.cat([curr_x_ll.unsqueeze(2), curr_x_h], dim=2)
 
-            next_x_ll = torch.zeros(curr_x.shape[0], curr_x.shape[1], curr_shape[2], curr_shape[3]).to(curr_x.device)
+            from .util.wavelet import inverse_2d_wavelet_transform
+            next_x_ll = inverse_2d_wavelet_transform(curr_x, self.iwt_filter)
 
             next_x_ll = next_x_ll[:, :, :curr_shape[2], :curr_shape[3]]
 

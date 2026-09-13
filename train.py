@@ -64,6 +64,15 @@ try:
     import ultralytics.nn.tasks as tasks
     setattr(modules, 'GhostConv', GetIndex)
     setattr(tasks, 'GhostConv', GetIndex)
+    
+    try:
+        from ultralytics.nn.modules.block import A2C2f, C3k2
+        setattr(modules, 'A2C2f', A2C2f)
+        setattr(tasks, 'A2C2f', A2C2f)
+        setattr(modules, 'C3k2', C3k2)
+        setattr(tasks, 'C3k2', C3k2)
+    except ImportError:
+        pass
 except Exception as e:
     print(f"Failed to load BladeYOLO dependencies in DDP subprocess: {e}")
 """
@@ -121,9 +130,20 @@ setattr(tasks, 'BladeYOLOBackbone', BladeYOLOBackbone)
 setattr(modules, 'GhostConv', GetIndex)
 setattr(tasks, 'GhostConv', GetIndex)
 
+
 # Also expose GetIndex directly so the PyTorch unpickler can find it when loading last.pt
 setattr(modules, 'GetIndex', GetIndex)
 setattr(tasks, 'GetIndex', GetIndex)
+
+try:
+    from ultralytics.nn.modules.block import A2C2f, C3k2
+    setattr(modules, 'A2C2f', A2C2f)
+    setattr(tasks, 'A2C2f', A2C2f)
+    setattr(modules, 'C3k2', C3k2)
+    setattr(tasks, 'C3k2', C3k2)
+except ImportError:
+    pass
+
 
 
 
@@ -226,7 +246,8 @@ def main():
             cos_lr=True,
             
             # Augmentations
-            mosaic=0.0,           # Disabled to recreate the 77.7% run
+            flipud=0.0,           # Disabled (vertical flips were already applied offline in dataset generation)
+            mosaic=0.0,           # Disabled per user request
             mixup=0.0,            # Disabled to recreate the 77.7% run
             copy_paste=0.0,
             

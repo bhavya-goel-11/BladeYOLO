@@ -381,14 +381,14 @@ class DINO3Backbone(nn.Module):
         if self.use_aqua_style and self.aqua_style_extractor is not None:
             style_vec = self.aqua_style_extractor(x)
 
-        with torch.set_grad_enabled(not self.freeze_backbone):
-            features = self.dino_model.get_intermediate_layers(
-                img,
-                n=self.interaction_layers,
-                reshape=False,
-                return_class_token=False,
-                style_vec=style_vec
-            )
+        # Removed set_grad_enabled context manager to allow Style Injector (which has requires_grad=True) to train
+        features = self.dino_model.get_intermediate_layers(
+            img,
+            n=self.interaction_layers,
+            reshape=False,
+            return_class_token=False,
+            style_vec=style_vec
+        )
 
         semantic_feats = self.extract_semantic_features(features, (B, C, H, W))
 

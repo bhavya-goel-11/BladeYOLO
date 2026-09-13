@@ -97,6 +97,13 @@ def selective_scan_pytorch(u, delta, A, B, C, D=None, z=None,
     """
     B_batch, D_total, L = u.shape
     N = A.shape[1]
+    
+    # Handle mamba_ssm standard 3D inputs (B, N, L) by adding group dim (B, 1, N, L)
+    if B.dim() == 3:
+        B = B.unsqueeze(1)
+    if C.dim() == 3:
+        C = C.unsqueeze(1)
+        
     G = B.shape[1]
     D_per_g = D_total // G
 

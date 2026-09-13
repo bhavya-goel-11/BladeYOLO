@@ -141,9 +141,11 @@ class CrossVSSBlock(nn.Module):
                 guide_x=guide_norm
             )
 
-            x_proj = x_proj + self.drop_path(x_ssm)
+            x_out = x_local + self.drop_path(x_ssm)
+        else:
+            x_out = x_local
 
-        return x_proj
+        return x_out
 
 
 
