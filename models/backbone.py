@@ -440,6 +440,12 @@ class DINO3Backbone(nn.Module):
                         if hasattr(blk, 'style_injector'):
                             for p in blk.style_injector.parameters():
                                 p.requires_grad = True
+                                
+        if getattr(self, 'use_mrf', False) and getattr(self, 'mrf_branch', None) is not None:
+            for name, p in self.mrf_branch.named_parameters():
+                if 'wt_filter' in name:
+                    p.requires_grad = False
+                    
         self.freeze_backbone = True
 
     def train(self, mode=True):
@@ -469,5 +475,10 @@ class DINO3Backbone(nn.Module):
                         if hasattr(blk, 'style_injector'):
                             for p in blk.style_injector.parameters():
                                 p.requires_grad = True
+                                
+        if getattr(self, 'use_mrf', False) and getattr(self, 'mrf_branch', None) is not None:
+            for name, p in self.mrf_branch.named_parameters():
+                if 'wt_filter' in name:
+                    p.requires_grad = False
 
         return self
