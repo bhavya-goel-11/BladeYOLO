@@ -245,10 +245,10 @@ def main():
             lr0=0.01,
             cos_lr=True,
             
-            # Augmentations
-            flipud=0.0,           # Disabled (vertical flips were already applied offline in dataset generation)
-            mosaic=0.0,           # Disabled per user request
-            mixup=0.0,            # Disabled to recreate the 77.7% run
+            # Augmentations (Enabled for proper YOLOv12-L training)
+            flipud=0.0,           # Keep at 0.0 unless offline wasn't applied here
+            mosaic=1.0,           # Enabled: Crucial for robust YOLO training
+            mixup=0.15,           # Enabled: Standard for advanced YOLO models
             copy_paste=0.0,
             
             project='BladeYOLO_WindSurface',
