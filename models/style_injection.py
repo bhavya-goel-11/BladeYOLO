@@ -58,7 +58,7 @@ class AquaStyleExtractor(nn.Module):
         amplitude = torch.abs(x_fft)
         phase = torch.angle(x_fft)
 
-        avg_phase = phase.mean(dim=1, keepdim=True)
+        avg_phase = phase.mean(dim=(0, 2, 3), keepdim=True)
 
         style_fft = amplitude * torch.exp(1j * avg_phase)
         style_img = torch.abs(fft.ifft2(style_fft, dim=(-2, -1)))
@@ -83,6 +83,10 @@ class StyleInjector(nn.Module):
     def __init__(self, embed_dim: int, num_heads: int = 6, drop_rate: float = 0.1, init_values: float = 1e-5):
         super().__init__()
         self.embed_dim = embed_dim
+        
+        self.injection_scale = 0.001
+        self.ls_style_attn = LayerScale(embed_dim, init_values=1e-6, inplace=False)
+        self.ls_style_ff = LayerScale(embed_dim, init_values=1e-6, inplace=False)
 
         self.style_proj = nn.Sequential(
             nn.Linear(embed_dim, embed_dim),
@@ -97,7 +101,7 @@ class StyleInjector(nn.Module):
             batch_first=True
         )
 
-        d_mid = embed_dim // 4
+        d_mid = embed_dim * 2
         self.style_ff_adapter = nn.Sequential(
             nn.Linear(embed_dim, d_mid),
             nn.GELU(),
@@ -118,11 +122,13 @@ class StyleInjector(nn.Module):
             need_weights=False
         )
 
-        omega1 = mha_output + style_attn_output
+        scaled_style_attn = style_attn_output * self.injection_scale
+        omega1 = mha_output + self.ls_style_attn(scaled_style_attn)
 
         style_ff_output = self.style_ff_adapter(omega1)
         
-        omega2 = ffn_output + style_ff_output
+        scaled_style_ff = style_ff_output * self.injection_scale
+        omega2 = ffn_output + self.ls_style_ff(scaled_style_ff)
 
         return omega1, omega2
 
