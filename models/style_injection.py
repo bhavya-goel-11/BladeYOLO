@@ -58,19 +58,27 @@ class AquaStyleExtractor(nn.Module):
         amplitude = torch.abs(x_fft)
         phase = torch.angle(x_fft)
 
+        phase = torch.nan_to_num(phase, nan=0.0)
         avg_phase = phase.mean(dim=(0, 2, 3), keepdim=True)
+        avg_phase = torch.nan_to_num(avg_phase, nan=0.0)
 
         style_fft = amplitude * torch.exp(1j * avg_phase)
         style_img = torch.abs(fft.ifft2(style_fft, dim=(-2, -1)))
 
-        style_max = style_img.max()
-        style_min = style_img.min()
+        # Robust per-image max/min to avoid batch poisoning and NaNs
+        style_img = torch.nan_to_num(style_img, nan=0.0, posinf=0.0, neginf=0.0)
+        B_dim = style_img.shape[0]
+        style_img_flat = style_img.view(B_dim, -1)
+        style_max = style_img_flat.max(dim=1, keepdim=True)[0].view(B_dim, 1, 1, 1)
+        style_min = style_img_flat.min(dim=1, keepdim=True)[0].view(B_dim, 1, 1, 1)
         diff = style_max - style_min
-
-        if diff.abs() < 1e-6:
-            style_img = torch.zeros_like(style_img)
-        else:
-            style_img = (style_img - style_min) / (diff + 1e-6)
+        
+        style_img = torch.where(
+            diff > 1e-6,
+            (style_img - style_min) / (diff + 1e-6),
+            torch.zeros_like(style_img)
+        )
+        style_img = torch.nan_to_num(style_img, nan=0.0, posinf=0.0, neginf=0.0)
 
         style_feat = self.style_encoder(style_img)
         style_vec = self.style_proj(style_feat)
@@ -121,6 +129,7 @@ class StyleInjector(nn.Module):
             value=style_vec_expand,
             need_weights=False
         )
+        style_attn_output = torch.nan_to_num(style_attn_output, nan=0.0, posinf=0.0, neginf=0.0)
 
         scaled_style_attn = style_attn_output * self.injection_scale
         omega1 = mha_output + self.ls_style_attn(scaled_style_attn)
