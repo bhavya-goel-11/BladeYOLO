@@ -242,8 +242,13 @@ def main():
             imgsz=640,
             device=devices,
             optimizer='SGD',
-            lr0=0.01,
+            lr0=0.001,
+            lrf=0.01,
             cos_lr=True,
+            warmup_epochs=3,
+            warmup_bias_lr=0.1,
+            momentum=0.937,
+            weight_decay=0.0005,
             
             # Augmentations (Enabled for proper YOLOv12-L training)
             flipud=0.0,           # Keep at 0.0 unless offline wasn't applied here

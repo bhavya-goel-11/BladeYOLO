@@ -54,31 +54,31 @@ class AquaStyleExtractor(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, C, H, W = x.shape
 
-        x_fft = fft.fft2(x, dim=(-2, -1))
-        amplitude = torch.abs(x_fft)
-        phase = torch.angle(x_fft)
+        with torch.no_grad():
+            x_fft = fft.fft2(x.detach().float(), dim=(-2, -1))
+            amplitude = torch.abs(x_fft)
+            phase = torch.angle(x_fft)
 
-        phase = torch.nan_to_num(phase, nan=0.0)
-        avg_phase = phase.mean(dim=(0, 2, 3), keepdim=True)
-        avg_phase = torch.nan_to_num(avg_phase, nan=0.0)
+            phase = torch.nan_to_num(phase, nan=0.0)
+            avg_phase = phase.mean(dim=(0, 2, 3), keepdim=True)
+            avg_phase = torch.nan_to_num(avg_phase, nan=0.0)
 
-        style_fft = amplitude * torch.exp(1j * avg_phase)
-        style_img = torch.abs(fft.ifft2(style_fft, dim=(-2, -1)))
+            style_fft = amplitude * torch.exp(1j * avg_phase)
+            style_img = torch.abs(fft.ifft2(style_fft, dim=(-2, -1)))
 
-        # Robust per-image max/min to avoid batch poisoning and NaNs
-        style_img = torch.nan_to_num(style_img, nan=0.0, posinf=0.0, neginf=0.0)
-        B_dim = style_img.shape[0]
-        style_img_flat = style_img.view(B_dim, -1)
-        style_max = style_img_flat.max(dim=1, keepdim=True)[0].view(B_dim, 1, 1, 1)
-        style_min = style_img_flat.min(dim=1, keepdim=True)[0].view(B_dim, 1, 1, 1)
-        diff = style_max - style_min
-        
-        style_img = torch.where(
-            diff > 1e-6,
-            (style_img - style_min) / (diff + 1e-6),
-            torch.zeros_like(style_img)
-        )
-        style_img = torch.nan_to_num(style_img, nan=0.0, posinf=0.0, neginf=0.0)
+            style_img = torch.nan_to_num(style_img, nan=0.0, posinf=0.0, neginf=0.0)
+            B_dim = style_img.shape[0]
+            style_img_flat = style_img.view(B_dim, -1)
+            style_max = style_img_flat.max(dim=1, keepdim=True)[0].view(B_dim, 1, 1, 1)
+            style_min = style_img_flat.min(dim=1, keepdim=True)[0].view(B_dim, 1, 1, 1)
+            diff = style_max - style_min
+
+            style_img = torch.where(
+                diff > 1e-6,
+                (style_img - style_min) / (diff + 1e-6),
+                torch.zeros_like(style_img)
+            )
+            style_img = torch.nan_to_num(style_img, nan=0.0, posinf=0.0, neginf=0.0)
 
         style_feat = self.style_encoder(style_img)
         style_vec = self.style_proj(style_feat)
@@ -92,7 +92,6 @@ class StyleInjector(nn.Module):
         super().__init__()
         self.embed_dim = embed_dim
         
-        self.injection_scale = 0.001
         self.ls_style_attn = LayerScale(embed_dim, init_values=1e-6, inplace=False)
         self.ls_style_ff = LayerScale(embed_dim, init_values=1e-6, inplace=False)
 
@@ -121,7 +120,7 @@ class StyleInjector(nn.Module):
         B, N, C = V_in.shape
 
         projected_style = self.style_proj(style_vec)
-        style_vec_expand = projected_style.unsqueeze(1).expand(B, N, C)
+        style_vec_expand = projected_style.unsqueeze(1).expand(B, N, C).contiguous()
 
         style_attn_output, _ = self.style_cross_attn(
             query=V_in,
@@ -131,13 +130,11 @@ class StyleInjector(nn.Module):
         )
         style_attn_output = torch.nan_to_num(style_attn_output, nan=0.0, posinf=0.0, neginf=0.0)
 
-        scaled_style_attn = style_attn_output * self.injection_scale
-        omega1 = mha_output + self.ls_style_attn(scaled_style_attn)
+        omega1 = mha_output + self.ls_style_attn(style_attn_output)
 
         style_ff_output = self.style_ff_adapter(omega1)
         
-        scaled_style_ff = style_ff_output * self.injection_scale
-        omega2 = ffn_output + self.ls_style_ff(scaled_style_ff)
+        omega2 = ffn_output + self.ls_style_ff(style_ff_output)
 
         return omega1, omega2
 
