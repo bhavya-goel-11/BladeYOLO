@@ -30,23 +30,12 @@ import torch
 import torch.nn as nn
 sys.path.append("/kaggle/working/BladeYOLO")
 try:
-    from models.backbone import DINO3Backbone
+    from models.backbone import PhysicsAwareBackbone
     
     class BladeYOLOBackbone(nn.Module):
         def __init__(self, *args, **kwargs):
             super().__init__()
-            weight_path = None
-            for p in ['dinov3_vits16.pth', '/kaggle/input/dinov3/dinov3_vits16.pth', '/kaggle/input/models/shamskarib/dinov3-vits/pytorch/default/1/dinov3_vits16_pretrain_lvd1689m-08c60483.pth']:
-                import os
-                if os.path.exists(p):
-                    weight_path = p
-                    break
-            self.backbone = DINO3Backbone(
-                use_mrf=True, 
-                use_cross_scale=True, 
-                use_aqua_style=True,
-                model_path=weight_path
-            ).to(torch.float32)
+            self.backbone = PhysicsAwareBackbone().to(torch.float32)
             
         def forward(self, x):
             return self.backbone(x)
@@ -80,32 +69,18 @@ except Exception as e:
         f.write(inject_code)
 # ----------------------
 
-
 # Import our custom restructured modules
-from models.backbone import DINO3Backbone
-
+from models.backbone import PhysicsAwareBackbone
 
 # 2. Define standard wrappers for the Ultralytics YAML Parser
 class BladeYOLOBackbone(nn.Module):
-    """Wrapper for DINO3Backbone to handle Ultralytics auto-arguments."""
+    """Wrapper for PhysicsAwareBackbone to handle Ultralytics auto-arguments."""
     def __init__(self, *args, **kwargs):
         super().__init__()
-        # Initialize with paper's default architectural settings
-        weight_path = None
-        for p in ['dinov3_vits16.pth', '/kaggle/input/dinov3/dinov3_vits16.pth', '/kaggle/input/models/shamskarib/dinov3-vits/pytorch/default/1/dinov3_vits16_pretrain_lvd1689m-08c60483.pth']:
-            import os
-            if os.path.exists(p):
-                weight_path = p
-                break
-        self.backbone = DINO3Backbone(
-            use_mrf=True, 
-            use_cross_scale=True, 
-            use_aqua_style=True,
-            model_path=weight_path
-        ).to(torch.float32)  # Force FP32 to prevent BFloat16 EMA crashes
+        self.backbone = PhysicsAwareBackbone().to(torch.float32)  # Force FP32 to prevent BFloat16 EMA crashes
         
     def forward(self, x):
-        # Outputs [F3_enh, F4_enh, F5] (or equivalent P3, P4, P5 scales)
+        # Outputs [P3, P4, P5] from LFA+DINOv3 fusion
         return self.backbone(x)
 
 class GetIndex(nn.Module):
@@ -113,23 +88,18 @@ class GetIndex(nn.Module):
     def __init__(self, c1, c2, index):
         super().__init__()
         self.index = index
-        # The DINO3Backbone outputs 384 channels. Project them to c2 (e.g., 256, 512, 1024)
-        self.proj = nn.Conv2d(384, c2, kernel_size=1, bias=False) if 384 != c2 else nn.Identity()
+        self.proj = nn.Conv2d(c1, c2, kernel_size=1, bias=False) if c1 != c2 else nn.Identity()
         
     def forward(self, x):
         return self.proj(x[self.index])
 
-
 # 3. Dynamically inject into Ultralytics namespace!
-# This allows us to use custom modules without modifying pip-installed code.
 setattr(modules, 'BladeYOLOBackbone', BladeYOLOBackbone)
 setattr(tasks, 'BladeYOLOBackbone', BladeYOLOBackbone)
 
 # We hijack 'GhostConv' in the YAML to bypass channel inference issues.
-# Ultralytics will read `GhostConv, [256, 0]`, set c2=256, and pass index=0.
 setattr(modules, 'GhostConv', GetIndex)
 setattr(tasks, 'GhostConv', GetIndex)
-
 
 # Also expose GetIndex directly so the PyTorch unpickler can find it when loading last.pt
 setattr(modules, 'GetIndex', GetIndex)
@@ -145,20 +115,6 @@ except ImportError:
     pass
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # --- DDP SURVIVAL PATCH FOR FREEZING ---
 import ultralytics.engine.trainer as trainer_mod
 trainer_file = trainer_mod.__file__
@@ -167,14 +123,13 @@ with open(trainer_file, 'r') as f:
 
 if "✅ [BladeYOLO]" not in trainer_code:
     print(f"Injecting BladeYOLO freeze patch into Ultralytics core: {trainer_file}")
-    
-    # We will inject the re-freezing logic right after Ultralytics unfreezes everything in _setup_train
     target_string = "if not any(v.requires_grad for v in self.model.parameters()):"
-    
     replacement = '''
         # [BladeYOLO DDP Patch] Re-apply freezing logic after Ultralytics _setup_train unfreezes it
         if hasattr(self.model, 'model') and hasattr(self.model.model[0], 'backbone'):
-            self.model.model[0].backbone.freeze_backbone_layers()
+            if hasattr(self.model.model[0].backbone, 'dino'):
+                for param in self.model.model[0].backbone.dino.parameters():
+                    param.requires_grad = False
             print("✅ [BladeYOLO] Re-applied DINOv3 freezing logic inside DDP subprocess.")
             
         if not any(v.requires_grad for v in self.model.parameters()):
@@ -186,43 +141,30 @@ if "✅ [BladeYOLO]" not in trainer_code:
 # ---------------------------------------
 
 def main():
-    # Relative paths for robust Kaggle execution
-    # Prioritize Kaggle input path for dataset
     yaml_path = os.path.join(ROOT_DIR, 'bladeyolo.yaml')
     kaggle_data_path = "/kaggle/input/datasets/beegee11/wind-surface-defect/data.yaml"
     local_data_path = os.path.join(ROOT_DIR, 'WindSurface-Defect', 'data.yaml')
     
-    # If the user copied the dataset locally, prioritize the local writable directory!
     original_data_path = local_data_path if os.path.exists(local_data_path) else kaggle_data_path
-    
     if not os.path.exists(original_data_path):
         raise FileNotFoundError(f"Dataset YAML not found at: {original_data_path}")
         
-    # --- DYNAMICALLY FIX DATASET PATH ---
-    # Ultralytics needs the absolute path in data.yaml. 
-    # If on Kaggle, the input directory is read-only, so we copy it to a writable temp file.
     import yaml
     import shutil
-    
     with open(original_data_path, 'r') as f:
         data_cfg = yaml.safe_load(f)
-        
     data_cfg['path'] = os.path.dirname(original_data_path)
     
-    # Write to a local writable file
     data_path = os.path.join(ROOT_DIR, 'active_data.yaml')
     with open(data_path, 'w') as f:
         yaml.dump(data_cfg, f, default_flow_style=False)
-    # ------------------------------------
         
     print(f"===========================================================")
     print(f" Target Dataset: {data_path}")
     print(f"===========================================================")
 
-    # Prioritize the uploaded Kaggle dataset path, fallback to local
     kaggle_last_pt = "/kaggle/input/datasets/beegee11/wind-surface-defect/runs/runs/detect/BladeYOLO_WindSurface/tgrs_paper_reproduction/weights/last.pt"
     local_last_pt = os.path.join(ROOT_DIR, "runs", "detect", "BladeYOLO_WindSurface", "tgrs_paper_reproduction", "weights", "last.pt")
-    
     last_pt = kaggle_last_pt if os.path.exists(kaggle_last_pt) else local_last_pt
     
     devices = '0,1' if torch.cuda.device_count() > 1 else '0'
@@ -238,7 +180,7 @@ def main():
         results = model.train(
             data=data_path,
             epochs=300,
-            batch=10,             # Splits to 5 per GPU if dual T4
+            batch=10,
             imgsz=640,
             device=devices,
             optimizer='SGD',
@@ -249,17 +191,13 @@ def main():
             warmup_bias_lr=0.1,
             momentum=0.937,
             weight_decay=0.0005,
-            
-            # Augmentations (Enabled for proper YOLOv12-L training)
-            flipud=0.0,           # Keep at 0.0 unless offline wasn't applied here
-            mosaic=1.0,           # Enabled: Crucial for robust YOLO training
-            mixup=0.15,           # Enabled: Standard for advanced YOLO models
+            flipud=0.0,
+            mosaic=1.0,
+            mixup=0.15,
             copy_paste=0.0,
-            
             project='BladeYOLO_WindSurface',
             name='tgrs_paper_reproduction',
-            
-            amp=False             # MUST be False to prevent cuFFT crashes on Kaggle T4
+            amp=False
         )
 if __name__ == '__main__':
     main()

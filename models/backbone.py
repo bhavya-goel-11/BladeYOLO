@@ -1,18 +1,15 @@
-import os
-from typing import List, Optional
-
+import math
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+# DINOv3 Patching (Clean, No Style Injection)
 from dinov3.models.vision_transformer import DinoVisionTransformer
 
-def patched_get_intermediate_layers(self_model, x, n=1, reshape=False, return_class_token=False, norm=False, style_vec=None):
-    rope_sincos = None
+def patched_get_intermediate_layers(self_model, x, n=1, reshape=False, return_class_token=False, norm=False):
     if hasattr(self_model, 'prepare_tokens_with_masks'):
         out = self_model.prepare_tokens_with_masks(x)
-        if isinstance(out, tuple):
-            x = out[0]
-            hw_tuple = out[1]
-            if hasattr(self_model, 'rope_embed') and self_model.rope_embed is not None:
-                rope_sincos = self_model.rope_embed(H=hw_tuple[0], W=hw_tuple[1])
+        x = out[0]
     else:
         x = self_model.patch_embed(x)
         x = torch.cat((self_model.cls_token.expand(x.shape[0], -1, -1), x), dim=1)
@@ -20,10 +17,7 @@ def patched_get_intermediate_layers(self_model, x, n=1, reshape=False, return_cl
 
     outputs = []
     for i, blk in enumerate(self_model.blocks):
-        if hasattr(blk, 'use_aqua_style') and blk.use_aqua_style:
-            x = blk(x, rope_or_rope_list=rope_sincos, style_vec_or_list=style_vec)
-        else:
-            x = blk(x, rope_or_rope_list=rope_sincos)
+        x = blk(x)
         if i in n:
             outputs.append(x)
             
@@ -34,451 +28,110 @@ def patched_get_intermediate_layers(self_model, x, n=1, reshape=False, return_cl
         num_extra = getattr(self_model, 'n_storage_tokens', 0) + 1
         outputs = [out[:, num_extra:] for out in outputs]
         
+    if reshape:
+        B, _, C = outputs[0].shape
+        H = W = int(math.sqrt(outputs[0].shape[1]))
+        outputs = [out.reshape(B, H, W, C).permute(0, 3, 1, 2).contiguous() for out in outputs]
+        
     return outputs
 
 DinoVisionTransformer.patched_get_intermediate_layers = patched_get_intermediate_layers
-from .style_injection import AquaStyleExtractor
-from .demb import MultiReceptiveFieldBranch
-from .cross_mamba import CrossScaleStateBlock
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
+from .lfa import LFA
 
-class concat(nn.Module):
-
-    def __init__(self, sem_channels: int, det_channels: int, out_channels: int):
+class FeatureFusion(nn.Module):
+    def __init__(self, semantic_channels, detail_channels, out_channels):
         super().__init__()
-        self.proj = nn.Conv2d(sem_channels + det_channels, out_channels, kernel_size=1, bias=False)
-
-    def forward(self, sem_feat: torch.Tensor, det_feat: torch.Tensor) -> torch.Tensor:
-        x = torch.cat([sem_feat, det_feat], dim=1)
-        return self.proj(x)
-
-
-class DINO3Backbone(nn.Module):
-
-    use_aqua_style: bool = False
-    aqua_style_layers: List[int] = []
-
-    def __init__(self,
-                 model_name: str = 'dinov3_vits16',
-                 freeze_backbone: bool = True,
-                 output_channels: int = 384,
-                 input_channels: Optional[int] = None,
-                 model_path: Optional[str] = None,
-                 use_mrf: bool = False,
-                 mrf_channels: int = 16,
-                 use_enhanced_fusion: bool = False,
-                 interaction_layers: List[int] = None,
-                 use_cross_scale: bool = False,
-                 use_aqua_style: bool = False,
-                 aqua_style_layers: List[int] = [3, 7, 11],
-                 device: Optional[torch.device] = None):
-        super().__init__()
-
-        self.model_name = model_name
-        self.freeze_backbone = freeze_backbone
-        self.input_channels = input_channels
-        self.output_channels = output_channels
-        self.local_model_path = model_path
-        self.use_mrf = use_mrf
-        self.use_enhanced_fusion = use_enhanced_fusion
-        self.use_cross_scale = use_cross_scale
-
-        self.dino_model = None
-        self._initialized = False
-
-        mrf_channels = int(mrf_channels) if mrf_channels is not None else 16
-        self.device = device
-
-        print(f"[初始化日志] use_aqua_style = {use_aqua_style}")
-        print(f"[初始化日志] aqua_style_layers = {aqua_style_layers}")
-
-        if not isinstance(aqua_style_layers, (list, tuple)):
-            print(f"警告: aqua_style_layers 应为 list/tuple，但收到 {type(aqua_style_layers)}")
-            if use_aqua_style:
-                aqua_style_layers = [3, 7, 11]
-            else:
-                aqua_style_layers = []
-        else:
-            aqua_style_layers = [int(x) for x in aqua_style_layers]
-
-        if not use_aqua_style:
-            aqua_style_layers = []
-
-        self.use_aqua_style = bool(use_aqua_style)
-        self.aqua_style_layers = aqua_style_layers
-
-        print(f"\n✅ AquaStyle配置确认:")
-        print(f"   使用风格注入: {self.use_aqua_style}")
-        print(f"   注入层索引: {self.aqua_style_layers}")
-        print(f"   状态: {'已关闭' if not self.use_aqua_style else f'已开启，将在第{self.aqua_style_layers}层注入'}")
-
-        self.interaction_layers = interaction_layers if interaction_layers else [3, 7, 11]
-
-        self.dinov3_specs = {
-            'dinov3_vit_tiny16': {'embed_dim': 192, 'patch_size': 16},
-            'dinov3_vit_tiny_plus16': {'embed_dim': 256, 'patch_size': 16},
-            'dinov3_vits16': {'embed_dim': 384, 'patch_size': 16},
-            'dinov3_vitb16': {'embed_dim': 768, 'patch_size': 16},
-            'dinov3_vitl16': {'embed_dim': 1024, 'patch_size': 16},
-            'dinov3_vits14': {'embed_dim': 384, 'patch_size': 14},
-            'dinov3_vitb14': {'embed_dim': 768, 'patch_size': 14},
-            'dinov3_vitl14': {'embed_dim': 1024, 'patch_size': 14},
-        }
-        if model_name not in self.dinov3_specs:
-            raise ValueError(f"不支持的model_name: {model_name}，可选：{list(self.dinov3_specs.keys())}")
-        self.model_spec = self.dinov3_specs[model_name]
-
-        self.aqua_style_extractor = None
-        if self.use_aqua_style and len(self.aqua_style_layers) > 0:
-            self.aqua_style_extractor = AquaStyleExtractor(
-                in_chans=3,
-                style_vec_dim=self.model_spec['embed_dim'],
-                device=self.device
-            )
-
-        self.mrf_branch = None
-        self.mrf_output_dims = [0, 0, 0]
-        if self.use_mrf:
-            self.mrf_branch = MultiReceptiveFieldBranch(in_channels=3, base_channels=mrf_channels)
-            self.mrf_output_dims = [mrf_channels, mrf_channels * 2, mrf_channels * 4]
-
-        self.fusions = None
-        self.fusion_convs = None
-        if self.use_mrf:
-            if self.use_enhanced_fusion:
-                self.fusions = nn.ModuleList([
-                    concat(self.model_spec['embed_dim'], self.mrf_output_dims[0], output_channels),
-                    concat(self.model_spec['embed_dim'], self.mrf_output_dims[1], output_channels),
-                    concat(self.model_spec['embed_dim'], self.mrf_output_dims[2], output_channels)
-                ])
-            else:
-                self.fusion_convs = nn.ModuleList([
-                    nn.Conv2d(self.model_spec['embed_dim'] + self.mrf_output_dims[0], output_channels, 1),
-                    nn.Conv2d(self.model_spec['embed_dim'] + self.mrf_output_dims[1], output_channels, 1),
-                    nn.Conv2d(self.model_spec['embed_dim'] + self.mrf_output_dims[2], output_channels, 1),
-                ])
-        else:
-            self.reduce_conv = nn.Conv2d(self.model_spec['embed_dim'], output_channels, 1)
-
-        self.bns = nn.ModuleList([
-            nn.BatchNorm2d(output_channels),
-            nn.BatchNorm2d(output_channels),
-            nn.BatchNorm2d(output_channels)
-        ])
-
-        self.cross_scale_block = None
-        if self.use_cross_scale:
-            self.cross_scale_block = CrossScaleStateBlock(in_channels=output_channels)
-
-        # Initialize DINOv3 model after all configs are set
-        self._initialize_model()
-
-    def __setstate__(self, state: dict):
-        self.__dict__.update(state)
-
-        if not hasattr(self, "use_aqua_style"):
-            self.use_aqua_style = False
-        if not hasattr(self, "aqua_style_layers"):
-            self.aqua_style_layers = []
-        if not hasattr(self, "freeze_backbone"):
-            self.freeze_backbone = True
-        if not hasattr(self, "dino_model"):
-            self.dino_model = None
-        if not hasattr(self, "_initialized"):
-            self._initialized = False
-
-        
-
-    def _initialize_model(self):
-        if self._initialized:
-            return
-
-        state_dict = None
-        if not self.local_model_path or not os.path.exists(self.local_model_path):
-            print(f"Warning: DINOv3 pretrained weights not found (path: {self.local_model_path}). Initializing architecture with random weights for dry-run/training.")
-        else:
-
-            try:
-                if self.local_model_path.endswith('.safetensors'):
-                    from safetensors.torch import load_file
-                    state_dict = load_file(self.local_model_path)
-                else:
-                    state_dict = torch.load(self.local_model_path, map_location='cpu', weights_only=True)
-                
-                # Force all loaded weights to float32 to prevent c10::BFloat16 EMA crashes
-                if state_dict is not None:
-                    state_dict = {k: v.to(torch.float32) if isinstance(v, torch.Tensor) else v for k, v in state_dict.items()}
-
-                if isinstance(state_dict, dict) and 'state_dict' in state_dict:
-                    state_dict = state_dict['state_dict']
-                if isinstance(state_dict, dict) and 'model' in state_dict:
-                    state_dict = state_dict['model']
-                if not isinstance(state_dict, dict):
-                    print("Warning: Loaded weights are not a state_dict. Proceeding with random weights.")
-                    state_dict = None
-                else:
-                    state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
-            except Exception as e:
-                print(f"Warning: Failed to load DINOv3 model weights: {str(e)}. Proceeding with random weights.")
-                state_dict = None
-
-
-
-        try:
-            model = self._create_matching_architecture(self.model_name, state_dict)
-
-            # Ensure the model knows about aqua_style_layers (since official dinov3 ignores it in kwargs)
-            model.aqua_style_layers = self.aqua_style_layers
-
-            # --- DYNAMIC INJECTION FOR DINOV3 OFFICIAL COMPATIBILITY ---
-            if self.use_aqua_style:
-                from .style_injection import SelfAttentionBlock
-                print("Dynamically injecting Style Injectors into official DINOv3 blocks...")
-                for layer_idx in model.aqua_style_layers:
-                    if 0 <= layer_idx < len(model.blocks):
-                        old_blk = model.blocks[layer_idx]
-                        new_blk = SelfAttentionBlock(
-                            dim=self.model_spec['embed_dim'],
-                            num_heads=getattr(old_blk.attn, 'num_heads', 6 if 'vits' in self.model_name else 12),
-                            use_aqua_style=True
-                        )
-                        
-                        # Copy weights if available
-                        try:
-                            new_blk.load_state_dict(old_blk.state_dict(), strict=False)
-                        except Exception:
-                            pass
-                            
-                        # Replace the block
-                        model.blocks[layer_idx] = new_blk
-
-                import types
-                model.get_intermediate_layers = types.MethodType(patched_get_intermediate_layers, model)
-
-            if self.use_aqua_style:
-
-
-                print("Initializing Style Injector parameters...")
-                for layer_idx in model.aqua_style_layers:
-                    if 0 <= layer_idx < len(model.blocks):
-                        blk = model.blocks[layer_idx]
-                        if hasattr(blk, 'style_injector'):
-                            nn.init.zeros_(blk.style_injector.style_cross_attn.out_proj.weight)
-                            nn.init.zeros_(blk.style_injector.style_cross_attn.out_proj.bias)
-                            nn.init.zeros_(blk.style_injector.style_ff_adapter[-1].weight)
-                            nn.init.zeros_(blk.style_injector.style_ff_adapter[-1].bias)
-                            print(f"  Zero-initialized output projections of StyleInjector at layer {layer_idx}")
-
-            if state_dict:
-                model.load_state_dict(state_dict, strict=False)
-
-            self.dino_model = model
-            if self.freeze_backbone:
-                for p in self.dino_model.parameters():
-                    p.requires_grad = False
-                if self.use_aqua_style and True:
-                    for layer_idx in self.dino_model.aqua_style_layers:
-                        if 0 <= layer_idx < len(self.dino_model.blocks):
-                            blk = self.dino_model.blocks[layer_idx]
-                            if hasattr(blk, 'style_injector'):
-                                for p in blk.style_injector.parameters():
-                                    p.requires_grad = True
-
-            
-            self._initialized = True
-            if state_dict:
-                print("Successfully loaded DINOv3 pretrained weights.")
-        except Exception as e:
-            raise RuntimeError(f"Failed to build or load DINOv3 model architecture: {str(e)}")
-
-    def _create_matching_architecture(self, model_name: str, state_dict: dict = None):
-        spec = self.dinov3_specs[model_name]
-        config = {
-            'n_storage_tokens': 1,
-            'layerscale_init': 1.0,
-            'mask_k_bias': True,
-            'pos_embed_rope_base': 10000.0,
-            'untie_cls_and_patch_norms': False,
-            'untie_global_and_local_cls_norm': False,
-            'device': 'cpu',
-            'aqua_style_layers': self.aqua_style_layers,
-        }
-
-        if state_dict:
-            storage_token_keys = [k for k in state_dict.keys() if 'storage_tokens' in k]
-            if storage_token_keys:
-                for k in storage_token_keys:
-                    if len(state_dict[k].shape) > 1:
-                        config['n_storage_tokens'] = state_dict[k].shape[1]
-                        print(f"从预训练权重中检测到 storage_tokens 数量: {config['n_storage_tokens']}")
-                        break
-
-        if 'vit_tiny' in model_name.lower():
-            base_config = {'embed_dim': 256, 'depth': 12, 'num_heads': 4} if 'plus' in model_name.lower() else {
-                'embed_dim': 192, 'depth': 12, 'num_heads': 3}
-        elif 'vits' in model_name.lower():
-            base_config = {'embed_dim': 384, 'depth': 12, 'num_heads': 6}
-        elif 'vitb' in model_name.lower():
-            base_config = {'embed_dim': 768, 'depth': 12, 'num_heads': 12}
-        elif 'vitl' in model_name.lower():
-            base_config = {'embed_dim': 1024, 'depth': 24, 'num_heads': 16}
-        else:
-            base_config = {'embed_dim': spec['embed_dim'], 'depth': spec.get('depth', 12),
-                           'num_heads': spec.get('num_heads', 12)}
-
-        full_config = {
-            **base_config,
-            'patch_size': spec['patch_size'],
-            'ffn_ratio': 4,
-            'qkv_bias': True,
-            'norm_layer': "layernorm",
-            'ffn_layer': "mlp",
-            **config
-        }
-        return DinoVisionTransformer(**full_config)
-
-    def extract_semantic_features(self, feats: List[torch.Tensor], input_size: tuple):
-        B, C, H, W = input_size
-        if len(feats) < 3:
-            feats_list = list(feats)
-            feats_list = feats_list + [feats_list[-1]] * (3 - len(feats_list))
-            feats = feats_list
-
-        semantic_feats = []
-        for i, f in enumerate(feats[:3]):
-            H_f = H // self.model_spec['patch_size']
-            W_f = W // self.model_spec['patch_size']
-            f_2d = f.transpose(1, 2).reshape(B, -1, H_f, W_f)
-            target_size = (H // 8, W // 8) if i == 0 else (H // 16, W // 16) if i == 1 else (H // 32, W // 32)
-            if f_2d.shape[2:] != target_size:
-                f_2d = F.interpolate(f_2d, size=target_size, mode='bilinear', align_corners=False)
-            semantic_feats.append(f_2d)
-        return semantic_feats
-
-    def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
-        self._initialize_model()
-        # Ensure dino_model is on the same device as input x
-        if hasattr(self, 'dino_model') and self.dino_model is not None:
-            self.dino_model.to(x.device)
-            
-        B, C, H, W = x.shape
-
-        if x.max() > 1.0:
-            x = x / 255.0
-        mean = torch.tensor([0.485, 0.456, 0.406], device=x.device).view(1, 3, 1, 1)
-        std = torch.tensor([0.229, 0.224, 0.225], device=x.device).view(1, 3, 1, 1)
-        x_norm = (x - mean) / std
-
-        ps = self.model_spec['patch_size']
-        dino_h = (H // ps) * ps
-        dino_w = (W // ps) * ps
-        img = F.interpolate(x_norm, size=(dino_h, dino_w), mode='bilinear', align_corners=False) if (H, W) != (dino_h, dino_w) else x_norm
-
-        style_vec = None
-        if self.use_aqua_style and self.aqua_style_extractor is not None:
-            style_vec = self.aqua_style_extractor(x)
-
-        # Removed set_grad_enabled context manager to allow Style Injector (which has requires_grad=True) to train
-        features = self.dino_model.get_intermediate_layers(
-            img,
-            n=self.interaction_layers,
-            reshape=False,
-            return_class_token=False,
-            style_vec=style_vec
+        self.conv = nn.Sequential(
+            nn.Conv2d(semantic_channels + detail_channels, out_channels, kernel_size=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.GELU(),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False, groups=out_channels),
+            nn.BatchNorm2d(out_channels),
+            nn.GELU()
         )
+    def forward(self, semantic, detail):
+        if semantic.shape[2:] != detail.shape[2:]:
+            semantic = F.interpolate(semantic, size=detail.shape[2:], mode='bilinear', align_corners=False)
+        fused = torch.cat([semantic, detail], dim=1)
+        return self.conv(fused)
 
-        semantic_feats = self.extract_semantic_features(features, (B, C, H, W))
+class PhysicsAwareBackbone(nn.Module):
+    """
+    Clean, Physics-Aware Backbone replacing the buggy BladeYOLO backbone.
+    1. Extracts pure semantics from DINOv3 (Blocks 4, 8, 12).
+    2. Extracts high-res physical details via CNN Stem + LFA.
+    3. Fuses them robustly into P3, P4, P5 for YOLOv12 Neck.
+    """
+    def __init__(self, in_channels=3, p3_channels=256, p4_channels=512, p5_channels=512, freeze_dino=True):
+        super().__init__()
+        
+        # 1. DINOv3 Branch
+        dino_model = torch.hub.load('facebookresearch/dinov3', 'dinov3_vits14', trust_repo=True)
+        self.dino = dino_model
+        if freeze_dino:
+            for param in self.dino.parameters():
+                param.requires_grad = False
+                
+        dino_dim = 384 # ViT-S dimension
+        
+        # 2. Physics / LFA Branch
+        self.stem = nn.Sequential(
+            nn.Conv2d(in_channels, 64, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.GELU(),
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(128),
+            nn.GELU()
+        )
+        
+        # P3 Detail (Stride 8)
+        self.p3_conv = nn.Sequential(
+            nn.Conv2d(128, p3_channels, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(p3_channels),
+            nn.GELU()
+        )
+        self.p3_lfa = LFA(p3_channels)
+        
+        # P4 Detail (Stride 16)
+        self.p4_conv = nn.Sequential(
+            nn.Conv2d(p3_channels, p4_channels, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(p4_channels),
+            nn.GELU()
+        )
+        self.p4_lfa = LFA(p4_channels)
+        
+        # P5 Detail (Stride 32)
+        self.p5_conv = nn.Sequential(
+            nn.Conv2d(p4_channels, p4_channels, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(p4_channels),
+            nn.GELU()
+        )
+        
+        # 3. Fusion Blocks
+        self.fuse3 = FeatureFusion(dino_dim, p3_channels, p3_channels)
+        self.fuse4 = FeatureFusion(dino_dim, p4_channels, p4_channels)
+        self.fuse5 = FeatureFusion(dino_dim, p4_channels, p5_channels)
 
-        fused_feats = []
-        if self.use_mrf and self.mrf_branch is not None:
-            detail_feats = self.mrf_branch(x)
-            target_sizes = [(H//8, W//8), (H//16, W//16), (H//32, W//32)]
-            for i, (sem_feat, det_feat) in enumerate(zip(semantic_feats, detail_feats)):
-                if det_feat.shape[2:] != target_sizes[i]:
-                    det_feat = F.interpolate(det_feat, size=target_sizes[i], mode='bilinear', align_corners=False)
-                if self.use_enhanced_fusion:
-                    fused = self.fusions[i](sem_feat, det_feat)
-                else:
-                    fused = torch.cat([sem_feat, det_feat], dim=1)
-                    fused = self.fusion_convs[i](fused)
-                fused = F.relu(self.bns[i](fused))
-                fused_feats.append(fused)
-        else:
-            for i, sem_feat in enumerate(semantic_feats):
-                reduced = self.reduce_conv(sem_feat)
-                fused_feats.append(F.relu(self.bns[i](reduced)))
-
-        if self.use_cross_scale and self.cross_scale_block is not None:
-            fused_feats = self.cross_scale_block(fused_feats)
-
-        return fused_feats
-
-    def unfreeze_backbone(self):
-        if self.dino_model is not None:
-            for p in self.dino_model.parameters():
-                p.requires_grad = True
-            if self.use_aqua_style and True:
-                for layer_idx in self.dino_model.aqua_style_layers:
-                    if 0 <= layer_idx < len(self.dino_model.blocks):
-                        blk = self.dino_model.blocks[layer_idx]
-                        if hasattr(blk, 'style_injector'):
-                            for p in blk.style_injector.parameters():
-                                p.requires_grad = True
-        self.freeze_backbone = False
-
-    def freeze_backbone_layers(self):
-        if self.dino_model is not None:
-            for p in self.dino_model.parameters():
-                p.requires_grad = False
-            if self.use_aqua_style and True:
-                for layer_idx in self.dino_model.aqua_style_layers:
-                    if 0 <= layer_idx < len(self.dino_model.blocks):
-                        blk = self.dino_model.blocks[layer_idx]
-                        if hasattr(blk, 'style_injector'):
-                            for p in blk.style_injector.parameters():
-                                p.requires_grad = True
-                                
-        if getattr(self, 'use_mrf', False) and getattr(self, 'mrf_branch', None) is not None:
-            for name, p in self.mrf_branch.named_parameters():
-                if 'wt_filter' in name:
-                    p.requires_grad = False
-                    
-        self.freeze_backbone = True
-
-    def train(self, mode=True):
-
-        super().train(mode)
-
-        use_aqua_style = getattr(self, "use_aqua_style", False)
-        aqua_layers = getattr(self, "aqua_style_layers", [])
-
-        if getattr(self, "freeze_backbone", True) and self.dino_model is not None:
-            self.dino_model.eval()
-
-            if use_aqua_style and True:
-                for layer_idx in self.dino_model.aqua_style_layers:
-                    if 0 <= layer_idx < len(self.dino_model.blocks):
-                        blk = self.dino_model.blocks[layer_idx]
-                        if hasattr(blk, 'style_injector'):
-                            blk.style_injector.train(mode)
-
-            for p in self.dino_model.parameters():
-                p.requires_grad = False
-
-            if use_aqua_style and True:
-                for layer_idx in self.dino_model.aqua_style_layers:
-                    if 0 <= layer_idx < len(self.dino_model.blocks):
-                        blk = self.dino_model.blocks[layer_idx]
-                        if hasattr(blk, 'style_injector'):
-                            for p in blk.style_injector.parameters():
-                                p.requires_grad = True
-                                
-        if getattr(self, 'use_mrf', False) and getattr(self, 'mrf_branch', None) is not None:
-            for name, p in self.mrf_branch.named_parameters():
-                if 'wt_filter' in name:
-                    p.requires_grad = False
-
-        return self
+    def forward(self, x):
+        # 1. DINOv3 Semantics (Frozen)
+        with torch.no_grad():
+            dino_feats = self.dino.patched_get_intermediate_layers(x, n=[3, 7, 11], reshape=True)
+            
+        # 2. Physics Details
+        stem_out = self.stem(x)
+        
+        p3_det = self.p3_conv(stem_out)
+        p3_det = self.p3_lfa(p3_det)
+        
+        p4_det = self.p4_conv(p3_det)
+        p4_det = self.p4_lfa(p4_det)
+        
+        p5_det = self.p5_conv(p4_det)
+        
+        # 3. Fusion
+        p3_out = self.fuse3(dino_feats[0], p3_det)
+        p4_out = self.fuse4(dino_feats[1], p4_det)
+        p5_out = self.fuse5(dino_feats[2], p5_det)
+        
+        return [p3_out, p4_out, p5_out]
