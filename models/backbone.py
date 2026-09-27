@@ -77,22 +77,14 @@ class PhysicsAwareBackbone(nn.Module):
                 break
                 
         if weight_path:
-            print(f"
-
-✅ [BladeYOLO] Loading local DINOv3 weights from {weight_path}...
-
-")
+            print(f"\n\n✅ [BladeYOLO] Loading local DINOv3 weights from {weight_path}...\n\n")
             state_dict = torch.load(weight_path, map_location='cpu', weights_only=True)
             if 'state_dict' in state_dict:
                 state_dict = state_dict['state_dict']
             clean_dict = {k.replace('backbone.', ''): v for k, v in state_dict.items()}
             dino_model.load_state_dict(clean_dict, strict=False)
         else:
-            print("
-
-⚠️ [BladeYOLO] No local DINOv3 weights found. Using random weights.
-
-")
+            print("\n\n⚠️ [BladeYOLO] No local DINOv3 weights found. Using random weights.\n\n")
 
         self.dino = dino_model
         if freeze_dino:
