@@ -105,7 +105,7 @@ class PhysicsAwareBackbone(nn.Module):
         
         # P3 Detail (Stride 8)
         self.p3_conv = nn.Sequential(
-            nn.Conv2d(128, p3_channels, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.Conv2d(128, p3_channels, kernel_size=3, stride=1, padding=1, bias=False),
             nn.BatchNorm2d(p3_channels),
             nn.GELU()
         )
@@ -113,7 +113,7 @@ class PhysicsAwareBackbone(nn.Module):
         
         # P4 Detail (Stride 16)
         self.p4_conv = nn.Sequential(
-            nn.Conv2d(p3_channels, p4_channels, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.Conv2d(p3_channels, p4_channels, kernel_size=3, stride=1, padding=1, bias=False),
             nn.BatchNorm2d(p4_channels),
             nn.GELU()
         )
