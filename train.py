@@ -141,7 +141,7 @@ if "✅ [BladeYOLO]" not in trainer_code:
 # ---------------------------------------
 
 def main():
-    yaml_path = os.path.join(ROOT_DIR, 'bladeyolo.yaml')
+    yaml_path = os.path.join(ROOT_DIR, 'bladeyolo-s.yaml')
     kaggle_data_path = "/kaggle/input/datasets/beegee11/wind-surface-defect/data.yaml"
     local_data_path = os.path.join(ROOT_DIR, 'WindSurface-Defect', 'data.yaml')
     

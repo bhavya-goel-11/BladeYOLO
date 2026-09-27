@@ -67,7 +67,33 @@ class PhysicsAwareBackbone(nn.Module):
         super().__init__()
         
         # 1. DINOv3 Branch
-        dino_model = torch.hub.load('facebookresearch/dinov3', 'dinov3_vits16', trust_repo=True)
+        dino_model = torch.hub.load('facebookresearch/dinov3', 'dinov3_vits16', pretrained=False, trust_repo=True)
+        
+        weight_path = None
+        import os
+        for p in ['dinov3_vits16.pth', '/kaggle/input/dinov3/dinov3_vits16.pth', '/kaggle/input/models/shamskarib/dinov3-vits/pytorch/default/1/dinov3_vits16_pretrain_lvd1689m-08c60483.pth']:
+            if os.path.exists(p):
+                weight_path = p
+                break
+                
+        if weight_path:
+            print(f"
+
+✅ [BladeYOLO] Loading local DINOv3 weights from {weight_path}...
+
+")
+            state_dict = torch.load(weight_path, map_location='cpu', weights_only=True)
+            if 'state_dict' in state_dict:
+                state_dict = state_dict['state_dict']
+            clean_dict = {k.replace('backbone.', ''): v for k, v in state_dict.items()}
+            dino_model.load_state_dict(clean_dict, strict=False)
+        else:
+            print("
+
+⚠️ [BladeYOLO] No local DINOv3 weights found. Using random weights.
+
+")
+
         self.dino = dino_model
         if freeze_dino:
             for param in self.dino.parameters():
