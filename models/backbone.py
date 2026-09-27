@@ -7,6 +7,12 @@ import torch.nn.functional as F
 from dinov3.models.vision_transformer import DinoVisionTransformer
 
 def patched_get_intermediate_layers(self_model, x, n=1, reshape=False, return_class_token=False, norm=False):
+    # Capture original image dimensions before patching
+    B_img, C_img, H_img, W_img = x.shape
+    patch_size = self_model.patch_embed.proj.kernel_size[0] if hasattr(self_model, 'patch_embed') else 16
+    orig_H = H_img // patch_size
+    orig_W = W_img // patch_size
+
     if hasattr(self_model, 'prepare_tokens_with_masks'):
         out = self_model.prepare_tokens_with_masks(x)
         x = out[0]
@@ -30,8 +36,7 @@ def patched_get_intermediate_layers(self_model, x, n=1, reshape=False, return_cl
         
     if reshape:
         B, _, C = outputs[0].shape
-        H = W = int(math.sqrt(outputs[0].shape[1]))
-        outputs = [out.reshape(B, H, W, C).permute(0, 3, 1, 2).contiguous() for out in outputs]
+        outputs = [out.reshape(B, orig_H, orig_W, C).permute(0, 3, 1, 2).contiguous() for out in outputs]
         
     return outputs
 
