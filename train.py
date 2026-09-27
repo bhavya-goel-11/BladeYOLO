@@ -44,7 +44,8 @@ try:
         def __init__(self, c1, c2, index):
             super().__init__()
             self.index = index
-            self.proj = nn.Conv2d(384, c2, kernel_size=1, bias=False) if 384 != c2 else nn.Identity()
+            real_c1 = 256 if index == 0 else 512
+            self.proj = nn.Conv2d(real_c1, c2, kernel_size=1, bias=False) if real_c1 != c2 else nn.Identity()
             
         def forward(self, x):
             return self.proj(x[self.index])
@@ -88,7 +89,8 @@ class GetIndex(nn.Module):
     def __init__(self, c1, c2, index):
         super().__init__()
         self.index = index
-        self.proj = nn.Conv2d(c1, c2, kernel_size=1, bias=False) if c1 != c2 else nn.Identity()
+        real_c1 = 256 if index == 0 else 512
+        self.proj = nn.Conv2d(real_c1, c2, kernel_size=1, bias=False) if real_c1 != c2 else nn.Identity()
         
     def forward(self, x):
         return self.proj(x[self.index])
