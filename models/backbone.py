@@ -67,7 +67,7 @@ class PhysicsAwareBackbone(nn.Module):
         super().__init__()
         
         # 1. DINOv3 Branch
-        dino_model = torch.hub.load('facebookresearch/dinov3', 'dinov3_vits14', trust_repo=True)
+        dino_model = torch.hub.load('facebookresearch/dinov3', 'dinov3_vits16', trust_repo=True)
         self.dino = dino_model
         if freeze_dino:
             for param in self.dino.parameters():
