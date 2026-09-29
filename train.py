@@ -64,6 +64,13 @@ try:
         setattr(tasks, 'C3k2', C3k2)
     except ImportError:
         pass
+        
+    try:
+        from models.morphology import C2f_Morph
+        setattr(modules, 'C3', C2f_Morph)
+        setattr(tasks, 'C3', C2f_Morph)
+    except ImportError:
+        pass
 except Exception as e:
     print(f"Failed to load BladeYOLO dependencies in DDP subprocess: {e}")
 """
@@ -120,6 +127,13 @@ try:
 except ImportError:
     pass
 
+try:
+    from models.morphology import C2f_Morph
+    setattr(modules, 'C3', C2f_Morph)
+    setattr(tasks, 'C3', C2f_Morph)
+except ImportError:
+    pass
+
 
 # --- DDP SURVIVAL PATCH FOR FREEZING ---
 import ultralytics.engine.trainer as trainer_mod
@@ -147,7 +161,7 @@ if "✅ [BladeYOLO]" not in trainer_code:
 # ---------------------------------------
 
 def main():
-    yaml_path = os.path.join(ROOT_DIR, 'bladeyolo-s.yaml')
+    yaml_path = os.path.join(ROOT_DIR, 'bladeyolo-l.yaml')
     local_data_path = os.path.join(ROOT_DIR, 'WindSurface-Defect', 'data.yaml')
     kaggle_data_path = "/kaggle/input/datasets/beegee11/wind-surface-defect/data.yaml"
     
@@ -204,7 +218,7 @@ def main():
             mixup=0.15,
             copy_paste=0.0,
             project='BladeYOLO_WindSurface',
-            name='tgrs_paper_reproduction',
+            name='bladeyolo_l_sota',
             amp=False
         )
 if __name__ == '__main__':
