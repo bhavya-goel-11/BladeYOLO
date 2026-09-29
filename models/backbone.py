@@ -76,7 +76,16 @@ class PhysicsAwareBackbone(nn.Module):
         
         weight_path = None
         import os
-        for p in ['dinov3_vits16.pth', '/kaggle/input/dinov3/dinov3_vits16.pth', '/kaggle/input/models/shamskarib/dinov3-vits/pytorch/default/1/dinov3_vits16_pretrain_lvd1689m-08c60483.pth']:
+        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        candidate_paths = [
+            'dinov3_vits16.pth',
+            'dinov3_vits16_pretrain_lvd1689m-08c60483.pth',
+            os.path.join(root_dir, 'dinov3_vits16.pth'),
+            os.path.join(root_dir, 'dinov3_vits16_pretrain_lvd1689m-08c60483.pth'),
+            '/kaggle/input/dinov3/dinov3_vits16.pth',
+            '/kaggle/input/models/shamskarib/dinov3-vits/pytorch/default/1/dinov3_vits16_pretrain_lvd1689m-08c60483.pth',
+        ]
+        for p in candidate_paths:
             if os.path.exists(p):
                 weight_path = p
                 break

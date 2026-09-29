@@ -24,10 +24,11 @@ with open(tasks_file, 'r') as f:
 
 if "BladeYOLOBackbone" not in tasks_code:
     print(f"Injecting BladeYOLO modules into Ultralytics core: {tasks_file}")
-    inject_code = """
+    inject_code = f"""
 import sys
 import torch
 import torch.nn as nn
+sys.path.append(r"{ROOT_DIR}")
 sys.path.append("/kaggle/working/BladeYOLO")
 try:
     from models.backbone import PhysicsAwareBackbone
@@ -68,6 +69,9 @@ except Exception as e:
 """
     with open(tasks_file, 'a') as f:
         f.write(inject_code)
+elif ROOT_DIR not in tasks_code:
+    with open(tasks_file, 'a') as f:
+        f.write(f'\nimport sys\nsys.path.append(r"{ROOT_DIR}")\n')
 # ----------------------
 
 # Import our custom restructured modules
@@ -144,22 +148,24 @@ if "✅ [BladeYOLO]" not in trainer_code:
 
 def main():
     yaml_path = os.path.join(ROOT_DIR, 'bladeyolo-s.yaml')
-    kaggle_data_path = "/kaggle/input/datasets/beegee11/wind-surface-defect/data.yaml"
     local_data_path = os.path.join(ROOT_DIR, 'WindSurface-Defect', 'data.yaml')
+    kaggle_data_path = "/kaggle/input/datasets/beegee11/wind-surface-defect/data.yaml"
     
-    original_data_path = local_data_path if os.path.exists(local_data_path) else kaggle_data_path
-    if not os.path.exists(original_data_path):
-        raise FileNotFoundError(f"Dataset YAML not found at: {original_data_path}")
+    data_path = local_data_path if os.path.exists(local_data_path) else kaggle_data_path
+    if not os.path.exists(data_path):
+        raise FileNotFoundError(f"Dataset YAML not found at: {data_path}")
         
+    # Ensure data.yaml does not use 'path: .' which misleads Ultralytics into resolving relative to cwd
     import yaml
-    import shutil
-    with open(original_data_path, 'r') as f:
-        data_cfg = yaml.safe_load(f)
-    data_cfg['path'] = os.path.dirname(original_data_path)
-    
-    data_path = os.path.join(ROOT_DIR, 'active_data.yaml')
-    with open(data_path, 'w') as f:
-        yaml.dump(data_cfg, f, default_flow_style=False)
+    try:
+        with open(data_path, 'r') as f:
+            data_cfg = yaml.safe_load(f)
+        if isinstance(data_cfg, dict) and data_cfg.get('path') == '.':
+            data_cfg.pop('path', None)
+            with open(data_path, 'w') as f:
+                yaml.dump(data_cfg, f, default_flow_style=False)
+    except Exception as e:
+        print(f"Warning: could not inspect/update path in {data_path}: {e}")
         
     print(f"===========================================================")
     print(f" Target Dataset: {data_path}")
@@ -174,7 +180,7 @@ def main():
     if os.path.exists(last_pt):
         print(f"Found checkpoint! Resuming training from: {last_pt}")
         model = YOLO(last_pt)
-        results = model.train(resume=True)
+        results = model.train(resume=True, data=data_path)
     else:
         print("No checkpoint found. Starting fresh training run...")
         model = YOLO(yaml_path)
