@@ -1,11 +1,15 @@
 import os
 import sys
+import glob
+import argparse
 import torch
 import torch.nn as nn
+import __main__
 
 # 1. Ensure absolute/relative imports resolve properly from the project root
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(ROOT_DIR)
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
 
 # Important: Ultralytics imports MUST happen after sys.path manipulation
 from ultralytics import YOLO
@@ -14,22 +18,21 @@ from ultralytics.nn import modules, tasks
 # --- KAGGLE DDP FIX ---
 # DDP creates fresh python subprocesses that don't inherit dynamic monkey-patches.
 # We must inject our custom classes directly into the installed ultralytics tasks.py file.
-import ultralytics.nn.tasks as tasks
-import ultralytics.nn.modules as modules
-import os
-
 tasks_file = tasks.__file__
 with open(tasks_file, 'r') as f:
     tasks_code = f.read()
 
-if "BladeYOLOBackbone" not in tasks_code:
-    print(f"Injecting BladeYOLO modules into Ultralytics core: {tasks_file}")
-    inject_code = f"""
+inject_marker = "# --- BLADEYOLO INJECTION START ---"
+inject_code = f"""{inject_marker}
 import sys
+import os
 import torch
 import torch.nn as nn
-sys.path.append(r"{ROOT_DIR}")
-sys.path.append("/kaggle/working/BladeYOLO")
+
+for _p in [r"{ROOT_DIR}", "/kaggle/working/BladeYOLO"]:
+    if os.path.exists(_p) and _p not in sys.path:
+        sys.path.insert(0, _p)
+
 try:
     from models.backbone import PhysicsAwareBackbone
     
@@ -53,8 +56,19 @@ try:
 
     import ultralytics.nn.modules as modules
     import ultralytics.nn.tasks as tasks
+    import __main__
+    
+    setattr(modules, 'BladeYOLOBackbone', BladeYOLOBackbone)
+    setattr(tasks, 'BladeYOLOBackbone', BladeYOLOBackbone)
+    setattr(__main__, 'BladeYOLOBackbone', BladeYOLOBackbone)
+    
+    setattr(modules, 'GetIndex', GetIndex)
+    setattr(tasks, 'GetIndex', GetIndex)
+    setattr(__main__, 'GetIndex', GetIndex)
+    
     setattr(modules, 'GhostConv', GetIndex)
     setattr(tasks, 'GhostConv', GetIndex)
+    setattr(__main__, 'GhostConv', GetIndex)
     
     try:
         from ultralytics.nn.modules.block import A2C2f, C3k2
@@ -69,16 +83,28 @@ try:
         from models.morphology import C2f_Morph
         setattr(modules, 'C3', C2f_Morph)
         setattr(tasks, 'C3', C2f_Morph)
+        setattr(__main__, 'C3', C2f_Morph)
+        setattr(modules, 'C2f_Morph', C2f_Morph)
+        setattr(tasks, 'C2f_Morph', C2f_Morph)
+        setattr(__main__, 'C2f_Morph', C2f_Morph)
     except ImportError:
         pass
 except Exception as e:
-    print(f"Failed to load BladeYOLO dependencies in DDP subprocess: {e}")
+    print(f"Failed to load BladeYOLO dependencies in tasks.py: {{e}}")
+# --- BLADEYOLO INJECTION END ---
 """
-    with open(tasks_file, 'a') as f:
-        f.write(inject_code)
-elif ROOT_DIR not in tasks_code:
-    with open(tasks_file, 'a') as f:
-        f.write(f'\nimport sys\nsys.path.append(r"{ROOT_DIR}")\n')
+
+if inject_marker not in tasks_code:
+    print(f"Injecting BladeYOLO modules into Ultralytics core: {tasks_file}")
+    # Strip any old legacy injection if present
+    cut_marker = '    return "detect"  # assume detect\n'
+    idx = tasks_code.find(cut_marker)
+    if idx != -1:
+        base_code = tasks_code[:idx + len(cut_marker)]
+    else:
+        base_code = tasks_code
+    with open(tasks_file, 'w') as f:
+        f.write(base_code + "\n" + inject_code)
 # ----------------------
 
 # Import our custom restructured modules
@@ -106,17 +132,20 @@ class GetIndex(nn.Module):
     def forward(self, x):
         return self.proj(x[self.index])
 
-# 3. Dynamically inject into Ultralytics namespace!
+# 3. Dynamically inject into Ultralytics and __main__ namespaces!
 setattr(modules, 'BladeYOLOBackbone', BladeYOLOBackbone)
 setattr(tasks, 'BladeYOLOBackbone', BladeYOLOBackbone)
+setattr(__main__, 'BladeYOLOBackbone', BladeYOLOBackbone)
 
 # We hijack 'GhostConv' in the YAML to bypass channel inference issues.
 setattr(modules, 'GhostConv', GetIndex)
 setattr(tasks, 'GhostConv', GetIndex)
+setattr(__main__, 'GhostConv', GetIndex)
 
 # Also expose GetIndex directly so the PyTorch unpickler can find it when loading last.pt
 setattr(modules, 'GetIndex', GetIndex)
 setattr(tasks, 'GetIndex', GetIndex)
+setattr(__main__, 'GetIndex', GetIndex)
 
 try:
     from ultralytics.nn.modules.block import A2C2f, C3k2
@@ -131,6 +160,10 @@ try:
     from models.morphology import C2f_Morph
     setattr(modules, 'C3', C2f_Morph)
     setattr(tasks, 'C3', C2f_Morph)
+    setattr(__main__, 'C3', C2f_Morph)
+    setattr(modules, 'C2f_Morph', C2f_Morph)
+    setattr(tasks, 'C2f_Morph', C2f_Morph)
+    setattr(__main__, 'C2f_Morph', C2f_Morph)
 except ImportError:
     pass
 
@@ -160,12 +193,59 @@ if "✅ [BladeYOLO]" not in trainer_code:
             f.write(trainer_code)
 # ---------------------------------------
 
+def find_checkpoint(project, name, explicit_path=None):
+    """Find the best checkpoint to resume from."""
+    if explicit_path:
+        if os.path.exists(explicit_path):
+            return explicit_path
+        raise FileNotFoundError(f"Specified checkpoint not found: {explicit_path}")
+
+    candidates = [
+        # Current active run
+        os.path.join(ROOT_DIR, "runs", "detect", project, name, "weights", "last.pt"),
+        f"/kaggle/input/datasets/beegee11/wind-surface-defect/runs/runs/detect/{project}/{name}/weights/last.pt",
+        # Legacy run names
+        os.path.join(ROOT_DIR, "runs", "detect", project, "tgrs_paper_reproduction", "weights", "last.pt"),
+        f"/kaggle/input/datasets/beegee11/wind-surface-defect/runs/runs/detect/{project}/tgrs_paper_reproduction/weights/last.pt",
+    ]
+
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return candidate
+
+    # Fallback: search for any last.pt under runs/ sorted by modification time (most recent first)
+    all_runs = sorted(
+        glob.glob(os.path.join(ROOT_DIR, "runs", "**", "last.pt"), recursive=True),
+        key=os.path.getmtime,
+        reverse=True
+    )
+    if all_runs:
+        return all_runs[0]
+
+    return None
+
 def main():
+    parser = argparse.ArgumentParser(description="BladeYOLO Training and Resumption")
+    parser.add_argument("--resume", nargs="?", const=True, default=True, help="Resume training (default: True). Pass False to train fresh, or path to checkpoint.")
+    parser.add_argument("--weights", type=str, default=None, help="Explicit weights/checkpoint path to resume from.")
+    parser.add_argument("--data", type=str, default=None, help="Path to data.yaml.")
+    parser.add_argument("--device", type=str, default=None, help="Device(s) to train on (e.g. '0' or '0,1').")
+    parser.add_argument("--epochs", type=int, default=400, help="Total epochs (default: 400).")
+    parser.add_argument("--batch", type=int, default=10, help="Batch size (default: 10).")
+    args, _ = parser.parse_known_args()
+
+    project = 'BladeYOLO_WindSurface'
+    name = 'bladeyolo_l_sota'
     yaml_path = os.path.join(ROOT_DIR, 'bladeyolo-l.yaml')
+    
     local_data_path = os.path.join(ROOT_DIR, 'WindSurface-Defect', 'data.yaml')
     kaggle_data_path = "/kaggle/input/datasets/beegee11/wind-surface-defect/data.yaml"
     
-    data_path = local_data_path if os.path.exists(local_data_path) else kaggle_data_path
+    if args.data and os.path.exists(args.data):
+        data_path = args.data
+    else:
+        data_path = local_data_path if os.path.exists(local_data_path) else kaggle_data_path
+
     if not os.path.exists(data_path):
         raise FileNotFoundError(f"Dataset YAML not found at: {data_path}")
         
@@ -181,28 +261,39 @@ def main():
     except Exception as e:
         print(f"Warning: could not inspect/update path in {data_path}: {e}")
         
-    print(f"===========================================================")
+    print("=" * 60)
     print(f" Target Dataset: {data_path}")
-    print(f"===========================================================")
+    print("=" * 60)
 
-    kaggle_last_pt = "/kaggle/input/datasets/beegee11/wind-surface-defect/runs/runs/detect/BladeYOLO_WindSurface/tgrs_paper_reproduction/weights/last.pt"
-    local_last_pt = os.path.join(ROOT_DIR, "runs", "detect", "BladeYOLO_WindSurface", "tgrs_paper_reproduction", "weights", "last.pt")
-    last_pt = kaggle_last_pt if os.path.exists(kaggle_last_pt) else local_last_pt
-    
-    devices = '0,1' if torch.cuda.device_count() > 1 else '0'
+    devices = args.device if args.device is not None else ('0,1' if torch.cuda.device_count() > 1 else '0')
 
-    if os.path.exists(last_pt):
+    # Determine resume mode and checkpoint path
+    resume_requested = True
+    explicit_ckpt = args.weights
+    if isinstance(args.resume, str):
+        if args.resume.lower() in ('false', '0', 'no'):
+            resume_requested = False
+        else:
+            explicit_ckpt = args.resume
+    elif args.resume is False:
+        resume_requested = False
+
+    last_pt = None
+    if resume_requested or explicit_ckpt:
+        last_pt = find_checkpoint(project, name, explicit_path=explicit_ckpt)
+
+    if last_pt and os.path.exists(last_pt):
         print(f"Found checkpoint! Resuming training from: {last_pt}")
         model = YOLO(last_pt)
-        results = model.train(resume=True, data=data_path)
+        results = model.train(resume=True, data=data_path, device=devices)
     else:
         print("No checkpoint found. Starting fresh training run...")
         model = YOLO(yaml_path)
         
         results = model.train(
             data=data_path,
-            epochs=400,
-            batch=10,
+            epochs=args.epochs,
+            batch=args.batch,
             imgsz=640,
             device=devices,
             optimizer='AdamW',
@@ -217,9 +308,10 @@ def main():
             mosaic=1.0,
             mixup=0.15,
             copy_paste=0.0,
-            project='BladeYOLO_WindSurface',
-            name='bladeyolo_l_sota',
+            project=project,
+            name=name,
             amp=False
         )
+
 if __name__ == '__main__':
     main()
