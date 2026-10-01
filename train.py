@@ -1,4 +1,5 @@
 import os
+import models.loss
 import sys
 import glob
 import argparse
@@ -26,6 +27,7 @@ inject_marker = "# --- BLADEYOLO INJECTION START ---"
 inject_code = f"""{inject_marker}
 import sys
 import os
+import models.loss
 import torch
 import torch.nn as nn
 
@@ -81,9 +83,13 @@ try:
         
     try:
         from models.morphology import C2f_Morph
-        setattr(modules, 'C3', C2f_Morph)
-        setattr(tasks, 'C3', C2f_Morph)
-        setattr(__main__, 'C3', C2f_Morph)
+        from models.cross_mamba import C2f_CrossMamba
+        setattr(modules, 'C2f', C2f_Morph)
+        setattr(tasks, 'C2f', C2f_Morph)
+        setattr(__main__, 'C2f', C2f_Morph)
+        setattr(modules, 'C3', C2f_CrossMamba)
+        setattr(tasks, 'C3', C2f_CrossMamba)
+        setattr(__main__, 'C3', C2f_CrossMamba)
         setattr(modules, 'C2f_Morph', C2f_Morph)
         setattr(tasks, 'C2f_Morph', C2f_Morph)
         setattr(__main__, 'C2f_Morph', C2f_Morph)
