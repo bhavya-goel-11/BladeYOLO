@@ -1,6 +1,5 @@
 """Hybrid backbone: frozen DINOv3 ViT-S/16 semantics fused with a trainable wavelet detail branch."""
 
-import glob
 import os
 import sys
 import zipfile
@@ -14,10 +13,10 @@ from .wavelet import WaveletDown
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DINOV3_REPO_ZIP = "https://github.com/facebookresearch/dinov3/archive/refs/heads/main.zip"
-DINOV3_WEIGHT_GLOBS = [
-    os.environ.get("DINOV3_WEIGHTS", ""),
-    os.path.join(ROOT_DIR, "dinov3_vits16*.pth"),
-    "/kaggle/input/**/dinov3_vits16*.pth",
+DINOV3_WEIGHT_PATHS = [
+    os.environ.get("DINOV3_WEIGHTS", ""),  # explicit override
+    os.path.join(ROOT_DIR, "dinov3_vits16_pretrain_lvd1689m-08c60483.pth"),  # local: project folder
+    "/kaggle/input/models/shamskarib/dinov3-vits/pytorch/default/1/dinov3_vits16_pretrain_lvd1689m-08c60483.pth",
 ]
 
 
@@ -50,20 +49,17 @@ def build_dinov3_vits16():
     from dinov3.hub.backbones import dinov3_vits16
 
     model = dinov3_vits16(pretrained=False)
-    paths = [p for pattern in DINOV3_WEIGHT_GLOBS if pattern for p in sorted(glob.glob(pattern, recursive=True))]
-    if not paths:
-        raise FileNotFoundError(
-            "DINOv3 ViT-S/16 weights not found. Set DINOV3_WEIGHTS=/path/to/dinov3_vits16_pretrain_lvd1689m-*.pth, "
-            "put the file in the project root, or attach it as a Kaggle input."
-        )
-    state = torch.load(paths[0], map_location="cpu", weights_only=True)
+    path = next((p for p in DINOV3_WEIGHT_PATHS if p and os.path.exists(p)), None)
+    if not path:
+        raise FileNotFoundError(f"DINOv3 ViT-S/16 weights not found in {DINOV3_WEIGHT_PATHS[1:]}. Set DINOV3_WEIGHTS=/path/to/file.pth.")
+    state = torch.load(path, map_location="cpu", weights_only=True)
     state = state.get("state_dict", state)
     state = {k.removeprefix("backbone."): v for k, v in state.items()}
     missing, unexpected = model.load_state_dict(state, strict=False)
     params = dict(model.named_parameters())
     if [k for k in missing if k in params] or unexpected:
         raise RuntimeError(f"DINOv3 weights do not match the model. Missing: {missing}. Unexpected: {unexpected}.")
-    print(f"[BladeYOLO] Loaded DINOv3 ViT-S/16 weights from {paths[0]}")
+    print(f"[BladeYOLO] Loaded DINOv3 ViT-S/16 weights from {path}")
     return model.float()
 
 

@@ -7,21 +7,18 @@ Examples:
 """
 
 import argparse
-import glob
 import os
 import sys
 
 import yaml
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-# Default: the merged, deduplicated, group-split dataset built by tools/build_dataset.py (it ships a manifest.csv).
+# Default: the merged, deduplicated, group-split dataset built by tools/build_dataset.py, copied into the
+# project folder (locally and on Kaggle), else read straight from the Kaggle input.
 # The original Wind Surface Defect split leaks augmented twins into val; use it only explicitly via --data.
 DATA_CANDIDATES = [
     os.path.join(ROOT_DIR, "WindSurface-Defect-v2", "data.yaml"),
-    *sorted(
-        p for p in glob.glob("/kaggle/input/**/data.yaml", recursive=True)
-        if os.path.exists(os.path.join(os.path.dirname(p), "manifest.csv"))
-    ),
+    "/kaggle/input/datasets/beegee11/wind-surface-defect/WindSurface-Defect-v2/data.yaml",
 ]
 
 

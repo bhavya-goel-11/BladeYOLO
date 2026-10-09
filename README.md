@@ -34,9 +34,11 @@ BladeYOLO: Wind Turbine Blade Defect Detection with Limited Annotations and Weak
 ## Training (Kaggle 2×T4)
 
 1. Build the dataset locally with `python tools/build_dataset.py` (see `WindSurface-Defect-v2/README.md`)
-   and upload `WindSurface-Defect-v2/` as a Kaggle dataset. Attach it and the DINOv3 ViT-S/16 weights
-   (`dinov3_vits16_pretrain_lvd1689m-*.pth`) as inputs. The weights are found automatically under
-   `/kaggle/input`, or set `DINOV3_WEIGHTS=/path/to/file.pth`.
+   and upload `WindSurface-Defect-v2/` as a Kaggle dataset.
+   - Dataset: copy it into the project folder (`BladeYOLO/WindSurface-Defect-v2`), locally and on Kaggle;
+     otherwise it is read from `/kaggle/input/datasets/beegee11/wind-surface-defect/WindSurface-Defect-v2`.
+   - DINOv3 ViT-S/16 weights: locally `BladeYOLO/dinov3_vits16_pretrain_lvd1689m-08c60483.pth`; on Kaggle
+     the `shamskarib/dinov3-vits` model input is used in place. Override with `DINOV3_WEIGHTS=/path/to/file.pth`.
 2. `pip install -r requirements.txt`
 3. `python train.py`. This uses both GPUs, AMP, a total batch of 16 and 300 epochs. Run `python train.py -h` to see all options.
 
