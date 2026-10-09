@@ -1,169 +1,124 @@
-import math
+"""Hybrid backbone: frozen DINOv3 ViT-S/16 semantics fused with a trainable wavelet detail branch."""
+
+import glob
+import os
+import sys
+import zipfile
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from ultralytics.nn.modules.conv import Conv
 
-# DINOv3 Patching (Clean, No Style Injection)
-from dinov3.models.vision_transformer import DinoVisionTransformer
+from .wavelet import WaveletDown
 
-def patched_get_intermediate_layers(self_model, x, n=1, reshape=False, return_class_token=False, norm=False):
-    # Capture original image dimensions before patching
-    B_img, C_img, H_img, W_img = x.shape
-    patch_size = self_model.patch_embed.proj.kernel_size[0] if hasattr(self_model, 'patch_embed') else 16
-    orig_H = H_img // patch_size
-    orig_W = W_img // patch_size
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DINOV3_REPO_ZIP = "https://github.com/facebookresearch/dinov3/archive/refs/heads/main.zip"
+DINOV3_WEIGHT_GLOBS = [
+    os.environ.get("DINOV3_WEIGHTS", ""),
+    os.path.join(ROOT_DIR, "dinov3_vits16*.pth"),
+    "/kaggle/input/**/dinov3_vits16*.pth",
+]
 
-    if hasattr(self_model, 'prepare_tokens_with_masks'):
-        out = self_model.prepare_tokens_with_masks(x)
-        x = out[0]
-    else:
-        x = self_model.patch_embed(x)
-        x = torch.cat((self_model.cls_token.expand(x.shape[0], -1, -1), x), dim=1)
-        x = x + self_model.interpolate_pos_encoding(x, x.shape[1], x.shape[2])
 
-    outputs = []
-    for i, blk in enumerate(self_model.blocks):
-        x = blk(x)
-        if i in n:
-            outputs.append(x)
-            
-    if norm and hasattr(self_model, 'norm'):
-        outputs = [self_model.norm(out) for out in outputs]
-        
-    if not return_class_token:
-        num_extra = getattr(self_model, 'n_storage_tokens', 0) + 1
-        outputs = [out[:, num_extra:] for out in outputs]
-        
-    if reshape:
-        B, _, C = outputs[0].shape
-        outputs = [out.reshape(B, orig_H, orig_W, C).permute(0, 3, 1, 2).contiguous() for out in outputs]
-        
-    return outputs
+def ensure_dinov3_importable():
+    """Put the DINOv3 source on sys.path, downloading it into the torch hub cache if needed.
 
-DinoVisionTransformer.patched_get_intermediate_layers = patched_get_intermediate_layers
+    The repo's hubconf pulls in segmentation/eval dependencies we do not need, so the backbone
+    is imported from dinov3.hub.backbones directly. The path must stay on sys.path because
+    checkpoints pickle the DINOv3 classes by reference (and DDP workers inherit sys.path).
+    """
+    try:
+        import dinov3  # noqa: F401  (pip-installed or already on the path)
 
-from .lfa import LFA
+        return
+    except ImportError:
+        pass
+    repo = os.path.join(torch.hub.get_dir(), "dinov3-main")
+    if not os.path.isdir(repo):
+        os.makedirs(torch.hub.get_dir(), exist_ok=True)
+        zip_path = repo + ".zip"
+        torch.hub.download_url_to_file(DINOV3_REPO_ZIP, zip_path)
+        with zipfile.ZipFile(zip_path) as z:
+            z.extractall(torch.hub.get_dir())
+        os.remove(zip_path)
+    sys.path.insert(0, repo)
+
+
+def build_dinov3_vits16():
+    ensure_dinov3_importable()
+    from dinov3.hub.backbones import dinov3_vits16
+
+    model = dinov3_vits16(pretrained=False)
+    paths = [p for pattern in DINOV3_WEIGHT_GLOBS if pattern for p in sorted(glob.glob(pattern, recursive=True))]
+    if not paths:
+        raise FileNotFoundError(
+            "DINOv3 ViT-S/16 weights not found. Set DINOV3_WEIGHTS=/path/to/dinov3_vits16_pretrain_lvd1689m-*.pth, "
+            "put the file in the project root, or attach it as a Kaggle input."
+        )
+    state = torch.load(paths[0], map_location="cpu", weights_only=True)
+    state = state.get("state_dict", state)
+    state = {k.removeprefix("backbone."): v for k, v in state.items()}
+    missing, unexpected = model.load_state_dict(state, strict=False)
+    params = dict(model.named_parameters())
+    if [k for k in missing if k in params] or unexpected:
+        raise RuntimeError(f"DINOv3 weights do not match the model. Missing: {missing}. Unexpected: {unexpected}.")
+    print(f"[BladeYOLO] Loaded DINOv3 ViT-S/16 weights from {paths[0]}")
+    return model.float()
+
 
 class FeatureFusion(nn.Module):
-    def __init__(self, semantic_channels, detail_channels, out_channels):
-        super().__init__()
-        self.conv = nn.Sequential(
-            nn.Conv2d(semantic_channels + detail_channels, out_channels, kernel_size=1, bias=False),
-            nn.BatchNorm2d(out_channels),
-            nn.GELU(),
-            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False, groups=out_channels),
-            nn.BatchNorm2d(out_channels),
-            nn.GELU()
-        )
-    def forward(self, semantic, detail):
-        if semantic.shape[2:] != detail.shape[2:]:
-            semantic = F.interpolate(semantic, size=detail.shape[2:], mode='bilinear', align_corners=False)
-        fused = torch.cat([semantic, detail], dim=1)
-        return self.conv(fused)
+    """Concatenate (resized) DINOv3 semantics with detail features and mix them."""
 
-class PhysicsAwareBackbone(nn.Module):
-    """
-    Clean, Physics-Aware Backbone replacing the buggy BladeYOLO backbone.
-    1. Extracts pure semantics from DINOv3 (Blocks 4, 8, 12).
-    2. Extracts high-res physical details via CNN Stem + LFA.
-    3. Fuses them robustly into P3, P4, P5 for YOLOv12 Neck.
-    """
-    def __init__(self, in_channels=3, p3_channels=256, p4_channels=512, p5_channels=512, freeze_dino=True):
+    def __init__(self, c_sem, c_det, c_out):
         super().__init__()
-        
-        # 1. DINOv3 Branch
-        dino_model = torch.hub.load('facebookresearch/dinov3', 'dinov3_vits16', pretrained=False, trust_repo=True)
-        
-        weight_path = None
-        import os
-        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        candidate_paths = [
-            'dinov3_vits16.pth',
-            'dinov3_vits16_pretrain_lvd1689m-08c60483.pth',
-            os.path.join(root_dir, 'dinov3_vits16.pth'),
-            os.path.join(root_dir, 'dinov3_vits16_pretrain_lvd1689m-08c60483.pth'),
-            '/kaggle/input/dinov3/dinov3_vits16.pth',
-            '/kaggle/input/models/shamskarib/dinov3-vits/pytorch/default/1/dinov3_vits16_pretrain_lvd1689m-08c60483.pth',
-        ]
-        for p in candidate_paths:
-            if os.path.exists(p):
-                weight_path = p
-                break
-                
-        if weight_path:
-            print(f"\n\n✅ [BladeYOLO] Loading local DINOv3 weights from {weight_path}...\n\n")
-            state_dict = torch.load(weight_path, map_location='cpu', weights_only=True)
-            if 'state_dict' in state_dict:
-                state_dict = state_dict['state_dict']
-            clean_dict = {k.replace('backbone.', ''): v for k, v in state_dict.items()}
-            dino_model.load_state_dict(clean_dict, strict=False)
-        else:
-            print("\n\n⚠️ [BladeYOLO] No local DINOv3 weights found. Using random weights.\n\n")
+        self.proj = Conv(c_sem + c_det, c_out, 1)
+        self.mix = Conv(c_out, c_out, 3, g=c_out)
 
-        self.dino = dino_model
-        if freeze_dino:
-            for param in self.dino.parameters():
-                param.requires_grad = False
-                
-        dino_dim = 384 # ViT-S dimension
-        
-        # 2. Physics / LFA Branch
-        self.stem = nn.Sequential(
-            nn.Conv2d(in_channels, 64, kernel_size=3, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(64),
-            nn.GELU(),
-            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(128),
-            nn.GELU()
-        )
-        
-        # P3 Detail (Stride 8)
-        self.p3_conv = nn.Sequential(
-            nn.Conv2d(128, p3_channels, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.BatchNorm2d(p3_channels),
-            nn.GELU()
-        )
-        self.p3_lfa = LFA(p3_channels)
-        
-        # P4 Detail (Stride 16)
-        self.p4_conv = nn.Sequential(
-            nn.Conv2d(p3_channels, p4_channels, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.BatchNorm2d(p4_channels),
-            nn.GELU()
-        )
-        self.p4_lfa = LFA(p4_channels)
-        
-        # P5 Detail (Stride 32)
-        self.p5_conv = nn.Sequential(
-            nn.Conv2d(p4_channels, p4_channels, kernel_size=3, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(p4_channels),
-            nn.GELU()
-        )
-        
-        # 3. Fusion Blocks
-        self.fuse3 = FeatureFusion(dino_dim, p3_channels, p3_channels)
-        self.fuse4 = FeatureFusion(dino_dim, p4_channels, p4_channels)
-        self.fuse5 = FeatureFusion(dino_dim, p4_channels, p5_channels)
+    def forward(self, sem, det):
+        if sem.shape[2:] != det.shape[2:]:
+            sem = F.interpolate(sem, size=det.shape[2:], mode="bilinear", align_corners=False)
+        return self.mix(self.proj(torch.cat([sem, det], 1)))
+
+
+class BladeBackbone(nn.Module):
+    """Returns [P3, P4, P5] (strides 8/16/32) with channels (256, 512, 512).
+
+    1. Semantic branch: frozen DINOv3 ViT-S/16, blocks 4/8/12 (stride 16), resized to each level.
+    2. Detail branch: CNN stem to stride 4, then learnable-wavelet downsampling for strides 8/16/32,
+       so high-frequency sub-bands are kept as channels instead of being pooled away.
+    3. Per-level fusion of the two.
+    """
+
+    channels = (256, 512, 512)
+    dino_blocks = (3, 7, 11)
+    dino_dim = 384
+
+    def __init__(self, *args):
+        super().__init__()
+        self.dino = build_dinov3_vits16()
+        self.dino.requires_grad_(False)
+        self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1), persistent=False)
+        self.register_buffer("std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1), persistent=False)
+
+        c3, c4, c5 = self.channels
+        self.stem = nn.Sequential(Conv(3, 64, 3, 2), Conv(64, 128, 3, 2))  # stride 4
+        self.down3 = nn.Sequential(WaveletDown(128, c3), Conv(c3, c3, 3))  # stride 8
+        self.down4 = WaveletDown(c3, c4)  # stride 16
+        self.down5 = WaveletDown(c4, c5)  # stride 32
+        self.fuse = nn.ModuleList(FeatureFusion(self.dino_dim, c, c) for c in self.channels)
+
+    def train(self, mode=True):
+        super().train(mode)
+        self.dino.eval()  # frozen: no dropout / drop-path
+        return self
 
     def forward(self, x):
-        # 1. DINOv3 Semantics (Frozen)
         with torch.no_grad():
-            dino_feats = self.dino.patched_get_intermediate_layers(x, n=[3, 7, 11], reshape=True)
-            
-        # 2. Physics Details
-        stem_out = self.stem(x)
-        
-        p3_det = self.p3_conv(stem_out)
-        p3_det = self.p3_lfa(p3_det)
-        
-        p4_det = self.p4_conv(p3_det)
-        p4_det = self.p4_lfa(p4_det)
-        
-        p5_det = self.p5_conv(p4_det)
-        
-        # 3. Fusion
-        p3_out = self.fuse3(dino_feats[0], p3_det)
-        p4_out = self.fuse4(dino_feats[1], p4_det)
-        p5_out = self.fuse5(dino_feats[2], p5_det)
-        
-        return [p3_out, p4_out, p5_out]
+            sem = self.dino.get_intermediate_layers(
+                (x - self.mean) / self.std, n=self.dino_blocks, reshape=True, norm=True
+            )
+        d3 = self.down3(self.stem(x))
+        d4 = self.down4(d3)
+        d5 = self.down5(d4)
+        return [f(s, d) for f, s, d in zip(self.fuse, sem, (d3, d4, d5))]

@@ -1,36 +1,33 @@
-# BladeYOLO Configuration (Base: YOLOv12-S structure)
-# Reconstructed with PhysicsAwareBackbone
+# BladeYOLO-L: frozen DINOv3 + wavelet detail backbone, hybrid deformable / selective-scan PAFPN neck.
+# Custom layers are registered by `import models`.
 
-nc: 80 # default to COCO, automatically overridden by WindSurface-Defect/data.yaml
+nc: 5 # overridden by the dataset YAML
 scales:
   # [depth, width, max_channels]
   l: [1.00, 1.00, 1024]
 
 backbone:
   # [from, repeats, module, args]
-  - [-1, 1, BladeYOLOBackbone, []]  # 0
-  
-  # Extract multiscale features (P3, P4, P5)
-  - [0, 1, GhostConv, [256, 0]]      # 1: P3 (stride 8)
-  - [0, 1, GhostConv, [512, 1]]      # 2: P4 (stride 16)
-  - [0, 1, GhostConv, [512, 2]]      # 3: P5 (stride 32)
+  - [-1, 1, BladeBackbone, []] # 0: [P3, P4, P5] with channels (256, 512, 512)
+  - [0, 1, Index, [256, 0]] # 1: P3 (stride 8)
+  - [0, 1, Index, [512, 1]] # 2: P4 (stride 16)
+  - [0, 1, Index, [512, 2]] # 3: P5 (stride 32)
 
 head:
-  # YOLOv12 PAFPN Neck
-  - [-1, 1, nn.Upsample, [None, 2, 'nearest']] # 4
-  - [[-1, 2], 1, Concat, [1]]                  # 5 (concat with P4)
-  - [-1, 2, C3, [512, False]]                  # 6 (Mamba - Global Context)
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 4
+  - [[-1, 2], 1, Concat, [1]] # 5: P5 up + P4
+  - [-1, 2, C2fSS2D, [512]] # 6: global cross-scale context (selective scan)
 
-  - [-1, 1, nn.Upsample, [None, 2, 'nearest']] # 7
-  - [[-1, 1], 1, Concat, [1]]                  # 8 (concat with P3)
-  - [-1, 2, C2f, [256, False]]                 # 9 (Morph - Crack Tracing, P3 out)
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 7
+  - [[-1, 1], 1, Concat, [1]] # 8: + P3
+  - [-1, 2, C2fMorph, [256]] # 9: P3 out, deformable contour tracing
 
-  - [-1, 1, Conv, [256, 3, 2]]                 # 10
-  - [[-1, 6], 1, Concat, [1]]                  # 11 (concat with neck P4)
-  - [-1, 2, C2f, [512, False]]                 # 12 (Morph - Crack Tracing, P4 out)
+  - [-1, 1, Conv, [256, 3, 2]] # 10
+  - [[-1, 6], 1, Concat, [1]] # 11
+  - [-1, 2, C2fMorph, [512]] # 12: P4 out, deformable contour tracing
 
-  - [-1, 1, Conv, [512, 3, 2]]                 # 13
-  - [[-1, 3], 1, Concat, [1]]                  # 14 (concat with backbone P5)
-  - [-1, 2, C3, [1024, True]]                  # 15 (Mamba - Global Context, P5 out)
+  - [-1, 1, Conv, [512, 3, 2]] # 13
+  - [[-1, 3], 1, Concat, [1]] # 14
+  - [-1, 2, C2fSS2D, [1024]] # 15: P5 out, global context (selective scan)
 
-  - [[9, 12, 15], 1, Detect, [nc]]             # 16
+  - [[9, 12, 15], 1, Detect, [nc]] # 16

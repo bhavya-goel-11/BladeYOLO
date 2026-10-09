@@ -1,73 +1,60 @@
+import math
+
 import torch
 import torch.nn as nn
-import math
 from torchvision.ops import deform_conv2d
 from ultralytics.nn.modules.conv import Conv
 
-class MorphologicalConv(nn.Module):
+
+class DeformConv(nn.Module):
+    """Modulated deformable convolution (DCNv2) + BN + SiLU.
+
+    Each kernel tap learns a 2D offset and a [0, 1] modulation weight, so the sampling grid can bend
+    along irregular defect contours and ignore background taps. Offsets start at zero and modulation
+    at 0.5, i.e. the layer starts as a (scaled) regular convolution.
     """
-    Morphological Deformable Convolution.
-    Learns 2D offsets for the convolution kernel to perfectly trace irregular 
-    defect edges like branching cracks and peeling contours, eliminating rigid 
-    background noise.
-    """
-    def __init__(self, c1, c2, k=3, s=1, p=1, g=1, act=True):
+
+    def __init__(self, c1, c2, k=3, s=1):
         super().__init__()
-        self.in_channels = c1
-        self.out_channels = c2
-        self.kernel_size = k
-        self.stride = s
-        self.padding = p
-        self.groups = g
-        
-        # Learnable offsets for the deformable kernel (2 * k * k channels)
-        self.offset_conv = nn.Conv2d(c1, 2 * k * k, kernel_size=k, stride=s, padding=p, bias=True)
-        # Initialize offsets to 0 (acts as standard conv initially)
-        nn.init.constant_(self.offset_conv.weight, 0)
-        nn.init.constant_(self.offset_conv.bias, 0)
-        
-        self.weight = nn.Parameter(torch.Tensor(c2, c1 // g, k, k))
+        self.k, self.s, self.p = k, s, k // 2
+        self.offset_mask = nn.Conv2d(c1, 3 * k * k, k, s, self.p)
+        nn.init.zeros_(self.offset_mask.weight)
+        nn.init.zeros_(self.offset_mask.bias)
+        self.weight = nn.Parameter(torch.empty(c2, c1, k, k))
         nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
-        self.bias = nn.Parameter(torch.Tensor(c2))
-        nn.init.constant_(self.bias, 0)
-        
         self.bn = nn.BatchNorm2d(c2)
-        self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
+        self.act = nn.SiLU()
 
     def forward(self, x):
-        offsets = self.offset_conv(x)
-        x = deform_conv2d(x, offsets, self.weight, self.bias, 
-                          stride=self.stride, padding=self.padding, 
-                          dilation=1, mask=None)
+        offset, mask = self.offset_mask(x).split([2 * self.k * self.k, self.k * self.k], 1)
+        x = deform_conv2d(x, offset, self.weight, stride=self.s, padding=self.p, mask=mask.sigmoid())
         return self.act(self.bn(x))
 
-class MorphologicalBottleneck(nn.Module):
-    """Standard Bottleneck but with MorphologicalConv instead of standard Conv."""
-    def __init__(self, c1, c2, shortcut=True, g=1, k=(3, 3), e=0.5):
+
+class DeformBottleneck(nn.Module):
+    def __init__(self, c1, c2, shortcut=True, e=1.0):
         super().__init__()
-        c_ = int(c2 * e)  # hidden channels
-        self.cv1 = Conv(c1, c_, k[0], 1)
-        self.cv2 = MorphologicalConv(c_, c2, k[1], 1, p=k[1]//2, g=g)
+        c_ = int(c2 * e)
+        self.cv1 = Conv(c1, c_, 3)
+        self.cv2 = DeformConv(c_, c2, 3)
         self.add = shortcut and c1 == c2
 
     def forward(self, x):
-        return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
+        y = self.cv2(self.cv1(x))
+        return x + y if self.add else y
 
-class C2f_Morph(nn.Module):
-    """CSP Bottleneck with 2 convolutions, using MorphologicalBottleneck."""
+
+class C2fMorph(nn.Module):
+    """C2f CSP block whose bottlenecks use deformable convolutions (defect-contour tracing)."""
+
     def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):
         super().__init__()
         self.c = int(c2 * e)
         self.cv1 = Conv(c1, 2 * self.c, 1, 1)
         self.cv2 = Conv((2 + n) * self.c, c2, 1)
-        self.m = nn.ModuleList(MorphologicalBottleneck(self.c, self.c, shortcut, g, k=(3, 3), e=1.0) for _ in range(n))
+        self.m = nn.ModuleList(DeformBottleneck(self.c, self.c, shortcut) for _ in range(n))
 
     def forward(self, x):
         y = list(self.cv1(x).chunk(2, 1))
-        y.extend(m(y[-1]) for m in self.m)
-        return self.cv2(torch.cat(y, 1))
-    
-    def forward_split(self, x):
-        y = list(self.cv1(x).split((self.c, self.c), 1))
         y.extend(m(y[-1]) for m in self.m)
         return self.cv2(torch.cat(y, 1))

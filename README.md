@@ -29,3 +29,19 @@ BladeYOLO: Wind Turbine Blade Defect Detection with Limited Annotations and Weak
 <p align="center">
     <i>IEEE Transactions on Geoscience and Remote Sensing (TGRS), 2026</i>
 </p>
+
+
+## Training (Kaggle 2×T4)
+
+1. Build the dataset locally with `python tools/build_dataset.py` (see `WindSurface-Defect-v2/README.md`)
+   and upload `WindSurface-Defect-v2/` as a Kaggle dataset. Attach it and the DINOv3 ViT-S/16 weights
+   (`dinov3_vits16_pretrain_lvd1689m-*.pth`) as inputs. The weights are found automatically under
+   `/kaggle/input`, or set `DINOV3_WEIGHTS=/path/to/file.pth`.
+2. `pip install -r requirements.txt`
+3. `python train.py`. This uses both GPUs, AMP, a total batch of 16 and 300 epochs. Run `python train.py -h` to see all options.
+
+Kaggle sessions stop after 12 h. To continue an interrupted run, attach its `runs/` folder and run
+`python train.py --resume <run>/weights/last.pt`.
+
+To train a stock baseline under the same pipeline:
+`python train.py --model yolo12l.pt --name yolo12l_baseline --box-loss ciou` (COCO-pretrained).
