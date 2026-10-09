@@ -1,2 +1,5 @@
-ultralytics==8.4.174  # parse_model hooks and DDP launch are tested against this version
+# torch / torchvision: use the CUDA build preinstalled on Kaggle; nothing below pins or reinstalls them.
+ultralytics==8.4.174  # parse_model hooks and DDP launch are tested against this version (brings opencv, numpy, pyyaml)
 cloudpickle>=3.1.1    # Ultralytics multi-GPU launcher
+# DINOv3 backbone code, pinned for reproducibility. Its own requirements (omegaconf, torchmetrics, termcolor, ...) are unpinned.
+dinov3 @ git+https://github.com/facebookresearch/dinov3.git@6876159a11b4df116f30f667f8c9888617df0751
