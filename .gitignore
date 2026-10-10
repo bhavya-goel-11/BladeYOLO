@@ -59,3 +59,6 @@ wtconv_explanation.md
 WindSurface-Defect-v2/
 .dataset_cache/
 WindSurface-Defect-v2.zip
+
+# Kaggle notebook logs
+download.txt
