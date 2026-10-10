@@ -12,7 +12,7 @@ rotations). A random split therefore leaks near-identical images across splits. 
 4. audits the result: no val/test image may match a train image.
 
 Usage:
-    python tools/build_dataset.py --ws WindSurface-Defect --wt WTBlade-Defect --out WindSurface-Defect-v2
+    python tools/build_dataset.py --ws WindSurface-Defect --wt WTBlade-Defect --out WindSurface-Defect-v3
 """
 
 import argparse
@@ -28,9 +28,13 @@ from multiprocessing import Pool
 import cv2
 import numpy as np
 
-CLASSES = ["corrosion", "dirt", "hide_craze", "surface_eye", "thunderstrike"]
-# WTBlade-Defect: burn, crack, deformity, dirt, oil, peeling, rust -> Wind Surface ids (None = dropped)
-WT_TO_WS = {0: 4, 1: 2, 2: None, 3: 1, 4: None, 5: None, 6: 0}
+# Blade-surface damage taxonomy as used in industrial blade inspection. Ids 0-4 are the Wind Surface Defect
+# classes (corrosion, dirt, hide_craze, surface_eye, thunderstrike) under their industry names, so Wind Surface
+# labels keep their ids and the paper-comparable five classes can be reported on their own.
+CLASSES = ["leading_edge_erosion", "contamination", "crack", "pitting", "lightning_damage", "coating_damage"]
+# WTBlade-Defect ids: burn, crack, deformity, dirt, oil, peeling, rust. Rust, oil and deformity are hub/nacelle
+# hardware findings (bearing and bolt rust, oil leaks, seal deformation), not blade-surface damage: dropped.
+WT_TO_WS = {0: 4, 1: 2, 2: None, 3: 1, 4: None, 5: 5, 6: None}
 
 KNN = 10  # retrieval candidates per image
 MIN_INLIERS = 25  # ORB/RANSAC inliers for a verified content match (random pairs: >=25 in ~1%, mostly true dups)
@@ -113,7 +117,7 @@ def collect(ws_root, wt_root):
             stem = os.path.splitext(f)[0]
             raw = read_boxes(f"{wt_root}/{split}/labels/{stem}.txt")
             boxes = read_boxes(f"{wt_root}/{split}/labels/{stem}.txt", WT_TO_WS)
-            stats["wt boxes dropped (deformity/oil/peeling)"] += len(raw) - len(boxes)
+            stats["wt boxes dropped (rust/oil/deformity: not blade surface)"] += len(raw) - len(boxes)
             items.append(dict(src="wt", path=os.path.join(img_dir, f), stem=stem,
                               dup_key="wt:" + source_stem(stem),
                               group_key=None, boxes=boxes))
@@ -282,7 +286,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--ws", default="WindSurface-Defect")
     ap.add_argument("--wt", default="WTBlade-Defect")
-    ap.add_argument("--out", default="WindSurface-Defect-v2")
+    ap.add_argument("--out", default="WindSurface-Defect-v3")
     ap.add_argument("--cache", default=".dataset_cache")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--workers", type=int, default=os.cpu_count())
@@ -308,17 +312,23 @@ def main():
     nn_idx, nn_sim = knn(E, KNN)
 
     print("3/6 geometric verification of candidate pairs (ORB + RANSAC, flip-aware)")
-    key = hashlib.md5("\n".join(paths).encode()).hexdigest()[:12]
-    vcache = os.path.join(args.cache, f"verify_{key}.json")
+    # Cached by file path, so a rebuild with a different image set only verifies new pairs.
+    vcache = os.path.join(args.cache, "verify.json")
+    known = json.load(open(vcache)) if os.path.exists(vcache) else {}
+    index = {p: i for i, p in enumerate(paths)}
     verified = {}
-    if os.path.exists(vcache):
-        verified = {tuple(map(int, k.split(","))): tuple(v) for k, v in json.load(open(vcache)).items()}
+    for k, v in known.items():
+        a, b = k.split("\t")
+        if a in index and b in index:
+            verified[(min(index[a], index[b]), max(index[a], index[b]))] = tuple(v)
 
     def verify(pairs):
         todo = sorted({(min(a, b), max(a, b)) for a, b in pairs} - verified.keys())
         if todo:
-            verified.update(verify_pairs(paths, todo, args.workers))
-            json.dump({f"{a},{b}": v for (a, b), v in verified.items()}, open(vcache, "w"))
+            new = verify_pairs(paths, todo, args.workers)
+            verified.update(new)
+            known.update({f"{paths[a]}\t{paths[b]}": v for (a, b), v in new.items()})
+            json.dump(known, open(vcache, "w"))
 
     verify((a, int(b)) for a in range(N) for b in nn_idx[a])
 
@@ -444,13 +454,24 @@ def counts_by_split(rows, out):
 def write_report(out, stats, rows, split_counts, leaks):
     c, n, src = split_counts
     lines = [
-        "# Wind Surface Defect v2 (merged, deduplicated, group-split)",
+        "# Wind Surface Defect v3 (merged, deduplicated, group-split, blade-surface taxonomy)",
         "",
         "Built by `tools/build_dataset.py` from the Wind Surface Defect dataset (Liu & Liu, Appl. Soft Comput. 2025)",
         "and the Roboflow WTBlade-Defect / fengChe dataset (CC BY 4.0, https://universe.roboflow.com/detr-swsa0/fengche-evxno).",
         "",
-        "WTBlade classes mapped to Wind Surface classes: crack -> hide_craze, burn -> thunderstrike, rust -> corrosion,",
-        "dirt -> dirt; deformity, oil and peeling boxes dropped (and images left without boxes).",
+        "Classes (industrial blade-inspection taxonomy):",
+        "",
+        "| id | class | Wind Surface label | WTBlade label |",
+        "|---|---|---|---|",
+        "| 0 | leading_edge_erosion | corrosion | - |",
+        "| 1 | contamination | dirt | dirt |",
+        "| 2 | crack | hide_craze | crack |",
+        "| 3 | pitting | surface_eye | - |",
+        "| 4 | lightning_damage | thunderstrike | burn |",
+        "| 5 | coating_damage | - | peeling |",
+        "",
+        "WTBlade rust, oil and deformity (hub/nacelle hardware, not blade surface) are dropped, and images left",
+        "without boxes are removed. Ids 0-4 are the original Wind Surface classes (paper-comparable subset).",
         "",
         "## Split",
         "",

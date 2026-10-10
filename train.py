@@ -17,8 +17,8 @@ ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 # project folder (locally and on Kaggle), else read straight from the Kaggle input.
 # The original Wind Surface Defect split leaks augmented twins into val; use it only explicitly via --data.
 DATA_CANDIDATES = [
-    os.path.join(ROOT_DIR, "WindSurface-Defect-v2", "data.yaml"),
-    "/kaggle/input/datasets/beegee11/wind-surface-defect/WindSurface-Defect-v2/data.yaml",
+    os.path.join(ROOT_DIR, "WindSurface-Defect-v3", "data.yaml"),
+    "/kaggle/input/datasets/beegee11/wind-surface-defect/WindSurface-Defect-v3/data.yaml",
 ]
 # Optimisation and augmentation recipe, shared by every run (and tools/diagnose_nan.py).
 RECIPE = dict(
@@ -39,7 +39,7 @@ RECIPE = dict(
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--model", default=os.path.join(ROOT_DIR, "bladeyolo-l.yaml"), help="model YAML")
-    p.add_argument("--data", default=None, help="dataset YAML (default: WindSurface-Defect-v2, local or Kaggle input)")
+    p.add_argument("--data", default=None, help="dataset YAML (default: WindSurface-Defect-v3, local or Kaggle input)")
     p.add_argument("--name", default="bladeyolo_l", help="run name under runs/detect/BladeYOLO_WindSurface")
     p.add_argument("--resume", default=None, help="last.pt of an interrupted run to resume")
     p.add_argument("--epochs", type=int, default=300)
@@ -116,8 +116,20 @@ def evaluate_test(weights, data, batch, device):
     from ultralytics import YOLO
 
     print(f"\nTest-split evaluation of {weights}")
-    YOLO(weights).val(data=data, split="test", batch=batch, imgsz=640, device=device,
-                      project=os.path.dirname(os.path.dirname(weights)), name="test", exist_ok=True)
+    out = os.path.join(os.path.dirname(os.path.dirname(weights)), "test")
+    metrics = YOLO(weights).val(data=data, split="test", batch=batch, imgsz=640, device=device,
+                                project=os.path.dirname(out), name="test", exist_ok=True)
+    save_metrics(metrics, os.path.join(out, "metrics.json"), weights=str(weights), split="test")
+
+
+def save_metrics(metrics, path, **info):
+    """Write an Ultralytics validation result (overall + per class) to JSON, so results never live only in logs."""
+    import json
+
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump({**info, "overall": metrics.results_dict, "per_class": metrics.summary(normalize=False)},
+                  f, indent=2, default=float)
 
 
 if __name__ == "__main__":

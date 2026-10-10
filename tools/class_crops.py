@@ -1,0 +1,119 @@
+"""Side-by-side crops of one class from each source dataset of WindSurface-Defect-v3, plus box statistics.
+
+Usage:
+    python tools/class_crops.py corrosion
+Writes runs/analysis/<class>_crops.png (crops with context) and <class>_scenes.png (whole images with boxes).
+"""
+
+import argparse
+import csv
+import os
+import random
+import statistics
+
+from PIL import Image, ImageDraw
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SOURCES = {"ws": "Wind Surface Defect", "wt": "WTBlade-Defect"}
+
+
+def boxes_by_source(data, cls_id):
+    out = {s: [] for s in SOURCES}
+    for r in csv.DictReader(open(os.path.join(data, "manifest.csv"))):
+        stem = os.path.splitext(os.path.basename(r["file"]))[0]
+        for line in open(os.path.join(data, "labels", r["split"], stem + ".txt")):
+            c, x, y, w, h = line.split()
+            if int(c) == cls_id:
+                out[r["source"]].append(dict(img=os.path.join(data, r["file"]), group=r["group"], split=r["split"],
+                                             box=tuple(map(float, (x, y, w, h)))))
+    return out
+
+
+def sample_diverse(boxes, n, rng):
+    """At most one box per split group first, so the sheet is not ten crops of one photo."""
+    by_group = {}
+    for b in rng.sample(boxes, len(boxes)):
+        by_group.setdefault(b["group"], []).append(b)
+    picked = [g[0] for g in by_group.values()][:n]
+    rest = [b for g in by_group.values() for b in g[1:]]
+    return picked + rest[: n - len(picked)]
+
+
+def crop(b, size, pad=0.5):
+    im = Image.open(b["img"]).convert("RGB")
+    W, H = im.size
+    x, y, w, h = b["box"]
+    x1, y1 = (x - w / 2 - w * pad) * W, (y - h / 2 - h * pad) * H
+    x2, y2 = (x + w / 2 + w * pad) * W, (y + h / 2 + h * pad) * H
+    c = im.crop((max(0, x1), max(0, y1), min(W, x2), min(H, y2)))
+    c.thumbnail((size, size))
+    tile = Image.new("RGB", (size, size), (255, 255, 255))
+    tile.paste(c, ((size - c.width) // 2, (size - c.height) // 2))
+    return tile
+
+
+def scene(b, size):
+    im = Image.open(b["img"]).convert("RGB")
+    W, H = im.size
+    d = ImageDraw.Draw(im)
+    x, y, w, h = b["box"]
+    d.rectangle(((x - w / 2) * W, (y - h / 2) * H, (x + w / 2) * W, (y + h / 2) * H), outline=(255, 0, 0), width=max(2, W // 200))
+    im.thumbnail((size, size))
+    return im
+
+
+def sheet(rows, size, title):
+    pad, label_h = 6, 24
+    width = max(len(r[1]) for r in rows) * (size + pad) + pad
+    S = Image.new("RGB", (width, len(rows) * (size + label_h + pad) + 30), (255, 255, 255))
+    d = ImageDraw.Draw(S)
+    d.text((pad, 8), title, fill=(0, 0, 0))
+    y = 30
+    for label, tiles in rows:
+        d.text((pad, y + 4), label, fill=(0, 0, 0))
+        for i, t in enumerate(tiles):
+            S.paste(t, (pad + i * (size + pad), y + label_h))
+        y += size + label_h + pad
+    return S
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("cls")
+    ap.add_argument("--data", default=os.path.join(ROOT, "WindSurface-Defect-v3"))
+    ap.add_argument("--n", type=int, default=16)
+    ap.add_argument("--seed", type=int, default=0)
+    args = ap.parse_args()
+
+    import yaml
+
+    names = yaml.safe_load(open(os.path.join(args.data, "data.yaml")))["names"]
+    boxes = boxes_by_source(args.data, names.index(args.cls))
+    rng = random.Random(args.seed)
+    out = os.path.join(ROOT, "runs", "analysis")
+    os.makedirs(out, exist_ok=True)
+
+    crop_rows, scene_rows = [], []
+    for s, label in SOURCES.items():
+        bs = boxes[s]
+        if not bs:
+            continue
+        pick = sample_diverse(bs, args.n, rng)
+        areas = [b["box"][2] * b["box"][3] * 100 for b in bs]
+        aspects = [max(b["box"][2] / b["box"][3], b["box"][3] / b["box"][2]) for b in bs if b["box"][3] > 0]
+        imgs = {b["img"] for b in bs}
+        stats = (f"{label}: {len(bs)} boxes in {len(imgs)} images, {len({b['group'] for b in bs})} groups | "
+                 f"box area % of image: median {statistics.median(areas):.2f}, p90 {sorted(areas)[int(len(areas) * .9)]:.2f} | "
+                 f"boxes/image {len(bs) / len(imgs):.1f} | elongation median {statistics.median(aspects):.1f}")
+        print(stats)
+        half = (len(pick) + 1) // 2
+        crop_rows += [(f"{label} ({len(bs)} boxes)", [crop(b, 150) for b in pick[:half]]),
+                      (f"{label} (cont.)", [crop(b, 150) for b in pick[half:]])]
+        scene_rows.append((label, [scene(b, 220) for b in pick[:6]]))
+    sheet(crop_rows, 150, f"'{args.cls}' crops (box + 50% context) by source").save(os.path.join(out, f"{args.cls}_crops.png"))
+    sheet(scene_rows, 220, f"'{args.cls}' boxes (red) in whole images by source").save(os.path.join(out, f"{args.cls}_scenes.png"))
+    print("wrote", os.path.join(out, f"{args.cls}_crops.png"), "and", os.path.join(out, f"{args.cls}_scenes.png"))
+
+
+if __name__ == "__main__":
+    main()
