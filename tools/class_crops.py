@@ -1,7 +1,8 @@
 """Side-by-side crops of one class from each source dataset of WindSurface-Defect-v3, plus box statistics.
 
 Usage:
-    python tools/class_crops.py corrosion
+    python tools/class_crops.py corrosion                                   # WindSurface-Defect-v3, by source
+    python tools/class_crops.py surface_oil --data wind-turbine.v1i.yolov12  # any raw YOLO export
 Writes runs/analysis/<class>_crops.png (crops with context) and <class>_scenes.png (whole images with boxes).
 """
 
@@ -14,10 +15,12 @@ import statistics
 from PIL import Image, ImageDraw
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SOURCES = {"ws": "Wind Surface Defect", "wt": "WTBlade-Defect"}
+SOURCES = {"ws": "Wind Surface Defect", "wt": "WTBlade-Defect", "bj": "Beijing wind-turbine"}
 
 
 def boxes_by_source(data, cls_id):
+    if not os.path.exists(os.path.join(data, "manifest.csv")):
+        return {os.path.basename(os.path.normpath(data)): raw_yolo_boxes(data, cls_id)}
     out = {s: [] for s in SOURCES}
     for r in csv.DictReader(open(os.path.join(data, "manifest.csv"))):
         stem = os.path.splitext(os.path.basename(r["file"]))[0]
@@ -26,6 +29,29 @@ def boxes_by_source(data, cls_id):
             if int(c) == cls_id:
                 out[r["source"]].append(dict(img=os.path.join(data, r["file"]), group=r["group"], split=r["split"],
                                              box=tuple(map(float, (x, y, w, h)))))
+    return out
+
+
+def raw_yolo_boxes(data, cls_id):
+    """Any Roboflow-style YOLO export (<split>/images, <split>/labels); groups = parent photo from tile names."""
+    import sys
+
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from build_dataset import photo_key, source_stem
+
+    out = []
+    for split in sorted(os.listdir(data)):
+        img_dir = os.path.join(data, split, "images")
+        if not os.path.isdir(img_dir):
+            continue
+        for f in sorted(os.listdir(img_dir)):
+            stem = os.path.splitext(f)[0]
+            src = source_stem(stem)
+            for line in open(os.path.join(data, split, "labels", stem + ".txt")):
+                v = line.split()
+                if len(v) == 5 and int(v[0]) == cls_id:
+                    out.append(dict(img=os.path.join(img_dir, f), group=photo_key(src) or src, split=split,
+                                    box=tuple(map(float, v[1:]))))
     return out
 
 
@@ -94,8 +120,8 @@ def main():
     os.makedirs(out, exist_ok=True)
 
     crop_rows, scene_rows = [], []
-    for s, label in SOURCES.items():
-        bs = boxes[s]
+    for s, bs in boxes.items():
+        label = SOURCES.get(s, s)
         if not bs:
             continue
         pick = sample_diverse(bs, args.n, rng)
@@ -110,9 +136,10 @@ def main():
         crop_rows += [(f"{label} ({len(bs)} boxes)", [crop(b, 150) for b in pick[:half]]),
                       (f"{label} (cont.)", [crop(b, 150) for b in pick[half:]])]
         scene_rows.append((label, [scene(b, 220) for b in pick[:6]]))
-    sheet(crop_rows, 150, f"'{args.cls}' crops (box + 50% context) by source").save(os.path.join(out, f"{args.cls}_crops.png"))
-    sheet(scene_rows, 220, f"'{args.cls}' boxes (red) in whole images by source").save(os.path.join(out, f"{args.cls}_scenes.png"))
-    print("wrote", os.path.join(out, f"{args.cls}_crops.png"), "and", os.path.join(out, f"{args.cls}_scenes.png"))
+    tag = args.cls if os.path.exists(os.path.join(args.data, "manifest.csv")) else f"{os.path.basename(os.path.normpath(args.data))}_{args.cls}"
+    sheet(crop_rows, 150, f"'{args.cls}' crops (box + 50% context) by source").save(os.path.join(out, f"{tag}_crops.png"))
+    sheet(scene_rows, 220, f"'{args.cls}' boxes (red) in whole images by source").save(os.path.join(out, f"{tag}_scenes.png"))
+    print("wrote", os.path.join(out, f"{tag}_crops.png"), "and", os.path.join(out, f"{tag}_scenes.png"))
 
 
 if __name__ == "__main__":

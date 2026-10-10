@@ -11,7 +11,7 @@ import os
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SOURCES = {"ws": "Wind Surface Defect", "wt": "WTBlade-Defect"}
+SOURCES = {"ws": "Wind Surface Defect", "wt": "WTBlade-Defect", "bj": "Beijing wind-turbine"}
 
 
 def main():

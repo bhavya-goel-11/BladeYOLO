@@ -63,3 +63,8 @@ WindSurface-Defect-v*.zip
 
 # Kaggle notebook logs
 download.txt
+
+# Candidate external datasets (Roboflow exports are named <project>.v<N>i.<format>)
+external/
+*.v*i.yolov*/
+*.v*i.yolov*.zip

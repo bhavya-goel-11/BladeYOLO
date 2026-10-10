@@ -35,6 +35,14 @@ CLASSES = ["leading_edge_erosion", "contamination", "crack", "pitting", "lightni
 # WTBlade-Defect ids: burn, crack, deformity, dirt, oil, peeling, rust. Rust, oil and deformity are hub/nacelle
 # hardware findings (bearing and bolt rust, oil leaks, seal deformation), not blade-surface damage: dropped.
 WT_TO_WS = {0: 4, 1: 2, 2: None, 3: 1, 4: None, 5: 5, 6: None}
+# Beijing wind-turbine (Roboflow beijing-university-9d61y/wind-turbine-ebl65), the collection Wind Surface Defect was
+# cut from: corrosion, craze, hide_craze, surface_eye, surface_injure, surface_oil, thunderstrike.
+BJ_TO_WS = {0: 0, 1: 2, 2: 2, 3: 3, 4: 5, 5: 1, 6: 4}
+SOURCES = {
+    "ws": "Wind Surface Defect (Liu & Liu, Appl. Soft Comput. 2025)",
+    "wt": "WTBlade-Defect / fengChe (Roboflow detr-swsa0/fengche-evxno, CC BY 4.0)",
+    "bj": "Beijing wind-turbine (Roboflow beijing-university-9d61y/wind-turbine-ebl65, CC BY 4.0)",
+}
 
 KNN = 10  # retrieval candidates per image
 MIN_INLIERS = 25  # ORB/RANSAC inliers for a verified content match (random pairs: >=25 in ~1%, mostly true dups)
@@ -88,39 +96,55 @@ def clean_boxes(boxes, img):
 
 def source_stem(stem):
     """Roboflow names exports `<source>_jpg.rf.<hash>`; every export of one source image shares <source>.
-    Some sources were exported twice with a format suffix (`<tile>_png_jpg` and `<tile>`); drop it."""
-    return re.sub(r"(_png)?_jpe?g$", "", re.split(r"\.rf\.", stem)[0], flags=re.IGNORECASE)
+    Sources re-exported with format suffixes (`<tile>_png_jpg`, `<tile>_JPG_jpg`) keep the same <source>."""
+    return re.sub(r"(_(png|jpe?g))+$", "", re.split(r"\.rf\.", stem)[0], flags=re.IGNORECASE).lstrip("_")
+
+
+TILE_NAMES = (
+    r"^(DJI_\d+)_\d+_\d+(?:_\d+)?$",  # DJI_<photo>_<row>_<col>[_<n>]
+    r"^(\d+_\d+)_\d+_\d+_\d+_\d+_\d+_(\d+)_(\d+)$",  # <set>_<photo>_<x>_<y>_<w>_<h>_<?>_<W>_<H>
+    r"^(\d+)_\d+_\d+_\d+_\d+_\d+_(\d+)_(\d+)$",  # <photo>_<x>_<y>_<w>_<h>_<?>_<W>_<H>
+)
 
 
 def photo_key(stem):
-    """Wind Surface tiles name their parent photo: `DJI_<photo>_<row>_<col>` or
-    `<photo>_<x>_<y>_<w>_<h>_<?>_<W>_<H>` (overlapping tiles of one large image)."""
-    m = re.match(r"^(DJI_\d+)_\d+_\d+$", stem) or re.match(r"^(\d+)_\d+_\d+_\d+_\d+_\d+_(\d+)_(\d+)$", stem)
-    return "ws-photo:" + "_".join(m.groups()) if m else None
+    """Parent photo of a tile, from tile names that encode it (overlapping crops of one large image)."""
+    for pattern in TILE_NAMES:
+        m = re.match(pattern, stem)
+        if m:
+            return "photo:" + "_".join(m.groups())
+    return None
 
 
-def collect(ws_root, wt_root):
+def dup_key(src, source):
+    """Wind Surface and Beijing share one image collection: their tile names identify the same source image across
+    datasets. Other names (plain numbers, Roboflow stems) are only meaningful within their own dataset."""
+    return ("tile:" if photo_key(source) else f"{src}:") + source
+
+
+def roboflow_split_dirs(root):
+    """(images dir, labels dir) for every split of a Roboflow-style export (<split>/images or <split>/<split>/images)."""
+    for split in sorted(os.listdir(root)):
+        for img_dir in (f"{root}/{split}/{split}/images", f"{root}/{split}/images"):
+            if os.path.isdir(img_dir):
+                yield img_dir, os.path.join(os.path.dirname(img_dir), "labels")
+                break
+
+
+def collect(ws_root, wt_root, bj_root=None):
     items, stats = [], collections.Counter()
-    for split in sorted(os.listdir(ws_root)):
-        img_dir = next((d for d in (f"{ws_root}/{split}/{split}/images", f"{ws_root}/{split}/images") if os.path.isdir(d)), None)
-        if not img_dir:
+    for src, root, class_map, twins in (("ws", ws_root, None, True), ("wt", wt_root, WT_TO_WS, False), ("bj", bj_root, BJ_TO_WS, False)):
+        if not root:
             continue
-        for f in sorted(os.listdir(img_dir)):
-            stem = os.path.splitext(f)[0]
-            source = source_stem(re.sub(r"_[01]$", "", stem))
-            items.append(dict(src="ws", path=os.path.join(img_dir, f), stem=stem, dup_key="ws:" + source,
-                              group_key=photo_key(source),
-                              boxes=read_boxes(os.path.join(os.path.dirname(img_dir), "labels", stem + ".txt"))))
-    for split in ("train", "valid", "test"):
-        img_dir = f"{wt_root}/{split}/images"
-        for f in sorted(os.listdir(img_dir)):
-            stem = os.path.splitext(f)[0]
-            raw = read_boxes(f"{wt_root}/{split}/labels/{stem}.txt")
-            boxes = read_boxes(f"{wt_root}/{split}/labels/{stem}.txt", WT_TO_WS)
-            stats["wt boxes dropped (rust/oil/deformity: not blade surface)"] += len(raw) - len(boxes)
-            items.append(dict(src="wt", path=os.path.join(img_dir, f), stem=stem,
-                              dup_key="wt:" + source_stem(stem),
-                              group_key=None, boxes=boxes))
+        for img_dir, lab_dir in roboflow_split_dirs(root):
+            for f in sorted(os.listdir(img_dir)):
+                stem = os.path.splitext(f)[0]
+                source = source_stem(re.sub(r"_[01]$", "", stem) if twins else stem)  # Wind Surface: <name>_0/_1 twins
+                raw = read_boxes(os.path.join(lab_dir, stem + ".txt"))
+                boxes = read_boxes(os.path.join(lab_dir, stem + ".txt"), class_map) if class_map else raw
+                stats[f"{src} boxes dropped (class not in taxonomy)"] += len(raw) - len(boxes)
+                items.append(dict(src=src, path=os.path.join(img_dir, f), stem=stem, dup_key=dup_key(src, source),
+                                  group_key=photo_key(source), boxes=boxes))
     return items, stats
 
 
@@ -286,6 +310,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--ws", default="WindSurface-Defect")
     ap.add_argument("--wt", default="WTBlade-Defect")
+    ap.add_argument("--bj", default="wind-turbine.v1i.yolov12", help="Beijing wind-turbine export ('' to skip)")
     ap.add_argument("--out", default="WindSurface-Defect-v3")
     ap.add_argument("--cache", default=".dataset_cache")
     ap.add_argument("--seed", type=int, default=0)
@@ -294,14 +319,14 @@ def main():
     os.makedirs(args.cache, exist_ok=True)
 
     print("1/6 collecting and cleaning labels")
-    items, stats = collect(args.ws, args.wt)
+    items, stats = collect(args.ws, args.wt, args.bj or None)
     with Pool(args.workers) as pool:
         for it, info in zip(items, pool.map(load_and_clean, items, chunksize=32)):
             it.update(info)
             stats[f"{it['src']} boxes dropped (degenerate/on padding)"] += info["dropped"]
     stats["images in"] = len(items)
-    stats["ws images in"] = sum(it["src"] == "ws" for it in items)
-    stats["wt images in"] = sum(it["src"] == "wt" for it in items)
+    for src in SOURCES:
+        stats[f"{src} images in"] = sum(it["src"] == src for it in items)
     stats["images dropped (no target-class boxes)"] = sum(not it["boxes"] for it in items)
     items = [it for it in items if it["boxes"]]
     paths = [it["path"] for it in items]
@@ -343,7 +368,7 @@ def main():
     for k, idx in by_key.items():
         for x, a in enumerate(idx):
             grp.union(idx[0], a)
-            if not k.startswith("ws-photo:"):  # tiles of one photo are distinct images, only grouped
+            if not k.startswith("photo:"):  # tiles of one photo are distinct images, only grouped
                 dup_edges.update((a, b) for b in idx[x + 1:])
     n_match = 0
     for (a, b), (inl, cov) in verified.items():
@@ -442,49 +467,60 @@ def main():
 
 def counts_by_split(rows, out):
     c = {s: np.zeros(len(CLASSES), int) for s in SPLITS}
+    groups = {s: [set() for _ in CLASSES] for s in SPLITS}  # independent split groups containing each class
     n = collections.Counter(r["split"] for r in rows)
     src = collections.Counter((r["split"], r["source"]) for r in rows)
     for r in rows:
         stem = os.path.splitext(os.path.basename(r["file"]))[0]
         for line in open(f"{out}/labels/{r['split']}/{stem}.txt"):
-            c[r["split"]][int(line.split()[0])] += 1
-    return c, n, src
+            k = int(line.split()[0])
+            c[r["split"]][k] += 1
+            groups[r["split"]][k].add(r["group"])
+    return c, n, src, groups
 
 
 def write_report(out, stats, rows, split_counts, leaks):
-    c, n, src = split_counts
+    c, n, src, groups = split_counts
     lines = [
         "# Wind Surface Defect v3 (merged, deduplicated, group-split, blade-surface taxonomy)",
         "",
-        "Built by `tools/build_dataset.py` from the Wind Surface Defect dataset (Liu & Liu, Appl. Soft Comput. 2025)",
-        "and the Roboflow WTBlade-Defect / fengChe dataset (CC BY 4.0, https://universe.roboflow.com/detr-swsa0/fengche-evxno).",
+        "Built by `tools/build_dataset.py` from:",
+        "",
+        *[f"- `{k}`: {v}" for k, v in SOURCES.items()],
         "",
         "Classes (industrial blade-inspection taxonomy):",
         "",
-        "| id | class | Wind Surface label | WTBlade label |",
-        "|---|---|---|---|",
-        "| 0 | leading_edge_erosion | corrosion | - |",
-        "| 1 | contamination | dirt | dirt |",
-        "| 2 | crack | hide_craze | crack |",
-        "| 3 | pitting | surface_eye | - |",
-        "| 4 | lightning_damage | thunderstrike | burn |",
-        "| 5 | coating_damage | - | peeling |",
+        "| id | class | Wind Surface (ws) | WTBlade (wt) | Beijing (bj) |",
+        "|---|---|---|---|---|",
+        "| 0 | leading_edge_erosion | corrosion | - | corrosion |",
+        "| 1 | contamination | dirt | dirt | surface_oil |",
+        "| 2 | crack | hide_craze | crack | craze, hide_craze |",
+        "| 3 | pitting | surface_eye | - | surface_eye |",
+        "| 4 | lightning_damage | thunderstrike | burn | thunderstrike |",
+        "| 5 | coating_damage | - | peeling | surface_injure |",
         "",
         "WTBlade rust, oil and deformity (hub/nacelle hardware, not blade surface) are dropped, and images left",
         "without boxes are removed. Ids 0-4 are the original Wind Surface classes (paper-comparable subset).",
         "",
         "## Split",
         "",
-        "| split | images | from Wind Surface | from WTBlade | " + " | ".join(CLASSES) + " |",
-        "|---" * (4 + len(CLASSES)) + "|",
+        "| split | images | " + " | ".join(f"from {k}" for k in SOURCES) + " | " + " | ".join(CLASSES) + " |",
+        "|---" * (2 + len(SOURCES) + len(CLASSES)) + "|",
     ]
     for s in SPLITS:
-        lines.append(f"| {s} | {n[s]} | {src[(s, 'ws')]} | {src[(s, 'wt')]} | " + " | ".join(str(v) for v in c[s]) + " |")
+        lines.append(f"| {s} | {n[s]} | " + " | ".join(str(src[(s, k)]) for k in SOURCES) + " | "
+                     + " | ".join(str(v) for v in c[s]) + " |")
     missing = [f"{CLASSES[k]} ({s})" for s in SPLITS for k in range(len(CLASSES)) if c[s][k] == 0]
     if missing:
         lines += ["", f"**Classes absent from a split: {', '.join(missing)}.** All boxes of such a class come from",
                   "images in a single split group (one photo/session), so it cannot appear on both sides without",
                   "leakage. Its AP is not measured on that split and does not enter that split's mAP."]
+    lines += ["", "## Independence per class", "",
+              "Boxes / independent split groups (a group is one photo, session or set of overlapping views). Few groups",
+              "means few independent examples, whatever the box count.", "",
+              "| class | " + " | ".join(SPLITS) + " |", "|---" * (1 + len(SPLITS)) + "|"]
+    for k, name in enumerate(CLASSES):
+        lines.append(f"| {name} | " + " | ".join(f"{c[s][k]} / {len(groups[s][k])}" for s in SPLITS) + " |")
     lines += ["", "## Build statistics", "", "| step | count |", "|---|---|"]
     lines += [f"| {k} | {v} |" for k, v in stats.items()]
     lines += ["", "`manifest.csv` maps every image to its source file and split group."]
