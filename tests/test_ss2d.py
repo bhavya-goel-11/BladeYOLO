@@ -36,6 +36,16 @@ def test_ss2d_shapes_and_grads():
     assert y.shape == x.shape and torch.isfinite(x.grad).all()
 
 
+def test_ss2d_half_precision_large_activations():
+    """Regression: the scan output exceeded fp16 range and was cast before the norm -> inf -> NaN under AMP."""
+    torch.manual_seed(0)
+    m = SS2D(256).half()
+    x = (torch.randn(1, 40, 40, 256) * 1000).half().requires_grad_()
+    y = m(x)
+    y.float().sum().backward()
+    assert torch.isfinite(y).all() and torch.isfinite(x.grad).all()
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

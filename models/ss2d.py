@@ -124,10 +124,14 @@ class SS2D(nn.Module):
                 Cs.float().flatten(0, 1),
                 self.chunk,
             ).view_as(xs)
-            y = y + xs * self.D[:, None, :, None]
+            y = y + xs * self.D[:, None, :, None].float()
             y = _merge_orders(y, H, W).flatten(-2)  # (B, H, W, d_inner)
+            # Normalise before leaving fp32: the scan sums over the whole sequence and can exceed the fp16
+            # range (65504); casting first turned it into inf -> NaN under AMP.
+            n = self.out_norm
+            y = F.layer_norm(y, n.normalized_shape, n.weight.float(), n.bias.float(), n.eps)
 
-        y = self.out_norm(y.to(z.dtype)) * F.silu(z)
+        y = y.to(z.dtype) * F.silu(z)
         return self.out_proj(y)
 
 
