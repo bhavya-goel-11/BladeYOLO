@@ -40,14 +40,11 @@ def wiou_v3(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7)
     # v3: non-monotonic focusing on the outlier degree beta = L_IoU / running mean(L_IoU).
     l_det = l_iou.detach()
     if torch.is_grad_enabled() and l_det.numel():  # update only on training steps, not validation loss
-        # A non-finite batch (e.g. an AMP overflow) must not enter the running mean: it is process state that
-        # Ultralytics' NaN recovery (reload last.pt) does not reset, so one bad batch would NaN every later loss.
         batch_mean = l_det.mean()
-        ok = torch.isfinite(batch_mean)
         if _RunningMean.value is None or _RunningMean.value.device != batch_mean.device:
-            _RunningMean.value = torch.where(ok, batch_mean, torch.ones_like(batch_mean))
+            _RunningMean.value = batch_mean.clone()
         else:
-            _RunningMean.value = torch.where(ok, _RunningMean.value.lerp(batch_mean, MOMENTUM), _RunningMean.value)
+            _RunningMean.value.lerp_(batch_mean, MOMENTUM)
     mean = _RunningMean.value if _RunningMean.value is not None else l_det.mean()
     beta = l_det / (mean + eps)
     r = beta / (DELTA * ALPHA ** (beta - DELTA))

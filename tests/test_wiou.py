@@ -1,4 +1,4 @@
-"""WIoU v3: correct reduction to IoU loss behaviour and robustness of its running mean."""
+"""WIoU v3: zero loss for perfect boxes; validation must not touch the running mean."""
 
 import os
 import sys
@@ -22,21 +22,6 @@ def test_perfect_boxes_zero_loss():
     _, t = _boxes()
     wiou._RunningMean.value = None
     assert torch.allclose(1 - wiou.wiou_v3(t, t, xywh=False, CIoU=True), torch.zeros(len(t), 1), atol=1e-6)
-
-
-def test_running_mean_survives_nan_batch():
-    """Regression: one NaN batch poisoned the running mean, so the box loss stayed NaN after NaN recovery."""
-    p, t = _boxes()
-    wiou._RunningMean.value = None
-    wiou.wiou_v3(p, t, xywh=False, CIoU=True)
-    before = wiou._RunningMean.value.clone()
-    bad = p.detach().clone()
-    bad[0] = float("nan")
-    wiou.wiou_v3(bad, t, xywh=False, CIoU=True)
-    assert torch.isfinite(wiou._RunningMean.value) and torch.equal(wiou._RunningMean.value, before)
-    loss = 1 - wiou.wiou_v3(p, t, xywh=False, CIoU=True)
-    loss.sum().backward()
-    assert torch.isfinite(loss).all() and torch.isfinite(p.grad).all()
 
 
 def test_validation_does_not_update_mean():

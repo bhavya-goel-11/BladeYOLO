@@ -20,6 +20,20 @@ DATA_CANDIDATES = [
     os.path.join(ROOT_DIR, "WindSurface-Defect-v2", "data.yaml"),
     "/kaggle/input/datasets/beegee11/wind-surface-defect/WindSurface-Defect-v2/data.yaml",
 ]
+# Optimisation and augmentation recipe, shared by every run (and tools/diagnose_nan.py).
+RECIPE = dict(
+    deterministic=False,  # deterministic mode slows training and deform_conv2d's backward has no deterministic kernel
+    optimizer="AdamW",
+    lr0=0.002,
+    lrf=0.001,
+    cos_lr=True,
+    warmup_epochs=5,
+    weight_decay=0.0005,
+    mosaic=1.0,
+    mixup=0.15,
+    flipud=0.0,
+    close_mosaic=10,
+)
 
 
 def parse_args():
@@ -87,19 +101,9 @@ def main():
         workers=args.workers,
         cache=False if args.cache == "false" else args.cache,
         amp=not args.no_amp,
-        deterministic=False,  # deterministic mode slows training and deform_conv2d's backward has no deterministic kernel
-        optimizer="AdamW",
-        lr0=0.002,
-        lrf=0.001,
-        cos_lr=True,
-        warmup_epochs=5,
-        weight_decay=0.0005,
-        mosaic=1.0,
-        mixup=0.15,
-        flipud=0.0,
-        close_mosaic=10,
         project=os.path.join(ROOT_DIR, "runs", "detect", "BladeYOLO_WindSurface"),
         name=args.name,
+        **RECIPE,
     )
     evaluate_test(model.trainer.best, data, args.batch, test_device)
 
