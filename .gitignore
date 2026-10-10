@@ -68,3 +68,8 @@ download.txt
 external/
 *.v*i.yolov*/
 *.v*i.yolov*.zip
+
+# Large reference datasets not used for detection
+Wind Turbine Blade Surfaces Dataset/
+WTBs2025/
+WTBs2025.zip

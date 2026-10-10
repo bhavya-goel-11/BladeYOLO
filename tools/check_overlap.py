@@ -33,6 +33,7 @@ def candidate_items(root):
     import yaml
 
     names = yaml.safe_load(open(os.path.join(root, "data.yaml")))["names"]
+    names = [names[k] for k in sorted(names)] if isinstance(names, dict) else names  # YOLO allows {id: name}
     items = []
     for split in sorted(os.listdir(root)):
         img_dir, lab_dir = os.path.join(root, split, "images"), os.path.join(root, split, "labels")

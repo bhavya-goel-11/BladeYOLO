@@ -38,10 +38,29 @@ WT_TO_WS = {0: 4, 1: 2, 2: None, 3: 1, 4: None, 5: 5, 6: None}
 # Beijing wind-turbine (Roboflow beijing-university-9d61y/wind-turbine-ebl65), the collection Wind Surface Defect was
 # cut from: corrosion, craze, hide_craze, surface_eye, surface_injure, surface_oil, thunderstrike.
 BJ_TO_WS = {0: 0, 1: 2, 2: 2, 3: 3, 4: 5, 5: 1, 6: 4}
+# WTBs2025 (provenance/licence unknown): oil leakage, paint cracks, localized damage, lightning strikes, surface stains,
+# erosion, coating detachment, protective film damage, pinholes. Whole-blade photos downscaled to 640 px, so many
+# defects are a few pixels wide: pinholes (median 1.5 px, one box per hole) and localized damage (5 px) are not
+# learnable and conflict with our region-level pitting boxes. Images containing them are dropped entirely, as they
+# would otherwise hold real, unlabelled blade defects. Oil leakage is a hub/bearing fault (as for WTBlade).
+WTBS_TO_WS = {0: None, 1: 2, 2: None, 3: 4, 4: 1, 5: 0, 6: 5, 7: 5, 8: None}
 SOURCES = {
     "ws": "Wind Surface Defect (Liu & Liu, Appl. Soft Comput. 2025)",
     "wt": "WTBlade-Defect / fengChe (Roboflow detr-swsa0/fengche-evxno, CC BY 4.0)",
     "bj": "Beijing wind-turbine (Roboflow beijing-university-9d61y/wind-turbine-ebl65, CC BY 4.0)",
+    "wtbs": "WTBs2025 (provenance and licence unknown; filtered, see below)",
+}
+# Per-source collection rules.
+#   class_map       source class id -> taxonomy id (None: box dropped; images stay, the class is not a blade defect)
+#   drop_image_ids  source classes that are blade defects we cannot use: images containing them are dropped
+#   min_box_px      images with any box whose shorter side is below this are dropped (unlearnable at 640 px)
+#   skip_name       file-name pattern of images to exclude (synthetic, GAN-generated images)
+#   twins           Wind Surface stores augmented twins as <name>_0 / <name>_1
+SOURCE_RULES = {
+    "ws": dict(class_map=None, twins=True),
+    "wt": dict(class_map=WT_TO_WS),
+    "bj": dict(class_map=BJ_TO_WS),
+    "wtbs": dict(class_map=WTBS_TO_WS, drop_image_ids={2, 8}, min_box_px=16, skip_name=r"GAN"),
 }
 
 KNN = 10  # retrieval candidates per image
@@ -131,29 +150,41 @@ def roboflow_split_dirs(root):
                 break
 
 
-def collect(ws_root, wt_root, bj_root=None):
+def collect(roots):
+    """roots: {source: dataset root}; sources without a root are skipped."""
     items, stats = [], collections.Counter()
-    for src, root, class_map, twins in (("ws", ws_root, None, True), ("wt", wt_root, WT_TO_WS, False), ("bj", bj_root, BJ_TO_WS, False)):
+    for src, root in roots.items():
         if not root:
             continue
+        rules = SOURCE_RULES[src]
         for img_dir, lab_dir in roboflow_split_dirs(root):
             for f in sorted(os.listdir(img_dir)):
                 stem = os.path.splitext(f)[0]
-                source = source_stem(re.sub(r"_[01]$", "", stem) if twins else stem)  # Wind Surface: <name>_0/_1 twins
+                if rules.get("skip_name") and re.search(rules["skip_name"], stem):
+                    stats[f"{src} images skipped (synthetic)"] += 1
+                    continue
                 raw = read_boxes(os.path.join(lab_dir, stem + ".txt"))
-                boxes = read_boxes(os.path.join(lab_dir, stem + ".txt"), class_map) if class_map else raw
+                if rules.get("drop_image_ids") and {b[0] for b in raw} & rules["drop_image_ids"]:
+                    stats[f"{src} images dropped (unusable blade-defect class present)"] += 1
+                    continue
+                source = source_stem(re.sub(r"_[01]$", "", stem) if rules.get("twins") else stem)
+                boxes = read_boxes(os.path.join(lab_dir, stem + ".txt"), rules["class_map"]) if rules["class_map"] else raw
                 stats[f"{src} boxes dropped (class not in taxonomy)"] += len(raw) - len(boxes)
                 items.append(dict(src=src, path=os.path.join(img_dir, f), stem=stem, dup_key=dup_key(src, source),
-                                  group_key=photo_key(source), boxes=boxes))
+                                  group_key=photo_key(source), boxes=boxes, min_box_px=rules.get("min_box_px", 0)))
     return items, stats
 
 
 def load_and_clean(item):
     img = cv2.imread(item["path"], cv2.IMREAD_COLOR)
     boxes, dropped = clean_boxes(item["boxes"], img)
+    H, W = img.shape[:2]
+    too_small = bool(item.get("min_box_px")) and any(min(w * W, h * H) < item["min_box_px"] for _, _, _, w, h in boxes)
+    if too_small:  # drop the whole image: removing only the small boxes would leave visible defects unlabelled
+        boxes = []
     small = cv2.resize(img, (64, 64), interpolation=cv2.INTER_AREA)
     return dict(boxes=boxes, dropped=dropped, md5=hashlib.md5(img.tobytes()).hexdigest(),
-                black=float((small.max(axis=2) < 10).mean()), size=img.shape[1::-1])
+                black=float((small.max(axis=2) < 10).mean()), size=img.shape[1::-1], too_small=too_small)
 
 
 # ------------------------------------------------------------------------------- content matching
@@ -311,6 +342,7 @@ def main():
     ap.add_argument("--ws", default="WindSurface-Defect")
     ap.add_argument("--wt", default="WTBlade-Defect")
     ap.add_argument("--bj", default="wind-turbine.v1i.yolov12", help="Beijing wind-turbine export ('' to skip)")
+    ap.add_argument("--wtbs", default="WTBs2025", help="WTBs2025 export ('' to skip)")
     ap.add_argument("--out", default="WindSurface-Defect-v3")
     ap.add_argument("--cache", default=".dataset_cache")
     ap.add_argument("--seed", type=int, default=0)
@@ -319,11 +351,12 @@ def main():
     os.makedirs(args.cache, exist_ok=True)
 
     print("1/6 collecting and cleaning labels")
-    items, stats = collect(args.ws, args.wt, args.bj or None)
+    items, stats = collect({"ws": args.ws, "wt": args.wt, "bj": args.bj, "wtbs": args.wtbs})
     with Pool(args.workers) as pool:
         for it, info in zip(items, pool.map(load_and_clean, items, chunksize=32)):
             it.update(info)
             stats[f"{it['src']} boxes dropped (degenerate/on padding)"] += info["dropped"]
+            stats[f"{it['src']} images dropped (a box below {it['min_box_px']} px)"] += info["too_small"]
     stats["images in"] = len(items)
     for src in SOURCES:
         stats[f"{src} images in"] = sum(it["src"] == src for it in items)
@@ -490,17 +523,19 @@ def write_report(out, stats, rows, split_counts, leaks):
         "",
         "Classes (industrial blade-inspection taxonomy):",
         "",
-        "| id | class | Wind Surface (ws) | WTBlade (wt) | Beijing (bj) |",
-        "|---|---|---|---|---|",
-        "| 0 | leading_edge_erosion | corrosion | - | corrosion |",
-        "| 1 | contamination | dirt | dirt | surface_oil |",
-        "| 2 | crack | hide_craze | crack | craze, hide_craze |",
-        "| 3 | pitting | surface_eye | - | surface_eye |",
-        "| 4 | lightning_damage | thunderstrike | burn | thunderstrike |",
-        "| 5 | coating_damage | - | peeling | surface_injure |",
+        "| id | class | Wind Surface (ws) | WTBlade (wt) | Beijing (bj) | WTBs2025 (wtbs) |",
+        "|---|---|---|---|---|---|",
+        "| 0 | leading_edge_erosion | corrosion | - | corrosion | erosion |",
+        "| 1 | contamination | dirt | dirt | surface_oil | surface stains |",
+        "| 2 | crack | hide_craze | crack | craze, hide_craze | paint cracks |",
+        "| 3 | pitting | surface_eye | - | surface_eye | - |",
+        "| 4 | lightning_damage | thunderstrike | burn | thunderstrike | lightning strikes |",
+        "| 5 | coating_damage | - | peeling | surface_injure | coating detachment, protective film damage |",
         "",
-        "WTBlade rust, oil and deformity (hub/nacelle hardware, not blade surface) are dropped, and images left",
-        "without boxes are removed. Ids 0-4 are the original Wind Surface classes (paper-comparable subset).",
+        "WTBlade rust, oil and deformity and WTBs2025 oil leakage (hub/nacelle hardware, not blade surface) are dropped;",
+        "images left without boxes are removed. WTBs2025 rules: GAN-generated images excluded; images containing",
+        "pinholes or localized damage (1.5 px / 5 px median boxes) dropped entirely; images with any box under 16 px",
+        "dropped entirely. Ids 0-4 are the original Wind Surface classes (paper-comparable subset).",
         "",
         "## Split",
         "",
