@@ -40,7 +40,7 @@ BladeYOLO: Wind Turbine Blade Defect Detection with Limited Annotations and Weak
    - DINOv3 ViT-S/16 weights: locally `BladeYOLO/dinov3_vits16_pretrain_lvd1689m-08c60483.pth`; on Kaggle
      the `shamskarib/dinov3-vits` model input is used in place. Override with `DINOV3_WEIGHTS=/path/to/file.pth`.
 2. `pip install -r requirements.txt`
-3. `python train.py`. This uses both GPUs, AMP, a total batch of 16 and 300 epochs. Run `python train.py -h` to see all options.
+3. `python train.py`. This uses both GPUs, AMP, a total batch of 16 and 150 epochs. Run `python train.py -h` to see all options.
 
 Kaggle sessions stop after 12 h. To continue an interrupted run, attach its `runs/` folder and run
 `python train.py --resume <run>/weights/last.pt`.

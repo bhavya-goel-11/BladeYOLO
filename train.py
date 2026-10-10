@@ -28,10 +28,10 @@ RECIPE = dict(
     lrf=0.001,
     cos_lr=True,
     warmup_epochs=5,
-    weight_decay=0.0005,
+    weight_decay=0.01,  # AdamW decay; v2 runs overfit after ~100 epochs with 0.0005
     mosaic=1.0,
     mixup=0.15,
-    flipud=0.0,
+    flipud=0.5,  # drone views of blades have no canonical "up"
     close_mosaic=10,
 )
 
@@ -42,7 +42,8 @@ def parse_args():
     p.add_argument("--data", default=None, help="dataset YAML (default: WindSurface-Defect-v3, local or Kaggle input)")
     p.add_argument("--name", default="bladeyolo_l", help="run name under runs/detect/BladeYOLO_WindSurface")
     p.add_argument("--resume", default=None, help="last.pt of an interrupted run to resume")
-    p.add_argument("--epochs", type=int, default=300)
+    p.add_argument("--epochs", type=int, default=150, help="v2 runs peaked at epochs ~90-170")
+    p.add_argument("--seed", type=int, default=0, help="change for repeat runs to measure run-to-run variance")
     p.add_argument("--imgsz", type=int, default=640)
     p.add_argument("--batch", type=int, default=16, help="total batch size across GPUs")
     p.add_argument("--workers", type=int, default=4, help="dataloader workers per GPU")
@@ -103,6 +104,7 @@ def main():
         amp=not args.no_amp,
         project=os.path.join(ROOT_DIR, "runs", "detect", "BladeYOLO_WindSurface"),
         name=args.name,
+        seed=args.seed,
         **RECIPE,
     )
     evaluate_test(model.trainer.best, data, args.batch, test_device)
