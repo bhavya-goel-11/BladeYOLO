@@ -25,7 +25,11 @@ DATA_CANDIDATES = [
 RECIPE = dict(
     deterministic=False,  # deterministic mode slows training and deform_conv2d's backward has no deterministic kernel
     optimizer="AdamW",
-    lr0=0.002,
+    # v1/v3 from-scratch runs used lr0=0.002 and Ultralytics' default warmup_bias_lr=0.1. With pretrained weights
+    # (BladeYOLO-v2, yolo12l.pt) that disrupted the detector during warmup and diverged to NaN at epoch 4; 0.1 is an
+    # SGD value (Ultralytics' own AdamW setting is 0.0 and lr0 ~0.001 for 6 classes).
+    lr0=0.001,
+    warmup_bias_lr=0.0,
     lrf=0.001,
     cos_lr=True,
     warmup_epochs=5,

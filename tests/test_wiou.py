@@ -34,6 +34,15 @@ def test_validation_does_not_update_mean():
     assert torch.equal(wiou._RunningMean.value, before)
 
 
+def test_nan_batch_does_not_poison_mean():
+    p, t = _boxes()
+    wiou._RunningMean.value = None
+    wiou.wiou_v3(p, t, xywh=False, CIoU=True)
+    wiou.wiou_v3(torch.full_like(p, float("nan")).requires_grad_(), t, xywh=False, CIoU=True)
+    assert wiou._RunningMean.value.isfinite()
+    assert wiou.wiou_v3(p, t, xywh=False, CIoU=True).isfinite().all()
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

@@ -39,8 +39,11 @@ def wiou_v3(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7)
 
     # v3: non-monotonic focusing on the outlier degree beta = L_IoU / running mean(L_IoU).
     l_det = l_iou.detach()
-    if torch.is_grad_enabled() and l_det.numel():  # update only on training steps, not validation loss
-        batch_mean = l_det.mean()
+    finite = l_det[l_det.isfinite()]
+    # Update only on training steps (not validation loss) and only from finite values: the mean outlives the step
+    # (and Ultralytics' NaN recovery, which reloads the weights only), so one NaN would poison every later step.
+    if torch.is_grad_enabled() and finite.numel():
+        batch_mean = finite.mean()
         if _RunningMean.value is None or _RunningMean.value.device != batch_mean.device:
             _RunningMean.value = batch_mean.clone()
         else:
