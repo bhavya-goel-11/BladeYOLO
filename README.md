@@ -40,10 +40,22 @@ BladeYOLO: Wind Turbine Blade Defect Detection with Limited Annotations and Weak
    - DINOv3 ViT-S/16 weights: locally `BladeYOLO/dinov3_vits16_pretrain_lvd1689m-08c60483.pth`; on Kaggle
      the `shamskarib/dinov3-vits` model input is used in place. Override with `DINOV3_WEIGHTS=/path/to/file.pth`.
 2. `pip install -r requirements.txt`
-3. `python train.py`. This uses both GPUs, AMP, a total batch of 16 and 150 epochs. Run `python train.py -h` to see all options.
+3. Train (both GPUs, AMP, total batch 16; `python train.py -h` lists all options):
+   - BladeYOLO-v2-L: `python train.py --model bladeyolo2-l.yaml --name bladeyolo2_v3 --epochs 100`
+   - stock baseline under the same pipeline: `python train.py --model yolo12l.pt --name yolo12l_v3_r90 --box-loss ciou --epochs 100`
+   - BladeYOLO-L (v1, wavelet backbone trained from scratch): `python train.py`
+
+   Test metrics are written to `<run>/test/metrics.json`, with test-time augmentation to `metrics_tta.json`.
+
+BladeYOLO-v2 (`bladeyolo2-l.yaml`) is the COCO-pretrained YOLOv12-L (backbone, neck and head; `yolo12l.pt` is downloaded
+automatically) with BladeYOLO's components added as zero-initialised residual branches, so training starts exactly
+from the pretrained detector: frozen DINOv3 semantics fused into P3/P4/P5, deformable-conv refinement of the P3/P4
+outputs and selective-scan refinement of the P5 output. Training adds random quarter turns (`--rot90`, default 0.5),
+which with the flips cover all 8 orientations without loosening boxes.
 
 Kaggle sessions stop after 12 h. To continue an interrupted run, attach its `runs/` folder and run
-`python train.py --resume <run>/weights/last.pt`.
+`python train.py --resume <run>/weights/last.pt` with the same `--box-loss` and `--rot90` as the original run.
 
-To train a stock baseline under the same pipeline:
-`python train.py --model yolo12l.pt --name yolo12l_baseline --box-loss ciou` (COCO-pretrained).
+Error analysis and label review: `tools/error_analysis.py` (per class, size, error type; galleries),
+`tools/review_labels.py` (local review page for model-flagged label candidates) and `tools/apply_review.py`
+(applies the decisions as a new dataset version).

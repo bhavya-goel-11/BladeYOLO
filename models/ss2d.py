@@ -164,3 +164,15 @@ class C2fSS2D(nn.Module):
         y = list(self.cv1(x).chunk(2, 1))
         y.extend(m(y[-1]) for m in self.m)
         return self.cv2(torch.cat(y, 1))
+
+
+class C2fSS2DRes(C2fSS2D):
+    """x + C2fSS2D(x), with the output BN scale at zero so the block starts as the identity."""
+
+    def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):
+        assert c1 == c2, "residual block needs c1 == c2"
+        super().__init__(c1, c2, n, shortcut, g, e)
+        nn.init.zeros_(self.cv2.bn.weight)
+
+    def forward(self, x):
+        return x + super().forward(x)

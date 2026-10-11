@@ -52,6 +52,64 @@ def test_forward_loss_backward():
         assert m(torch.rand(1, 3, 192, 320))[0].shape[1] == 4 + 5
 
 
+def test_v2_starts_as_pretrained_yolo12l():
+    """BladeYOLO-v2 at initialisation is exactly the COCO-pretrained YOLOv12-L: every pretrained tensor is loaded and
+    the DINOv3 fusion and the deformable / selective-scan refinements are zero-initialised residuals, so the neck
+    outputs and the box branch of the head equal those of the stock checkpoint. Then: DINOv3 stays frozen, every
+    added branch receives gradient, and the fused (inference) forward works."""
+    _fake_dinov3_weights()
+    import models  # noqa: F401
+    from ultralytics.cfg import get_cfg
+    from ultralytics.nn.tasks import load_checkpoint
+
+    from models.trainer import BladeTrainer
+
+    trainer = BladeTrainer.__new__(BladeTrainer)  # get_model only needs args/data
+    trainer.args, trainer.data = get_cfg(), {"nc": 6, "channels": 3, "names": {i: str(i) for i in range(6)}}
+    m = trainer.get_model(cfg=os.path.join(ROOT, "bladeyolo2-l.yaml"), verbose=False)
+    ref, _ = load_checkpoint(os.path.join(ROOT, "yolo12l.pt"))
+    ref, m = ref.float().eval(), m.eval()
+    x = torch.rand(1, 3, 256, 320)
+
+    def outputs(model):
+        y = []
+        for layer in model.model[:-1]:  # everything but Detect
+            xx = (y[layer.f] if isinstance(layer.f, int) else [y[j] for j in layer.f]) if layer.f != -1 else (y[-1] if y else x)
+            y.append(layer(xx))
+        return y
+
+    with torch.no_grad():
+        a, b = outputs(ref), outputs(m)
+        for i, j in ((4, 9), (6, 10), (8, 11), (14, 17), (17, 20), (20, 23), (14, 24), (17, 25), (20, 26)):
+            assert torch.allclose(a[i], b[j], atol=1e-4), f"layer {j} differs from YOLOv12-L layer {i}"
+        for k in range(3):  # box-regression branch of the head
+            assert torch.allclose(ref.model[-1].cv2[k](a[(14, 17, 20)[k]]), m.model[-1].cv2[k](b[24 + k]), atol=1e-4)
+
+    m.args = get_cfg()
+    m.train()
+    batch = {
+        "img": torch.rand(2, 3, 320, 256),
+        "batch_idx": torch.tensor([0.0, 1.0]),
+        "cls": torch.tensor([[0.0], [5.0]]),
+        "bboxes": torch.tensor([[0.5, 0.5, 0.2, 0.1], [0.3, 0.6, 0.05, 0.3]]),
+    }
+    loss, _ = m.loss(batch)
+    loss.sum().backward()
+    assert torch.isfinite(loss).all()
+    assert all(p.grad is None for p in m.model[0].dino.parameters())
+    for i in (9, 10, 11):
+        assert m.model[i].out.weight.grad.abs().sum() > 0, f"DINOv3 fusion {i} gets no gradient"
+    for i in (24, 25, 26):
+        assert m.model[i].cv2.bn.weight.grad.abs().sum() > 0, f"refinement {i} gets no gradient"
+    m.eval()
+    with torch.no_grad():
+        raw = m(torch.rand(1, 3, 192, 320))[0]
+        m.fuse(verbose=False)  # the summary profiles FLOPs with thop, which crashes deform_conv2d on some CPU builds
+        assert m(torch.rand(1, 3, 192, 320))[0].shape == raw.shape
+
+
 if __name__ == "__main__":
     test_forward_loss_backward()
     print("ok test_forward_loss_backward")
+    test_v2_starts_as_pretrained_yolo12l()
+    print("ok test_v2_starts_as_pretrained_yolo12l")

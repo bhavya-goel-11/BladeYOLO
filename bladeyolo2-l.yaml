@@ -1,0 +1,53 @@
+# BladeYOLO-v2-L: COCO-pretrained YOLOv12-L (backbone, neck and head) with BladeYOLO's additions as zero-initialised
+# residual branches, so training starts exactly from the pretrained detector and learns how much of each to use:
+#   - frozen DINOv3 ViT-S/16 semantics fused into backbone P3/P4/P5 (global, domain-general features)
+#   - deformable-conv refinement of the P3/P4 outputs (fine, irregular defect contours: cracks, edges)
+#   - selective-scan (Mamba) refinement of the P5 output (global context over the whole blade)
+# Custom layers are registered by `import models`. BladeTrainer loads `pretrained.weights` into the layers given by
+# `pretrained.map`: [first, last, offset] = checkpoint layers first..last go to layer index + offset here.
+
+nc: 6 # overridden by the dataset YAML
+pretrained:
+  weights: yolo12l.pt
+  map: [[0, 8, 0], [9, 20, 3], [21, 21, 6]]
+scales:
+  # [depth, width, max_channels] (YOLOv12-L, so every pretrained layer matches its checkpoint)
+  l: [1.00, 1.00, 512]
+
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, DinoConv, [64, 3, 2]] # 0-P1/2 (also runs DINOv3 on the image)
+  - [-1, 1, Conv, [128, 3, 2]] # 1-P2/4
+  - [-1, 2, C3k2, [256, False, 0.25]]
+  - [-1, 1, Conv, [256, 3, 2]] # 3-P3/8
+  - [-1, 2, C3k2, [512, False, 0.25]] # 4
+  - [-1, 1, Conv, [512, 3, 2]] # 5-P4/16
+  - [-1, 4, A2C2f, [512, True, 4]] # 6
+  - [-1, 1, Conv, [1024, 3, 2]] # 7-P5/32
+  - [-1, 4, A2C2f, [1024, True, 1]] # 8
+  - [[0, 4], 1, DinoFuse, [0, 512]] # 9: P3 + DINOv3 block 4
+  - [[0, 6], 1, DinoFuse, [1, 512]] # 10: P4 + DINOv3 block 8
+  - [[0, 8], 1, DinoFuse, [2, 512]] # 11: P5 + DINOv3 block 12
+
+head: # YOLOv12-L head (checkpoint layers 9-21), reading the fused levels
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 12
+  - [[-1, 10], 1, Concat, [1]] # 13: cat P4
+  - [-1, 2, A2C2f, [512, False, -1]] # 14
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 15
+  - [[-1, 9], 1, Concat, [1]] # 16: cat P3
+  - [-1, 2, A2C2f, [256, False, -1]] # 17
+
+  - [-1, 1, Conv, [256, 3, 2]] # 18
+  - [[-1, 14], 1, Concat, [1]] # 19: cat head P4
+  - [-1, 2, A2C2f, [512, False, -1]] # 20
+
+  - [-1, 1, Conv, [512, 3, 2]] # 21
+  - [[-1, 11], 1, Concat, [1]] # 22: cat P5
+  - [-1, 2, C3k2, [1024, True]] # 23
+
+  - [17, 1, C2fMorphRes, [256]] # 24: P3 out + deformable refinement
+  - [20, 1, C2fMorphRes, [512]] # 25: P4 out + deformable refinement
+  - [23, 1, C2fSS2DRes, [1024]] # 26: P5 out + selective-scan refinement
+
+  - [[24, 25, 26], 1, Detect, [nc]] # 27
