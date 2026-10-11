@@ -5,6 +5,8 @@ import torch.nn as nn
 from torchvision.ops import deform_conv2d
 from ultralytics.nn.modules.conv import Conv
 
+from .precision import FP32Block
+
 
 class DeformConv(nn.Module):
     """Modulated deformable convolution (DCNv2) + BN + SiLU.
@@ -60,12 +62,7 @@ class C2fMorph(nn.Module):
         return self.cv2(torch.cat(y, 1))
 
 
-class C2fMorphRes(C2fMorph):
-    """x + C2fMorph(x), with the output BN scale at zero so the block starts as the identity.
-
-    Used to refine a pretrained neck output without disturbing it at the start of training.
-    """
-
+class _C2fMorphRes(C2fMorph):
     def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):
         assert c1 == c2, "residual block needs c1 == c2"
         super().__init__(c1, c2, n, shortcut, g, e)
@@ -73,3 +70,11 @@ class C2fMorphRes(C2fMorph):
 
     def forward(self, x):
         return x + super().forward(x)
+
+
+class C2fMorphRes(FP32Block, _C2fMorphRes):
+    """x + C2fMorph(x), with the output BN scale at zero so the block starts as the identity.
+
+    Used to refine a pretrained neck output without disturbing it at the start of training. Runs in fp32 for the
+    same reason as C2fSS2DRes: its output conv feeds a BatchNorm, so its input scale is unbounded.
+    """

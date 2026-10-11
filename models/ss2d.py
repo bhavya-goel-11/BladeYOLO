@@ -15,6 +15,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from ultralytics.nn.modules.conv import Conv
 
+from .precision import FP32Block
+
 
 def ssd_scan(x, a, B, C, chunk=64):
     """Selective scan h_t = exp(a_t) h_{t-1} + B_t x_t,  y_t = C_t h_t  (Mamba-2 SSD, chunked).
@@ -166,9 +168,7 @@ class C2fSS2D(nn.Module):
         return self.cv2(torch.cat(y, 1))
 
 
-class C2fSS2DRes(C2fSS2D):
-    """x + C2fSS2D(x), with the output BN scale at zero so the block starts as the identity."""
-
+class _C2fSS2DRes(C2fSS2D):
     def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):
         assert c1 == c2, "residual block needs c1 == c2"
         super().__init__(c1, c2, n, shortcut, g, e)
@@ -176,3 +176,8 @@ class C2fSS2DRes(C2fSS2D):
 
     def forward(self, x):
         return x + super().forward(x)
+
+
+class C2fSS2DRes(FP32Block, _C2fSS2DRes):
+    """x + C2fSS2D(x), with the output BN scale at zero so the block starts as the identity. Runs in fp32: the
+    output conv feeds a BatchNorm, so nothing bounds the scale entering it, and in fp16 it overflowed (NaN)."""
