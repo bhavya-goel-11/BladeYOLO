@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Label Review</title>
+<style>
+  :root { --bg: #f6f6f4; --fg: #1d1d1b; --muted: #6b6b66; --card: #fff; --line: #ddd; --accent: #2563eb; --ok: #15803d; --bad: #b91c1c; --warn: #a16207; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #161615; --fg: #ececea; --muted: #a3a39d; --card: #222220; --line: #3a3a37; --accent: #60a5fa; --ok: #4ade80; --bad: #f87171; --warn: #facc15; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 1; }
+  header h1 { font-size: 16px; margin: 0; }
+  .bar { flex: 1; min-width: 120px; height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
+  .bar > div { height: 100%; background: var(--accent); }
+  select, button { font: inherit; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--fg); cursor: pointer; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  main { display: grid; grid-template-columns: 1fr 340px; gap: 16px; padding: 16px; max-width: 1500px; margin: auto; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .imgs { display: flex; gap: 12px; flex-wrap: wrap; }
+  .imgs figure { margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+  .imgs img { display: block; max-width: 100%; height: auto; }
+  .imgs figcaption { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+  .q { font-size: 15px; font-weight: 600; margin: 0 0 6px; }
+  .meta { color: var(--muted); margin-bottom: 12px; }
+  .opts { display: grid; gap: 6px; }
+  .opts button { text-align: left; display: flex; justify-content: space-between; }
+  .opts button kbd { color: var(--muted); }
+  .opts button.sel { outline: 2px solid var(--accent); }
+  .tag { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 12px; border: 1px solid var(--line); }
+  .decided { color: var(--ok); font-weight: 600; }
+  .help { color: var(--muted); font-size: 12px; margin-top: 12px; }
+  textarea { width: 100%; font: inherit; margin-top: 8px; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Label review</h1>
+  <select id="filter">
+    <option value="all">All items</option>
+    <option value="unlabelled">Unlabelled candidates</option>
+    <option value="missed">Labels nobody found</option>
+    <option value="class">Class disagreements</option>
+    <option value="todo">Not yet decided</option>
+  </select>
+  <div class="bar"><div id="prog"></div></div>
+  <span id="count"></span>
+  <button id="prev">← Prev</button><button id="next">Next →</button>
+  <button class="primary" id="export">Export decisions</button>
+</header>
+<main>
+  <div class="imgs">
+    <figure><img id="crop" alt="crop around the box"><figcaption>Close-up (yellow = item under review)</figcaption></figure>
+    <figure><img id="full" alt="whole image"><figcaption>Whole image (yellow = item, green = other labels)</figcaption></figure>
+  </div>
+  <div class="panel">
+    <p class="q" id="question"></p>
+    <div class="meta" id="meta"></div>
+    <div class="opts" id="opts"></div>
+    <textarea id="note" rows="2" placeholder="Optional note"></textarea>
+    <div id="status" class="help"></div>
+    <div class="help">Keys: 1–6 damage of that class · <b>d</b> damage, class unclear · <b>0</b> no damage · <b>n</b> not on a blade · <b>k</b> keep label as is · <b>u</b> unsure · ←/→ navigate. Choosing advances automatically. Decisions autosave in this browser; Export writes the JSON file.</div>
+  </div>
+</main>
+<script>
+const DATA = /*ITEMS*/null;
+const KEY = "bladeyolo-review-" + DATA.split;
+let dec = {};
+try { dec = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) {}
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(dec)); } catch (e) {} };
+const N = DATA.names;
+let view = [], pos = 0;
+
+const QUESTIONS = {
+  unlabelled: it => `Model predicted <b>${N[it.cls]}</b> (conf ${it.conf}) where nothing is labelled. Is there damage in the yellow box?`,
+  missed: it => `Labelled <b>${N[it.cls]}</b>, but no model found anything here. Is there damage in the yellow box?`,
+  class: it => `Labelled <b>${N[it.cls]}</b>, a model says <b>${N[it.pred_cls]}</b>. Which is it?`,
+};
+
+function options(it) {
+  const o = N.map((n, i) => ({ v: "cls:" + i, label: "Damage: " + n + (i === it.cls && it.kind !== "unlabelled" ? " (as labelled)" : ""), key: String(i + 1) }));
+  o.push({ v: "damage", label: "Damage, class unclear", key: "d" });
+  o.push({ v: "none", label: it.kind === "unlabelled" ? "No damage (false alarm)" : "No damage (remove label)", key: "0" });
+  o.push({ v: "off_blade", label: "Not on a blade (hub, nacelle, tower, ground)", key: "n" });
+  if (it.kind !== "unlabelled") o.unshift({ v: "keep", label: "Keep label as is", key: "k" });
+  o.push({ v: "unsure", label: "Unsure", key: "u" });
+  return o;
+}
+
+function refilter() {
+  const f = document.getElementById("filter").value;
+  view = DATA.items.filter(it => f === "all" || (f === "todo" ? !dec[it.id] : it.kind === f));
+  pos = Math.min(pos, Math.max(0, view.length - 1));
+  show();
+}
+
+function show() {
+  const done = DATA.items.filter(it => dec[it.id]).length;
+  document.getElementById("prog").style.width = (100 * done / DATA.items.length) + "%";
+  document.getElementById("count").textContent = `${done}/${DATA.items.length} decided · item ${view.length ? pos + 1 : 0}/${view.length}`;
+  document.getElementById("title").textContent = `Label review — ${DATA.split}`;
+  if (!view.length) { document.getElementById("question").textContent = "Nothing in this filter."; document.getElementById("opts").innerHTML = ""; return; }
+  const it = view[pos];
+  document.getElementById("crop").src = it.crop;
+  document.getElementById("full").src = it.full;
+  document.getElementById("question").innerHTML = QUESTIONS[it.kind](it);
+  document.getElementById("meta").innerHTML = `<span class="tag">${it.kind}</span> <span class="tag">${it.source}</span> <span class="tag">${it.size} px</span> <span class="tag">#${it.id}</span><br><small>${it.image}</small>`;
+  const d = dec[it.id];
+  document.getElementById("opts").innerHTML = options(it).map(o =>
+    `<button data-v="${o.v}" class="${d && d.decision === o.v ? "sel" : ""}"><span>${o.label}</span><kbd>${o.key}</kbd></button>`).join("");
+  document.querySelectorAll("#opts button").forEach(b => b.onclick = () => choose(b.dataset.v));
+  document.getElementById("note").value = d && d.note || "";
+  document.getElementById("status").innerHTML = d ? `<span class="decided">Decided: ${d.decision}</span>` : "Not decided yet";
+}
+
+function choose(v) {
+  const it = view[pos];
+  dec[it.id] = { decision: v, note: document.getElementById("note").value || undefined };
+  save();
+  if (document.getElementById("filter").value === "todo") { refilter(); } else { pos = Math.min(pos + 1, view.length - 1); show(); }
+}
+
+document.getElementById("note").addEventListener("change", e => { const it = view[pos]; if (dec[it.id]) { dec[it.id].note = e.target.value || undefined; save(); } });
+document.getElementById("filter").onchange = () => { pos = 0; refilter(); };
+document.getElementById("prev").onclick = () => { pos = Math.max(0, pos - 1); show(); };
+document.getElementById("next").onclick = () => { pos = Math.min(view.length - 1, pos + 1); show(); };
+document.getElementById("export").onclick = () => {
+  const out = { split: DATA.split, names: N, decisions: DATA.items.filter(it => dec[it.id]).map(it => ({ ...it, crop: undefined, full: undefined, ...dec[it.id] })) };
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 1)], { type: "application/json" }));
+  a.download = `review_${DATA.split}.json`;
+  a.click();
+};
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "TEXTAREA" || !view.length) return;
+  if (e.key === "ArrowLeft") { pos = Math.max(0, pos - 1); show(); return; }
+  if (e.key === "ArrowRight") { pos = Math.min(view.length - 1, pos + 1); show(); return; }
+  const o = options(view[pos]).find(o => o.key === e.key.toLowerCase());
+  if (o) choose(o.v);
+});
+refilter();
+</script>
+</body>
+</html>

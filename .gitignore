@@ -56,8 +56,7 @@ wtconv_explanation.md
 *.png
 
 # Built datasets and caches
-WindSurface-Defect-v2/
-WindSurface-Defect-v3/
+WindSurface-Defect-v*/
 .dataset_cache/
 WindSurface-Defect-v*.zip
 
