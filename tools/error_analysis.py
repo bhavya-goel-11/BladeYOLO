@@ -50,6 +50,19 @@ def iou_matrix(a, b):
     return inter / (area(a)[:, None] + area(b)[None] - inter + 1e-9)
 
 
+def image_key(data, path):
+    """Canonical key of a dataset image: <data>/images/<split>/<file>, normalised for this OS. Works for paths written
+    on another OS too (cached predictions from Linux used on Windows and vice versa)."""
+    p = path.replace("\\", "/")
+    return os.path.normpath(os.path.join(data, p[p.rindex("images/"):]))
+
+
+def device():
+    import torch
+
+    return "0" if torch.cuda.is_available() else "cpu"
+
+
 def load_split(data, split, names):
     """{image path: dict(gt=(n,5) [cls, x1, y1, x2, y2] in 640-input pixels, scale)}"""
     import csv
@@ -64,7 +77,7 @@ def load_split(data, split, names):
         rows = [list(map(float, l.split())) for l in open(os.path.join(data, "labels", split, stem + ".txt")) if l.strip()]
         g = np.array([[c, (x - w / 2) * W * s, (y - h / 2) * H * s, (x + w / 2) * W * s, (y + h / 2) * H * s]
                       for c, x, y, w, h in rows]).reshape(-1, 5)
-        out[os.path.join(data, r["file"])] = dict(gt=g, scale=s, source=r["source"])
+        out[image_key(data, r["file"])] = dict(gt=g, scale=s, source=r["source"])
     return out
 
 
@@ -89,7 +102,7 @@ def predict(run, data, split, imgs, batch):
     preds, files = {}, sorted(imgs)
     for i in range(0, len(files), batch):
         for f, r in zip(files[i:i + batch], model.predict(files[i:i + batch], imgsz=run_imgsz(run), conf=0.001, iou=0.7, max_det=300,
-                                                          verbose=False, device="cpu")):
+                                                          verbose=False, device=device())):
             b = r.boxes
             s = imgs[f]["scale"]
             preds[f] = np.concatenate([b.xyxy.numpy() * s, b.conf.numpy()[:, None], b.cls.numpy()[:, None]], 1).round(3).tolist()
@@ -105,7 +118,7 @@ def drop_ignored(imgs, preds, data):
     path = os.path.join(data, "ignore_regions.json")
     if not os.path.exists(path):
         return preds, 0
-    ign = {os.path.join(data, k): np.array([r[:4] for r in v]) for k, v in json.load(open(path)).items()}
+    ign = {image_key(data, k): np.array([r[:4] for r in v]) for k, v in json.load(open(path)).items()}
     out, n = {}, 0
     for f, P in preds.items():
         p = np.array(P).reshape(-1, 6)
@@ -303,7 +316,7 @@ def main():
     nc = len(names)
     splits = {s: load_split(data, s, names) for s in ("val", "test")}
     # predictions depend only on the images, so a relabelled copy of the dataset (v3.1) reuses them
-    preds = {(r, s): {os.path.join(data, k[k.rindex("images" + os.sep):]): v
+    preds = {(r, s): {image_key(data, k): v
                       for k, v in predict(os.path.abspath(r), data, s, splits[s], args.batch).items()}
              for r in args.runs for s in splits}
     for k in preds:

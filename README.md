@@ -92,6 +92,21 @@ which with the flips cover all 8 orientations without loosening boxes.
 Kaggle sessions stop after 12 h. To continue an interrupted run, attach its `runs/` folder and run
 `python train.py --resume <run>/weights/last.pt` with the same `--box-loss` and `--rot90` as the original run.
 
+## Local GPU workstation (Windows, older NVIDIA GPU)
+
+For inference, error analysis, ensembling, the dataset audit and the label tools on a Windows machine with a small
+Pascal-generation GPU (e.g. GeForce MX230, 2 GB; training stays on Kaggle). Datasets, trained weights and caches are
+not in git: make `audit_bundle.zip` (raw source datasets + embedding/verification caches) and `project_bundle.zip`
+(WindSurface-Defect-v3, WTBD, trained `best.pt` files, cached predictions, review decisions) on the Linux machine, put
+both in the repository root, then in PowerShell:
+
+    powershell -ExecutionPolicy Bypass -File tools\setup_windows.ps1
+
+It creates `.venv` with torch 2.6 + CUDA 12.4 (the newest build that still runs Pascal GPUs on a CUDA 12.5 driver),
+installs the requirements, checks the GPU, unpacks the bundles, rebuilds v3.1 / v3.2 / WTBD-group / WTBD-official
+deterministically, and runs the unit tests. Tools pick the GPU automatically; caches use OS-independent keys, so caches
+made on Linux are reused. Clone to a short path (e.g. `C:\BladeYOLO`): some Roboflow file names are long.
+
 Error analysis and label review: `tools/error_analysis.py` (per class, size, error type; galleries),
 `tools/ensemble.py` (weighted box fusion of several runs, scored on val and test), `tools/merge_regions.py` (region
 labelling convention), `tools/probe_nan.py` (first non-finite layer of a checkpoint on training batches),

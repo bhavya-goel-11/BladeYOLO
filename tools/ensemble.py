@@ -34,7 +34,7 @@ def predict(run, data, split, imgs, batch, tta, device):
     path = os.path.join(ROOT, "runs", "analysis", "ensemble", "preds", f"{name}_{split}{'_tta' if tta else ''}.json")
     if os.path.exists(path):
         raw = json.load(open(path))
-        return {os.path.join(data, k[k.rindex("images" + os.sep):]): v for k, v in raw.items()}
+        return {ea.image_key(data, k): v for k, v in raw.items()}
     sys.path.insert(0, ROOT)
     import models  # noqa: F401  (BladeYOLO modules for unpickling)
     from ultralytics import YOLO
@@ -103,7 +103,7 @@ def main():
     data = os.path.abspath(args.data)
     names = yaml.safe_load(open(os.path.join(data, "data.yaml")))["names"]
     nc = len(names)
-    device = args.device or ("0" if __import__("torch").cuda.is_available() else "cpu")
+    device = args.device or ea.device()
     splits = {s: ea.load_split(data, s, names) for s in ("val", "test")}
     preds = {s: [ea.drop_ignored(splits[s], predict(os.path.abspath(r), data, s, splits[s], args.batch, args.tta, device),
                                  data)[0] for r in args.runs] for s in splits}
