@@ -63,6 +63,15 @@ SOURCE_RULES = {
     "wtbs": dict(class_map=WTBS_TO_WS, drop_image_ids={2, 8}, min_box_px=16, skip_name=r"GAN"),
 }
 
+# --native wtbs: WTBs2025 alone with its own class names (a single-dataset benchmark). Pinholes and localized damage
+# stay excluded (unlearnable at 640 px, see above); oil leakage is kept, it is one of this dataset's classes.
+NATIVE = {
+    "wtbs": dict(classes=["oil_leakage", "paint_cracks", "lightning_strikes", "surface_stains", "erosion",
+                          "coating_detachment", "protective_film_damage"],
+                 rules=dict(class_map={0: 0, 1: 1, 2: None, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6, 8: None},
+                            drop_image_ids={2, 8}, min_box_px=16, skip_name=r"GAN")),
+}
+
 KNN = 10  # retrieval candidates per image
 MIN_INLIERS = 25  # ORB/RANSAC inliers for a verified content match (random pairs: >=25 in ~1%, mostly true dups)
 SAME_VIEW = 0.7  # verified match covering this much of the other image = duplicate, not just overlap
@@ -347,7 +356,16 @@ def main():
     ap.add_argument("--cache", default=".dataset_cache")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--workers", type=int, default=os.cpu_count())
+    ap.add_argument("--native", choices=sorted(NATIVE), default=None,
+                    help="build one source alone with its own classes (other sources ignored)")
     args = ap.parse_args()
+    global CLASSES
+    if args.native:
+        CLASSES = NATIVE[args.native]["classes"]
+        SOURCE_RULES[args.native] = NATIVE[args.native]["rules"]
+        for k in SOURCES:
+            if k != args.native:
+                setattr(args, k, "")
     os.makedirs(args.cache, exist_ok=True)
 
     print("1/6 collecting and cleaning labels")
@@ -514,6 +532,16 @@ def counts_by_split(rows, out):
 
 def write_report(out, stats, rows, split_counts, leaks):
     c, n, src, groups = split_counts
+    if CLASSES != ["leading_edge_erosion", "contamination", "crack", "pitting", "lightning_damage", "coating_damage"]:
+        lines = [f"# {os.path.basename(out)} (single source, own classes, deduplicated, group-split)", "",
+                 "Built by `tools/build_dataset.py --native`. Classes: " + ", ".join(CLASSES), "", "## Split", "",
+                 "| split | images | " + " | ".join(CLASSES) + " |", "|---" * (2 + len(CLASSES)) + "|"]
+        lines += [f"| {s} | {n[s]} | " + " | ".join(str(v) for v in c[s]) + " |" for s in SPLITS]
+        lines += ["", "## Build statistics", "", *[f"- {k}: {v}" for k, v in stats.items()]]
+        if leaks:
+            lines += ["", f"WARNING: {len(leaks)} held-out images still match train images"]
+        open(f"{out}/README.md", "w").write("\n".join(lines) + "\n")
+        return
     lines = [
         "# Wind Surface Defect v3 (merged, deduplicated, group-split, blade-surface taxonomy)",
         "",

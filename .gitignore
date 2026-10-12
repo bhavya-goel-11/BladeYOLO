@@ -72,3 +72,8 @@ external/
 Wind Turbine Blade Surfaces Dataset/
 WTBs2025/
 WTBs2025.zip
+
+# Single-dataset benchmarks
+WTBs2025-clean/
+WTBD*.zip
+WTBD*/

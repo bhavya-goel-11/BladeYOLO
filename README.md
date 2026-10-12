@@ -63,6 +63,26 @@ then fuse them (weighted box fusion, fusion IoU chosen on val, test reported onc
 `python tools/ensemble.py <run> <run> <run> --data WindSurface-Defect-v3.2 [--tta]`, which writes
 `runs/analysis/ensemble/<name>/metrics.json`. Scores on v3.2 are not comparable with v3; report both.
 
+### WTBD benchmark (single dataset, leak-free split)
+
+WTBD (Ji et al., *Scientific Data* 13:396, 2026; [figshare 10.6084/m9.figshare.30210175](https://doi.org/10.6084/m9.figshare.30210175),
+CC BY 4.0): 1,065 UAV images (1024 px) of one coastal wind farm, 6 classes (craze, corrosion, surface_injure,
+thunderstrike, crack, hide_craze), double-annotated (Cohen's kappa 0.897). Its published split is a seeded random
+shuffle of images, but the images include augmented copies (re-lit, rotated, recoloured views of the same defect):
+`tools/wtbd_groups.py` finds 122 of the 161 official test images geometrically verified (ORB/RANSAC) as the same
+surface as a train image, and 1,065 images form only ~330 distinct scenes. It writes a group split that keeps each
+scene in one split (class-stratified; audited to zero held-out/train matches), committed as
+`tools/splits/wtbd_group_split.csv`.
+
+    python tools/convert_wtbd.py "<WTBD>/WT blade defect dataset" --out WTBD-group --split-file tools/splits/wtbd_group_split.csv
+    python tools/convert_wtbd.py "<WTBD>/WT blade defect dataset" --out WTBD-official      # authors' split, for comparison
+    python train.py --data WTBD-group/data.yaml --model bladeyolo2-l.yaml --name bladeyolo2_wtbd_group --epochs 150
+    python train.py --data WTBD-official/data.yaml --model bladeyolo2-l.yaml --name bladeyolo2_wtbd_official --epochs 150
+
+The group-split result is the one to report; the official-split run measures how much the leak inflates scores.
+(WTBs2025, *Scientific Data* 13:1310, 2026, was also audited with `tools/build_dataset.py --native wtbs`: of 7,544
+images, 1,486 unique, learnable ones remain after removing augmented copies, GAN images and sub-16 px defects.)
+
 BladeYOLO-v2 (`bladeyolo2-l.yaml`) is the COCO-pretrained YOLOv12-L (backbone, neck and head; `yolo12l.pt` is downloaded
 automatically) with BladeYOLO's components added as zero-initialised residual branches, so training starts exactly
 from the pretrained detector: frozen DINOv3 semantics fused into P3/P4/P5, deformable-conv refinement of the P3/P4
