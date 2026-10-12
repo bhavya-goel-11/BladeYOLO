@@ -179,7 +179,7 @@ def collect(roots):
                 source = source_stem(re.sub(r"_[01]$", "", stem) if rules.get("twins") else stem)
                 boxes = read_boxes(os.path.join(lab_dir, stem + ".txt"), rules["class_map"]) if rules["class_map"] else raw
                 stats[f"{src} boxes dropped (class not in taxonomy)"] += len(raw) - len(boxes)
-                items.append(dict(src=src, path=os.path.join(img_dir, f), stem=stem, dup_key=dup_key(src, source),
+                items.append(dict(src=src, path=f"{img_dir}/{f}", stem=stem, dup_key=dup_key(src, source),
                                   group_key=photo_key(source), boxes=boxes, min_box_px=rules.get("min_box_px", 0)))
     return items, stats
 
@@ -197,8 +197,12 @@ def load_and_clean(item):
 
 
 # ------------------------------------------------------------------------------- content matching
-def dinov2_embeddings(paths, cache):
-    """L2-normalised DINOv2 ViT-S/14 [CLS, mean patch] embeddings, cached per file path."""
+def dinov2_embeddings(paths, cache, batch=32):
+    """L2-normalised DINOv2 ViT-S/14 [CLS, mean patch] embeddings, cached per file path.
+
+    Paths are cache keys: pass them with forward slashes (as collect() builds them) so a cache made on Linux is reused
+    on Windows. Runs on CUDA when available; the cache is saved every 50 batches, so an interrupted run resumes.
+    """
     known = {}
     if os.path.exists(cache):
         z = np.load(cache)
@@ -207,23 +211,31 @@ def dinov2_embeddings(paths, cache):
     if todo:
         import torch
 
-        model = torch.hub.load("facebookresearch/dinov2", "dinov2_vits14").eval()
+        dev = "cuda" if torch.cuda.is_available() else "cpu"
+        model = torch.hub.load("facebookresearch/dinov2", "dinov2_vits14").eval().to(dev)
         mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
         std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+
+        def save():
+            np.savez(cache, paths=np.array(list(known)), emb=np.stack(list(known.values())))
+
+        print(f"  embedding {len(todo)} images on {dev}")
         with torch.no_grad():
-            for i in range(0, len(todo), 64):
-                batch = todo[i:i + 64]
+            for n, i in enumerate(range(0, len(todo), batch)):
+                chunk = todo[i:i + batch]
                 x = torch.stack([
                     (torch.from_numpy(cv2.resize(cv2.imread(p)[:, :, ::-1], (224, 224), interpolation=cv2.INTER_CUBIC).copy())
                      .permute(2, 0, 1).float() / 255 - mean) / std
-                    for p in batch
-                ])
+                    for p in chunk
+                ]).to(dev)
                 f = model.forward_features(x)
                 e = torch.nn.functional.normalize(torch.cat([f["x_norm_clstoken"], f["x_norm_patchtokens"].mean(1)], 1), dim=1)
-                known.update(zip(batch, e.numpy().astype(np.float16)))
-                print(f"  embedded {min(i + 64, len(todo))}/{len(todo)}", end="\r", flush=True)
+                known.update(zip(chunk, e.cpu().numpy().astype(np.float16)))
+                print(f"  embedded {min(i + batch, len(todo))}/{len(todo)}", end="\r", flush=True)
+                if n % 50 == 49:
+                    save()
         print()
-        np.savez(cache, paths=np.array(list(known)), emb=np.stack(list(known.values())))
+        save()
     return np.stack([known[p] for p in paths]).astype(np.float32)
 
 
