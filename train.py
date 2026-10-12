@@ -94,7 +94,7 @@ def main():
     if args.resume:
         model = YOLO(args.resume)
         model.train(resume=True, trainer=BladeTrainer)
-        evaluate_test(model.trainer.best, model.trainer.args.data, args.batch, test_device)
+        evaluate_test(model.trainer.best, model.trainer.args.data, args.batch, test_device, imgsz=model.trainer.args.imgsz)
         return
 
     device = args.device or ",".join(str(i) for i in range(max(torch.cuda.device_count(), 1)))
@@ -115,26 +115,33 @@ def main():
         seed=args.seed,
         **RECIPE,
     )
-    evaluate_test(model.trainer.best, data, args.batch, test_device, box_loss=args.box_loss, rot90=args.rot90)
+    evaluate_test(model.trainer.best, data, args.batch, test_device, imgsz=args.imgsz, box_loss=args.box_loss,
+                  rot90=args.rot90)
 
 
-def evaluate_test(weights, data, batch, device, **info):
+def evaluate_test(weights, data, batch, device, imgsz=640, **info):
     """Report the held-out test split once, with the checkpoint selected on val; also with test-time augmentation
-    (flips and rescaling, merged predictions), reported separately as metrics_tta.json."""
+    (flips and rescaling, merged predictions), reported separately as metrics_tta.json. A failure is printed and the
+    other evaluation still runs (they can be rerun with tools/ensemble.py on a single run)."""
+    import traceback
+
     with open(data) as f:
         if "test" not in yaml.safe_load(f):
             return
     from ultralytics import YOLO
 
-    print(f"\nTest-split evaluation of {weights}")
     out = os.path.join(os.path.dirname(os.path.dirname(weights)), "test")
-    metrics = YOLO(weights).val(data=data, split="test", batch=batch, imgsz=640, device=device,
-                                project=os.path.dirname(out), name="test", exist_ok=True)
-    save_metrics(metrics, os.path.join(out, "metrics.json"), weights=str(weights), split="test", **info)
-    print("\nTest-split evaluation with test-time augmentation")
-    metrics = YOLO(weights).val(data=data, split="test", batch=batch, imgsz=640, device=device, augment=True,
-                                project=os.path.dirname(out), name="test_tta", exist_ok=True, plots=False)
-    save_metrics(metrics, os.path.join(out, "metrics_tta.json"), weights=str(weights), split="test", tta=True, **info)
+    for tta in (False, True):
+        print(f"\nTest-split evaluation of {weights} at {imgsz}px{' with test-time augmentation' if tta else ''}")
+        try:
+            metrics = YOLO(weights).val(data=data, split="test", batch=batch, imgsz=imgsz, device=device, augment=tta,
+                                        project=os.path.dirname(out), name="test_tta" if tta else "test",
+                                        exist_ok=True, plots=not tta)
+            save_metrics(metrics, os.path.join(out, "metrics_tta.json" if tta else "metrics.json"), weights=str(weights),
+                         split="test", imgsz=imgsz, tta=tta, **info)
+        except Exception:
+            traceback.print_exc()
+            print(f"Test-split evaluation{' with TTA' if tta else ''} FAILED (see traceback above)")
 
 
 def save_metrics(metrics, path, **info):

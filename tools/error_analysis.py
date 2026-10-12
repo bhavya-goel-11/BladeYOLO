@@ -68,6 +68,15 @@ def load_split(data, split, names):
     return out
 
 
+def run_imgsz(run):
+    """Inference size of a run: the size it was trained at (args.yaml), default 640. Boxes are always reported in
+    640-input pixels, whatever the inference size."""
+    import yaml
+
+    path = os.path.join(run, "args.yaml")
+    return int(yaml.safe_load(open(path)).get("imgsz", 640)) if os.path.exists(path) else 640
+
+
 def predict(run, data, split, imgs, batch):
     path = os.path.join(ROOT, "runs", "analysis", "errors", os.path.basename(run), f"{split}_preds.json")
     if os.path.exists(path):
@@ -79,7 +88,7 @@ def predict(run, data, split, imgs, batch):
     model = YOLO(os.path.join(run, "weights", "best.pt"))
     preds, files = {}, sorted(imgs)
     for i in range(0, len(files), batch):
-        for f, r in zip(files[i:i + batch], model.predict(files[i:i + batch], imgsz=640, conf=0.001, iou=0.7, max_det=300,
+        for f, r in zip(files[i:i + batch], model.predict(files[i:i + batch], imgsz=run_imgsz(run), conf=0.001, iou=0.7, max_det=300,
                                                           verbose=False, device="cpu")):
             b = r.boxes
             s = imgs[f]["scale"]

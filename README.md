@@ -47,6 +47,22 @@ BladeYOLO: Wind Turbine Blade Defect Detection with Limited Annotations and Weak
 
    Test metrics are written to `<run>/test/metrics.json`, with test-time augmentation to `metrics_tta.json`.
 
+### Current recipe: v3.2 labels and an ensemble
+
+`WindSurface-Defect-v3.2` (`python tools/merge_regions.py --data WindSurface-Defect-v3.1 --out WindSurface-Defect-v3.2`)
+is v3.1 (reviewed test labels, ignore regions) with one labelling convention in every split: same-class boxes within
+8 px of each other are merged into one region box while they cover at least 60% of it (diagonal staircases of boxes
+along a slanted edge are left alone). Upload it as its own Kaggle dataset and pass its `data.yaml` with `--data`.
+Three diverse models, one Kaggle session each:
+
+    python train.py --data <v3.2>/data.yaml --model bladeyolo2-l.yaml --name bladeyolo2_v32 --epochs 100
+    python train.py --data <v3.2>/data.yaml --model yolo12l.pt --name yolo12l_v32_832 --box-loss ciou --imgsz 832 --batch 12 --epochs 100
+    python train.py --data <v3.2>/data.yaml --name bladeyolo_v32 --epochs 150
+
+then fuse them (weighted box fusion, fusion IoU chosen on val, test reported once) with
+`python tools/ensemble.py <run> <run> <run> --data WindSurface-Defect-v3.2 [--tta]`, which writes
+`runs/analysis/ensemble/<name>/metrics.json`. Scores on v3.2 are not comparable with v3; report both.
+
 BladeYOLO-v2 (`bladeyolo2-l.yaml`) is the COCO-pretrained YOLOv12-L (backbone, neck and head; `yolo12l.pt` is downloaded
 automatically) with BladeYOLO's components added as zero-initialised residual branches, so training starts exactly
 from the pretrained detector: frozen DINOv3 semantics fused into P3/P4/P5, deformable-conv refinement of the P3/P4
@@ -57,5 +73,7 @@ Kaggle sessions stop after 12 h. To continue an interrupted run, attach its `run
 `python train.py --resume <run>/weights/last.pt` with the same `--box-loss` and `--rot90` as the original run.
 
 Error analysis and label review: `tools/error_analysis.py` (per class, size, error type; galleries),
+`tools/ensemble.py` (weighted box fusion of several runs, scored on val and test), `tools/merge_regions.py` (region
+labelling convention), `tools/probe_nan.py` (first non-finite layer of a checkpoint on training batches),
 `tools/review_labels.py` (local review page for model-flagged label candidates) and `tools/apply_review.py`
 (applies the decisions as a new dataset version).
