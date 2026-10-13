@@ -59,6 +59,8 @@ def parse_args():
     p.add_argument("--rot90", type=float, default=0.5,
                    help="probability of a random quarter turn (with the flips: all 8 orientations); 0 disables")
     p.add_argument("--no-amp", action="store_true", help="train in fp32 (slower; for debugging)")
+    p.add_argument("--test", default=None, metavar="WEIGHTS",
+                   help="only evaluate WEIGHTS (e.g. a run's best.pt) on the test split of --data, then exit")
     return p.parse_args()
 
 
@@ -108,6 +110,9 @@ def main():
     from models.trainer import BladeTrainer
 
     test_device = 0 if torch.cuda.is_available() else "cpu"
+    if args.test:
+        evaluate_test(args.test, resolve_data(args.data), args.batch, test_device, imgsz=args.imgsz)
+        return
     if args.resume:
         model = YOLO(args.resume)
         model.train(resume=True, trainer=BladeTrainer)
