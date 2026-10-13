@@ -29,6 +29,12 @@ class DeformConv(nn.Module):
 
     def forward(self, x):
         offset, mask = self.offset_mask(x).split([2 * self.k * self.k, self.k * self.k], 1)
+        # torchvision's kernel bounds-checks sampling positions with comparisons that NaN passes, so a non-finite (or
+        # int-overflowing) offset reads outside the tensor and segfaults, e.g. on Ultralytics' FLOPs probe, which
+        # profiles an uninitialised torch.empty image. Beyond the image a sample is zero anyway, so clamping there
+        # leaves every valid output unchanged.
+        lim = float(max(x.shape[2:]) + self.k)
+        offset = offset.nan_to_num(0.0, lim, -lim).clamp(-lim, lim)
         x = deform_conv2d(x, offset, self.weight, stride=self.s, padding=self.p, mask=mask.sigmoid())
         return self.act(self.bn(x))
 

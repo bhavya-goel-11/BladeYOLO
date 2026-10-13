@@ -116,7 +116,7 @@ def main():
     if args.resume:
         model = YOLO(args.resume)
         model.train(resume=True, trainer=BladeTrainer)
-        evaluate_test(model.trainer.best, model.trainer.args.data, args.batch, test_device, imgsz=model.trainer.args.imgsz)
+        test_in_new_process(model.trainer.best, model.trainer.args.data, args.batch, model.trainer.args.imgsz)
         return
 
     device = args.device or ",".join(str(i) for i in range(max(torch.cuda.device_count(), 1)))
@@ -137,8 +137,20 @@ def main():
         seed=args.seed,
         **RECIPE,
     )
-    evaluate_test(model.trainer.best, data, args.batch, test_device, imgsz=args.imgsz, box_loss=args.box_loss,
-                  rot90=args.rot90)
+    test_in_new_process(model.trainer.best, data, args.batch, args.imgsz)
+
+
+def test_in_new_process(weights, data, batch, imgsz):
+    """Run the test evaluation (train.py --test) in a fresh process. In the training process, after DDP, it twice died
+    on Kaggle right after loading the model, with no output or traceback, and the run ended without test metrics."""
+    import subprocess
+
+    sys.stdout.flush()
+    cmd = [sys.executable, "-u", os.path.abspath(__file__), "--test", str(weights), "--data", str(data),
+           "--batch", str(batch), "--imgsz", str(imgsz)]
+    code = subprocess.run(cmd).returncode
+    if code:
+        print(f"Test evaluation exited with code {code}; rerun it with:\n  {' '.join(cmd)}", flush=True)
 
 
 def evaluate_test(weights, data, batch, device, imgsz=640, **info):
