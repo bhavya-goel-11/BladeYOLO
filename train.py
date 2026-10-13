@@ -9,6 +9,7 @@ Examples:
 
 import argparse
 import os
+import shutil
 import sys
 
 import yaml
@@ -61,16 +62,32 @@ def parse_args():
     return p.parse_args()
 
 
+def local_copy(root):
+    """A read-only dataset folder (e.g. a Kaggle input) is copied once into the project folder, so Ultralytics can write
+    its label caches next to the labels; later runs reuse the copy."""
+    if os.access(root, os.W_OK):
+        return root
+    dst = os.path.join(ROOT_DIR, os.path.basename(root))
+    if not os.path.isdir(dst):
+        print(f"Copying read-only dataset {root} -> {dst}")
+        tmp = dst + ".partial"  # renamed only when complete
+        shutil.copytree(root, tmp, copy_function=shutil.copyfile, dirs_exist_ok=True)
+        for d, _, _ in os.walk(tmp):  # copytree keeps the source's read-only folder modes
+            os.chmod(d, 0o755)
+        os.replace(tmp, dst)
+    return dst
+
+
 def resolve_data(path):
-    """Write a copy of the dataset YAML with an absolute root (the original may be read-only, e.g. on Kaggle)."""
+    """Write a copy of the dataset YAML with an absolute root, on a writable copy of the dataset (see local_copy)."""
     path = path or next((p for p in DATA_CANDIDATES if os.path.exists(p)), None)
     if not path or not os.path.exists(path):
         raise FileNotFoundError(f"Dataset YAML not found. Pass --data. Looked in: {DATA_CANDIDATES}")
     with open(path) as f:
         cfg = yaml.safe_load(f)
-    cfg["path"] = root = os.path.abspath(os.path.join(os.path.dirname(path), cfg.get("path") or "."))
-    for split in ("train", "val"):  # the Kaggle zips unpack to <split>/<split>/images, local copies to <split>/images
-        if not os.path.isdir(os.path.join(root, cfg[split])) and os.path.isdir(os.path.join(root, split, "images")):
+    cfg["path"] = root = local_copy(os.path.abspath(os.path.join(os.path.dirname(path), cfg.get("path") or ".")))
+    for split in ("train", "val", "test"):  # the Kaggle zips unpack to <split>/<split>/images, local copies to <split>/images
+        if split in cfg and not os.path.isdir(os.path.join(root, cfg[split])) and os.path.isdir(os.path.join(root, split, "images")):
             cfg[split] = os.path.join(split, "images")
     out = os.path.join(ROOT_DIR, "runs", "data.yaml")
     os.makedirs(os.path.dirname(out), exist_ok=True)

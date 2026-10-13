@@ -4,7 +4,8 @@ native classes of different datasets are the same defect concept.
 Datasets are read with their own class names (no taxonomy mapping). Image matching is tools/build_dataset.py's (DINOv2
 retrieval over all datasets together, flip-aware ORB/RANSAC verification, cached):
   duplicate   md5 / Roboflow source stem / embedding cosine >= DINO_DUP / verified match covering >= SAME_VIEW
-  same scene  verified match (>= MIN_INLIERS) or embedding cosine >= DINO_GROUP or same parent photo (tile names)
+  same scene  verified match (>= MIN_INLIERS) or embedding cosine >= DINO_GROUP or same parent photo (tile names);
+              only retrieval pairs with cosine >= VERIFY_MIN_SIM are geometrically verified
 Per dataset and class:
   raw images / boxes; unique images (one per within-dataset duplicate cluster); independent scenes (same-scene groups,
   the unit that matters for generalisation); learnable boxes (on unique images, shorter side >= 10 px and sqrt(area)
@@ -42,6 +43,7 @@ DATASETS = {  # key: (root, description)
     "wtbd": ("external/WTBD-official", "WTBD (Scientific Data 13:396, 2026)"),
 }
 CROPS_PER_CLASS = 300
+VERIFY_MIN_SIM = 0.80  # retrieval pairs below this cosine are not geometrically verified
 
 
 def class_names(root):
@@ -152,12 +154,17 @@ def main():
         a, b = k.split("\t")
         if a in index and b in index:
             verified[(min(index[a], index[b]), max(index[a], index[b]))] = tuple(v)
-    todo = sorted({(min(a, int(b)), max(a, int(b))) for a in range(N) for b in nn_idx[a]} - verified.keys())
-    if todo:
-        new = B.verify_pairs(paths, todo, args.workers)
+    # geometric verification of retrieval neighbours; pairs below VERIFY_MIN_SIM are not verified (they practically
+    # never show the same surface); results are saved every chunk so an interrupted run resumes
+    todo = sorted({(min(a, int(b)), max(a, int(b))) for a in range(N) for b, s in zip(nn_idx[a], nn_sim[a])
+                   if s >= VERIFY_MIN_SIM} - verified.keys())
+    print(f"  {len(todo)} pairs to verify (embedding cosine >= {VERIFY_MIN_SIM})")
+    for c in range(0, len(todo), 4000):
+        new = B.verify_pairs(paths, todo[c:c + 4000], args.workers)
         verified.update(new)
         known.update({f"{paths[a]}\t{paths[b]}": list(v) for (a, b), v in new.items()})
         json.dump(known, open(vcache, "w"))
+        print(f"  verified pairs {min(c + 4000, len(todo))}/{len(todo)} (saved)", flush=True)
 
     dup, grp = B.DSU(N), B.DSU(N)
     by_key = collections.defaultdict(list)
