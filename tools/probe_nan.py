@@ -6,7 +6,8 @@ finiteness check after every layer, in fp16 and in fp32, and the loss is recompu
 predictions. That separates an fp16 overflow inside a layer from a problem in the loss or the labels.
 
 Usage (Kaggle, one GPU; the weights are those of the failing run):
-    python tools/probe_nan.py --weights runs/detect/BladeYOLO_WindSurface/bladeyolo2_v3/weights/last.pt
+    python tools/probe_nan.py --weights runs/detect/BladeYOLO_WindSurface/bladeyolo2_wtbd_group/weights/last.pt \
+        --data WTBD/WTBD-group/data.yaml
 Output: runs/debug/<name>/{probe_report.json, nan_batch.pt}
 """
 
@@ -36,7 +37,7 @@ def finite(o):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--weights", required=True, help="checkpoint (or model YAML) to probe")
-    ap.add_argument("--data", default=None)
+    ap.add_argument("--data", required=True, help="dataset YAML the checkpoint was trained on")
     ap.add_argument("--batches", type=int, default=100, help="stop after this many batches without a NaN")
     ap.add_argument("--batch", type=int, default=8)
     ap.add_argument("--imgsz", type=int, default=640)

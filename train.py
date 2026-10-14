@@ -1,10 +1,11 @@
-"""Train BladeYOLO (or a stock Ultralytics baseline) on the Wind Surface Defect dataset.
+"""Train BladeYOLO (or a stock Ultralytics baseline) on a dataset with its official classes, e.g. WTBD.
 
-Examples:
-    python train.py --model bladeyolo2-l.yaml --name bladeyolo2_v3 --epochs 100   # BladeYOLO-v2-L
-    python train.py --model yolo12l.pt --name yolo12l_v3_r90 --box-loss ciou --epochs 100   # stock baseline
-    python train.py                                  # BladeYOLO-L (v1), both GPUs if available
-    python train.py --resume runs/detect/BladeYOLO_WindSurface/bladeyolo_l/weights/last.pt
+Examples (WTBD = the folder holding WTBD-group/ and WTBD-official/):
+    python train.py --data WTBD/WTBD-group/data.yaml --model bladeyolo2-l.yaml --name bladeyolo2_wtbd_group --epochs 150
+    python train.py --data WTBD/WTBD-group/data.yaml --model yolo12l.pt --box-loss ciou --name yolo12l_wtbd_group --epochs 150
+    python train.py --data WTBD/WTBD-group/data.yaml --model bladeyolo2-l.yaml --tolerant --name bladeyolo2_wtbd_group_tolerant
+    python train.py --data WTBD/WTBD-group/data.yaml --test runs/detect/BladeYOLO_WindSurface/bladeyolo2_wtbd_group/weights/best.pt
+    python train.py --resume runs/detect/BladeYOLO_WindSurface/bladeyolo2_wtbd_group/weights/last.pt
 """
 
 import argparse
@@ -15,13 +16,6 @@ import sys
 import yaml
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-# Default: the merged, deduplicated, group-split dataset built by tools/build_dataset.py, copied into the
-# project folder (locally and on Kaggle), else read straight from the Kaggle input.
-# The original Wind Surface Defect split leaks augmented twins into val; use it only explicitly via --data.
-DATA_CANDIDATES = [
-    os.path.join(ROOT_DIR, "WindSurface-Defect-v3", "data.yaml"),
-    "/kaggle/input/datasets/beegee11/wind-surface-defect/WindSurface-Defect-v3/data.yaml",
-]
 # Optimisation and augmentation recipe, shared by every run (and tools/probe_nan.py).
 RECIPE = dict(
     deterministic=False,  # deterministic mode slows training and deform_conv2d's backward has no deterministic kernel
@@ -45,7 +39,7 @@ RECIPE = dict(
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--model", default=os.path.join(ROOT_DIR, "bladeyolo-l.yaml"), help="model YAML")
-    p.add_argument("--data", default=None, help="dataset YAML (default: WindSurface-Defect-v3, local or Kaggle input)")
+    p.add_argument("--data", default=None, help="dataset YAML with the dataset's official classes (required unless --resume)")
     p.add_argument("--name", default="bladeyolo_l", help="run name under runs/detect/BladeYOLO_WindSurface")
     p.add_argument("--resume", default=None, help="last.pt of an interrupted run to resume")
     p.add_argument("--epochs", type=int, default=150, help="v2 runs peaked at epochs ~90-170")
@@ -63,7 +57,10 @@ def parse_args():
                    help="split-tolerant box targets: a label or the region of touching same-class labels (models/tolerant.py)")
     p.add_argument("--test", default=None, metavar="WEIGHTS",
                    help="only evaluate WEIGHTS (e.g. a run's best.pt) on the test split of --data, then exit")
-    return p.parse_args()
+    args = p.parse_args()
+    if not args.data and not args.resume:
+        p.error("--data is required (a resumed run keeps its own dataset)")
+    return args
 
 
 def local_copy(root):
@@ -84,9 +81,8 @@ def local_copy(root):
 
 def resolve_data(path):
     """Write a copy of the dataset YAML with an absolute root, on a writable copy of the dataset (see local_copy)."""
-    path = path or next((p for p in DATA_CANDIDATES if os.path.exists(p)), None)
     if not path or not os.path.exists(path):
-        raise FileNotFoundError(f"Dataset YAML not found. Pass --data. Looked in: {DATA_CANDIDATES}")
+        raise FileNotFoundError(f"Dataset YAML not found: {path!r}. Pass --data <dataset>/data.yaml")
     with open(path) as f:
         cfg = yaml.safe_load(f)
     cfg["path"] = root = local_copy(os.path.abspath(os.path.join(os.path.dirname(path), cfg.get("path") or ".")))

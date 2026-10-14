@@ -177,6 +177,8 @@ Built with `tools/build_dataset.py`:
 
 ## 6. Phase 9: industrial taxonomy and dataset v3 (10–11 Oct)
 
+> **Retired (15 Oct).** All work from Phase 13 on uses each dataset's official classes: WTBD's six classes for every model and evaluation, and each dataset's own classes in the label audits. The custom taxonomy below exists only in the merged v3/v3.1/v3.2 datasets. Their tools stay so the earlier runs can be reproduced. `train.py` no longer falls back to v3 and requires `--data`.
+
 ### Taxonomy
 The research (and your choice of option B) adopted an industrial blade-surface taxonomy with 6 classes: `leading_edge_erosion`, `contamination`, `crack`, `pitting`, `lightning_damage`, `coating_damage`. Erosion and coating damage are separated by location: coating loss on the leading edge is erosion, elsewhere it is coating damage. Classes outside the taxonomy were dropped.
 
@@ -644,7 +646,7 @@ Operating points (scene units, calibrated on unseen scenes, any class):
 3. **The operating curve is the most practical comparison so far.** At every operating point up to about 1 false alarm per image, BladeYOLO-v2 finds more defects than YOLO12-L: at 0.1 false alarms per image, about 90% vs about 71% of defects on new scenes. Requiring the correct class costs BladeYOLO-v2 little, but YOLO12-L a lot (4.1 false alarms per image at α = 0.1). Caveat: one test set of 58 scenes, no interval on the curve yet.
 
 ### Step 13: cross-view label audit on Wind Surface Defect (and WTBlade, running)
-`tools/view_label_audit.py` now keeps paths as given, so cached embeddings are reused. Example sheets were checked by eye. The Wind Surface "same view" pairs are mostly overlapping tiles of one drone photo at different zoom, so the alignment is exact and the labels were drawn independently per tile.
+`tools/view_label_audit.py` now keeps paths as given, so cached embeddings are reused. It also keeps only each label's local keypoint support instead of the keypoints themselves. Stored keypoints would have needed several GB of RAM for WTBlade's 143,344 transforms; the WTBD report recomputed this way is byte-for-byte identical. Example sheets were checked by eye. The Wind Surface "same view" pairs are mostly overlapping tiles of one drone photo at different zoom, so the alignment is exact and the labels were drawn independently per tile.
 
 | dataset | same-view labels | agree | split | loose | missing | class conflicts | other-view agreement |
 |---|---|---|---|---|---|---|---|
@@ -801,6 +803,7 @@ Ordered by how much each step strengthens the main claims, with rough Kaggle cos
 
 ## 20. Working conventions
 
+- **Classes:** datasets are used with their official classes only; the custom v3 taxonomy (Phase 9) is retired.
 - **Testing:** tests and analyses run in the project's own `.venv`, with outputs under `runs/` and never `/tmp` ("research projects can have their own testing environments").
 - **NaN handling:** fix the root cause. Batches are only dropped by the guard as a last line of defence, logged and reported.
 - **Selection and reporting:** model selection on val, results reported on test. Never tune on test.

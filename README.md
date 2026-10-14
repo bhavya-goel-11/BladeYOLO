@@ -33,35 +33,18 @@ BladeYOLO: Wind Turbine Blade Defect Detection with Limited Annotations and Weak
 
 ## Training (Kaggle 2×T4)
 
-1. Build the dataset locally with `python tools/build_dataset.py --out WindSurface-Defect-v3` (see `WindSurface-Defect-v3/README.md`)
-   and upload `WindSurface-Defect-v3/` as a Kaggle dataset.
-   - Dataset: copy it into the project folder (`BladeYOLO/WindSurface-Defect-v3`), locally and on Kaggle;
-     otherwise it is read from `/kaggle/input/datasets/beegee11/wind-surface-defect/WindSurface-Defect-v3`.
-   - DINOv3 ViT-S/16 weights: locally `BladeYOLO/dinov3_vits16_pretrain_lvd1689m-08c60483.pth`; on Kaggle
-     the `shamskarib/dinov3-vits` model input is used in place. Override with `DINOV3_WEIGHTS=/path/to/file.pth`.
-2. `pip install -r requirements.txt`
-3. Train (both GPUs, AMP, total batch 16; `python train.py -h` lists all options):
-   - BladeYOLO-v2-L: `python train.py --model bladeyolo2-l.yaml --name bladeyolo2_v3 --epochs 100`
-   - stock baseline under the same pipeline: `python train.py --model yolo12l.pt --name yolo12l_v3_r90 --box-loss ciou --epochs 100`
-   - BladeYOLO-L (v1, wavelet backbone trained from scratch): `python train.py`
+Datasets are used with their **official classes** (WTBD: craze, corrosion, surface_injure, thunderstrike, crack,
+hide_craze). The custom 6-class taxonomy of the merged WindSurface-Defect-v3 dataset is retired (see the end of this
+section and the research log).
 
-   Test metrics are written to `<run>/test/metrics.json`, with test-time augmentation to `metrics_tta.json`.
-
-### Current recipe: v3.2 labels and an ensemble
-
-`WindSurface-Defect-v3.2` (`python tools/merge_regions.py --data WindSurface-Defect-v3.1 --out WindSurface-Defect-v3.2`)
-is v3.1 (reviewed test labels, ignore regions) with one labelling convention in every split: same-class boxes within
-8 px of each other are merged into one region box while they cover at least 60% of it (diagonal staircases of boxes
-along a slanted edge are left alone). Upload it as its own Kaggle dataset and pass its `data.yaml` with `--data`.
-Three diverse models, one Kaggle session each:
-
-    python train.py --data <v3.2>/data.yaml --model bladeyolo2-l.yaml --name bladeyolo2_v32 --epochs 100
-    python train.py --data <v3.2>/data.yaml --model yolo12l.pt --name yolo12l_v32_832 --box-loss ciou --imgsz 832 --batch 12 --epochs 100
-    python train.py --data <v3.2>/data.yaml --name bladeyolo_v32 --epochs 150
-
-then fuse them (weighted box fusion, fusion IoU chosen on val, test reported once) with
-`python tools/ensemble.py <run> <run> <run> --data WindSurface-Defect-v3.2 [--tta]`, which writes
-`runs/analysis/ensemble/<name>/metrics.json`. Scores on v3.2 are not comparable with v3; report both.
+1. Setup: `pip install -r requirements.txt`. DINOv3 ViT-S/16 weights: locally
+   `BladeYOLO/dinov3_vits16_pretrain_lvd1689m-08c60483.pth`; on Kaggle the `shamskarib/dinov3-vits` model input is used
+   in place. Override with `DINOV3_WEIGHTS=/path/to/file.pth`.
+2. Dataset: build WTBD-group / WTBD-official as below and upload them (zipped) as a Kaggle dataset. `--data` is required;
+   a read-only input (Kaggle) is copied once into the project folder so label caches can be written.
+3. Train (both GPUs, AMP, total batch 16; `python train.py -h` lists all options). Test metrics are written to
+   `<run>/test/metrics.json`, with test-time augmentation to `metrics_tta.json`; `python train.py --data ... --test
+   <best.pt>` re-runs the test evaluation alone.
 
 ### WTBD benchmark (single dataset, leak-free split)
 
@@ -109,6 +92,33 @@ which with the flips cover all 8 orientations without loosening boxes.
 
 Kaggle sessions stop after 12 h. To continue an interrupted run, attach its `runs/` folder and run
 `python train.py --resume <run>/weights/last.pt` with the same `--box-loss` and `--rot90` as the original run.
+
+## Earlier work: merged WindSurface-Defect-v3 with a custom taxonomy (retired)
+
+Before WTBD, Wind Surface Defect, WTBlade-Defect, the Beijing set and WTBs2025 were merged, deduplicated and mapped to a
+custom 6-class taxonomy (leading_edge_erosion, contamination, crack, pitting, lightning_damage, coating_damage). This
+is retired in favour of single datasets with their official classes; the tools stay to reproduce the earlier runs
+(research log, Phases 8–12).
+
+Build v3 with `python tools/build_dataset.py --out WindSurface-Defect-v3` (see `WindSurface-Defect-v3/README.md`), upload
+it as a Kaggle dataset and pass its `data.yaml` with `--data`, e.g.
+`python train.py --data WindSurface-Defect-v3/data.yaml --model bladeyolo2-l.yaml --name bladeyolo2_v3 --epochs 100`.
+
+### v3.2 labels and an ensemble
+
+`WindSurface-Defect-v3.2` (`python tools/merge_regions.py --data WindSurface-Defect-v3.1 --out WindSurface-Defect-v3.2`)
+is v3.1 (reviewed test labels, ignore regions) with one labelling convention in every split: same-class boxes within
+8 px of each other are merged into one region box while they cover at least 60% of it (diagonal staircases of boxes
+along a slanted edge are left alone). Upload it as its own Kaggle dataset and pass its `data.yaml` with `--data`.
+Three diverse models, one Kaggle session each:
+
+    python train.py --data <v3.2>/data.yaml --model bladeyolo2-l.yaml --name bladeyolo2_v32 --epochs 100
+    python train.py --data <v3.2>/data.yaml --model yolo12l.pt --name yolo12l_v32_832 --box-loss ciou --imgsz 832 --batch 12 --epochs 100
+    python train.py --data <v3.2>/data.yaml --name bladeyolo_v32 --epochs 150
+
+then fuse them (weighted box fusion, fusion IoU chosen on val, test reported once) with
+`python tools/ensemble.py <run> <run> <run> --data WindSurface-Defect-v3.2 [--tta]`, which writes
+`runs/analysis/ensemble/<name>/metrics.json`. Scores on v3.2 are not comparable with v3; report both.
 
 ## Local GPU workstation (Windows, older NVIDIA GPU)
 

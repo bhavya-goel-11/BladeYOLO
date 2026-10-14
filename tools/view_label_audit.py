@@ -227,13 +227,15 @@ def main():
     nn_idx, _ = B.knn(E, min(B.KNN, len(paths) - 1))
     pairs = sorted({(min(a, int(b)), max(a, int(b))) for a in range(len(paths)) for b in nn_idx[a] if a != int(b)})
 
-    tcache = os.path.join(out, "transforms_v2.json")
+    tcache = os.path.join(out, "transforms_v3.json")  # (inliers, flip, M, inlier keypoints inside each label of a)
     T = json.load(open(tcache)) if os.path.exists(tcache) else {}
     jobs = sorted({(x, y) for a, b in pairs for x, y in ((a, b), (b, a)) if f"{x} {y}" not in T})
     print(f"{len(pairs)} candidate pairs, {len(jobs)} directed transforms to estimate")
     with Pool(args.workers) as pool:
         for k, r in enumerate(pool.imap(transform_job, [(paths[x], paths[y]) for x, y in jobs], chunksize=16)):
-            T[f"{jobs[k][0]} {jobs[k][1]}"] = r
+            inl, fl, M, pts = r  # keep only the per-label local support: the keypoints themselves are large
+            x = jobs[k][0]
+            T[f"{x} {jobs[k][1]}"] = (inl, fl, M, [local_support(b, items[x][1], pts) for b in items[x][2][:, 1:]])
             if (k + 1) % 2000 == 0:
                 print(f"  transforms {k + 1}/{len(jobs)}", flush=True)
                 json.dump(T, open(tcache, "w"))
@@ -247,7 +249,7 @@ def main():
         f.write("image_a,image_b,inliers,flip,view_coverage,stratum," + ",".join(OUTCOMES) + "\n")
         for a, b in pairs:
             for x, y in ((a, b), (b, a)):
-                inl, fl, M, pts = T[f"{x} {y}"]
+                inl, fl, M, support = T[f"{x} {y}"]
                 if inl < args.min_inliers or M is None:
                     continue
                 (pa, sa, ga), (pb, sb, gb) = items[x], items[y]
@@ -256,8 +258,8 @@ def main():
                 n_pairs[st] += 1
                 proj = project(ga[:, 1:], sa, sb, fl, M) if len(ga) else np.zeros((0, 4))
                 row = collections.Counter()
-                for (c, *_), box_a, box in zip(ga, ga[:, 1:], proj):
-                    if frac_inside(box, *sb) < 0.8 or local_support(box_a, sa, pts) < LOCAL_MIN:
+                for (c, *_), box_a, box, sup in zip(ga, ga[:, 1:], proj, support):
+                    if frac_inside(box, *sb) < 0.8 or sup < LOCAL_MIN:
                         continue
                     o = classify(int(c), box, gb)
                     row[o] += 1
