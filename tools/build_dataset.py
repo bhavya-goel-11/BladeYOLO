@@ -81,14 +81,6 @@ SPLITS = {"train": 0.70, "val": 0.15, "test": 0.15}
 
 
 # ----------------------------------------------------------------------------------------- items
-def find_image(img_dir, stem):
-    for ext in (".jpg", ".jpeg", ".png", ".bmp", ".JPG", ".PNG"):
-        p = os.path.join(img_dir, stem + ext)
-        if os.path.exists(p):
-            return p
-    return None
-
-
 def read_boxes(label_path, class_map=None):
     boxes = []
     if os.path.exists(label_path):

@@ -77,9 +77,21 @@ scene in one split (class-stratified; audited to zero held-out/train matches), c
     python tools/convert_wtbd.py "<WTBD>/WT blade defect dataset" --out WTBD-group --split-file tools/splits/wtbd_group_split.csv
     python tools/convert_wtbd.py "<WTBD>/WT blade defect dataset" --out WTBD-official      # authors' split, for comparison
     python train.py --data WTBD-group/data.yaml --model bladeyolo2-l.yaml --name bladeyolo2_wtbd_group --epochs 150
-    python train.py --data WTBD-official/data.yaml --model bladeyolo2-l.yaml --name bladeyolo2_wtbd_official --epochs 150
+    python train.py --data WTBD-official/data.yaml --model bladeyolo2-l.yaml --name bladeyolo2_wtbd_official --epochs 120
+    python train.py --data WTBD-group/data.yaml --model yolo12l.pt --box-loss ciou --name yolo12l_wtbd_group --epochs 150
+    python train.py --data WTBD-official/data.yaml --model yolo12l.pt --box-loss ciou --name yolo12l_wtbd_official --epochs 120
 
 The group-split result is the one to report; the official-split run measures how much the leak inflates scores.
+Test results (Ultralytics mAP50 / mAP50-95; same recipe and seed for all four runs):
+
+| model | WTBD-group (leak-free) | WTBD official (random split) |
+|---|---|---|
+| BladeYOLO-v2 | 0.548 / 0.245 | 0.840 / 0.493 |
+| YOLO12-L | 0.438 / 0.206 | 0.704 / 0.388 |
+
+`tools/bootstrap_ci.py` gives 95% intervals by resampling test scene groups, and paired intervals for the difference
+between two runs (`runs/analysis/bootstrap/<name>/report.md`); the group test set has only 58 independent scenes.
+`tools/leak_subsets.py` scores a model separately on official test images with and without a twin in train.
 (WTBs2025, *Scientific Data* 13:1310, 2026, was also audited with `tools/build_dataset.py --native wtbs`: of 7,544
 images, 1,486 unique, learnable ones remain after removing augmented copies, GAN images and sub-16 px defects.)
 
@@ -109,6 +121,7 @@ made on Linux are reused. Clone to a short path (e.g. `C:\BladeYOLO`): some Robo
 
 Error analysis and label review: `tools/error_analysis.py` (per class, size, error type; galleries),
 `tools/ensemble.py` (weighted box fusion of several runs, scored on val and test), `tools/merge_regions.py` (region
-labelling convention), `tools/probe_nan.py` (first non-finite layer of a checkpoint on training batches),
+labelling convention), `tools/probe_nan.py` (first non-finite layer of a checkpoint on training batches; during
+training, `BladeTrainer` drops non-finite batches and writes the same per-layer report to `<run>/nan_batches/`),
 `tools/review_labels.py` (local review page for model-flagged label candidates) and `tools/apply_review.py`
 (applies the decisions as a new dataset version).

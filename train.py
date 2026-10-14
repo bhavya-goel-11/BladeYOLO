@@ -22,7 +22,7 @@ DATA_CANDIDATES = [
     os.path.join(ROOT_DIR, "WindSurface-Defect-v3", "data.yaml"),
     "/kaggle/input/datasets/beegee11/wind-surface-defect/WindSurface-Defect-v3/data.yaml",
 ]
-# Optimisation and augmentation recipe, shared by every run (and tools/diagnose_nan.py).
+# Optimisation and augmentation recipe, shared by every run (and tools/probe_nan.py).
 RECIPE = dict(
     deterministic=False,  # deterministic mode slows training and deform_conv2d's backward has no deterministic kernel
     optimizer="AdamW",

@@ -5,12 +5,12 @@
 | | |
 |---|---|
 | Researcher | Bhavya Goel |
-| Period | 3 Sep 2026 – 13 Oct 2026 |
+| Period | 3 Sep 2026 – 14 Oct 2026 |
 | Compute | Kaggle 2× Tesla T4 (all training since 9 Oct); A100 for Runs 5–7; local CPU machine (analysis only) |
-| Repository | github.com/bhavya-goel-11/BladeYOLO (`master`, latest `b8721bc`) |
+| Repository | github.com/bhavya-goel-11/BladeYOLO (`master`) |
 | Reference papers | BladeYOLO (IEEE TGRS 2026, `BladeYOLO.pdf`); GFD-YOLOX / Wind Surface Defect dataset (Appl. Soft Comput. 2025, `1-s2.0-S156849462501227X-main.pdf`); WTBD (Ji et al., *Scientific Data* 13:396, 2026, `s41597-026-06762-x.pdf`); WTBs2025 (*Scientific Data* 13:1310, 2026) |
 
-This log covers the whole project. Phases 1–5 (Sep 3 – Oct 6) summarise the original tentative research log (commit `6f6638a`, 6 Oct). That commit was removed from `master` by the 9 Oct reset but is still in the local git object store: `git show 6f6638a:research_log.md`. Later phases come from the working sessions, the git history and the run folders under `runs/detect/BladeYOLO_WindSurface/`. Where a later audit corrected an earlier conclusion, the correction appears in that phase and in the corrections section (§13).
+This log covers the whole project. Phases 1–5 (Sep 3 – Oct 6) summarise the original tentative research log (commit `6f6638a`, 6 Oct). That commit was removed from `master` by the 9 Oct reset but is still in the local git object store: `git show 6f6638a:research_log.md`. Later phases come from the working sessions, the git history and the run folders under `runs/detect/BladeYOLO_WindSurface/`. Where a later audit corrected an earlier conclusion, the correction appears in that phase and in the corrections section (§14).
 
 ---
 
@@ -27,12 +27,13 @@ This log covers the whole project. Phases 1–5 (Sep 3 – Oct 6) summarise the 
 9. [Phase 12: the v3 ceiling: region merging, ensembling, honest limits (12 Oct)](#9-phase-12-the-v3-ceiling-region-merging-ensembling-honest-limits-12-oct)
 10. [Phase 13: new datasets and the content-based audit (12–13 Oct)](#10-phase-13-new-datasets-and-the-content-based-audit-1213-oct)
 11. [Phase 14: WTBD training: leak-free vs published split (13 Oct)](#11-phase-14-wtbd-training-leak-free-vs-published-split-13-oct)
-12. [Engineering problems solved](#12-engineering-problems-solved)
-13. [Corrections to earlier conclusions](#13-corrections-to-earlier-conclusions)
-14. [Run registry](#14-run-registry)
-15. [Datasets and artefacts](#15-datasets-and-artefacts)
-16. [Open work and next steps](#16-open-work-and-next-steps)
-17. [Working conventions](#17-working-conventions)
+12. [Phase 15: YOLO12-L baselines and scene-level confidence intervals (14 Oct)](#12-phase-15-yolo12-l-baselines-and-scene-level-confidence-intervals-14-oct)
+13. [Engineering problems solved](#13-engineering-problems-solved)
+14. [Corrections to earlier conclusions](#14-corrections-to-earlier-conclusions)
+15. [Run registry](#15-run-registry)
+16. [Datasets and artefacts](#16-datasets-and-artefacts)
+17. [Open work and next steps](#17-open-work-and-next-steps)
+18. [Working conventions](#18-working-conventions)
 
 ---
 
@@ -47,8 +48,10 @@ This log covers the whole project. Phases 1–5 (Sep 3 – Oct 6) summarise the 
 | **BladeYOLO-v2, leak-free WTBD-group test: 0.548 mAP50 / 0.245 mAP50-95 (0.574 / 0.279 with test-time augmentation).** | `runs/.../bladeyolo2_wtbd_group/test/` |
 | **The same model on the published (leaky) WTBD split: 0.840 / 0.493 (0.830 / 0.517 with test-time augmentation).** | `runs/.../bladeyolo2_wtbd_official/test/` |
 | The random split inflates mAP50 by +0.29 and doubles mAP50-95. | Same model, same recipe, only the split differs. |
+| Stock YOLO12-L, same recipe: 0.438 / 0.206 leak-free, 0.704 / 0.388 published split. The inflation (+0.27 mAP50) is model-independent. | `runs/.../yolo12l_wtbd_*/test/` |
+| BladeYOLO-v2 beats YOLO12-L on the leak-free test: +0.161 mAP50 [95% CI 0.025, 0.284], +0.059 mAP50-95 [0.005, 0.169]. **But without the two classes seen in ≤ 3 test scenes the gain is +0.052 [−0.027, 0.135]: not established.** | Paired bootstrap over 58 test scene groups (§12) |
 
-The project's main contribution is now methodological: a reproducible, leakage-audited protocol for blade defect detection, plus measured evidence of how much random splits of augmented data inflate published numbers. The architecture is BladeYOLO-v2. The comparison against stock YOLO12-L on both WTBD splits is still to be run (§16).
+The project's main contribution is now methodological: a reproducible, leakage-audited protocol for blade defect detection, plus measured evidence of how much random splits of augmented data inflate published numbers. The architecture is BladeYOLO-v2. Against stock YOLO12-L it wins on both splits, but on the leak-free split the win rests largely on one class with 3 test scenes (thunderstrike), so an architectural advantage is suggested, not demonstrated (§12).
 
 ---
 
@@ -160,7 +163,7 @@ Built with `tools/build_dataset.py`:
 | `yolo12l_baseline` | Stock YOLO12-L (COCO), CIoU | 0.290 / 0.122 (epoch 166 of 266) | 0.358 / 0.149 |
 | `bladeyolo_l` | BladeYOLO-L (repaired), WIoU | 0.344 / 0.123 (epoch 84 of 167) | 0.400 / 0.146 at epoch 124 |
 
-- **NaN at epoch 9 under AMP:** the SS2D output overflowed fp16 before its LayerNorm. The LayerNorm now runs in fp32, confirmed with `tools/diagnose_nan.py` on Kaggle. You ruled out skipping batches ("do not skip batches, let's resolve the issue"), so the root cause was fixed instead.
+- **NaN at epoch 9 under AMP:** the SS2D output overflowed fp16 before its LayerNorm. The LayerNorm now runs in fp32, confirmed with `tools/diagnose_nan.py` on Kaggle (since removed; superseded by `tools/probe_nan.py`). You ruled out skipping batches ("do not skip batches, let's resolve the issue"), so the root cause was fixed instead.
 - The BladeYOLO run was stopped because val stagnated.
 
 ### Conclusions
@@ -424,7 +427,60 @@ Directionally consistent with leakage, but only 50 boxes.
 
 ---
 
-## 12. Engineering problems solved
+## 12. Phase 15: YOLO12-L baselines and scene-level confidence intervals (14 Oct)
+
+### Baseline runs
+Stock COCO-pretrained YOLO12-L with its own CIoU loss, on the same recipe, seed, image size, epochs and augmentation as BladeYOLO-v2 (`--model yolo12l.pt --box-loss ciou`). Both runs completed on Kaggle with test and test-time-augmentation metrics, so the segfault fix (`b8721bc`) held.
+
+| model | WTBD-group test | with test-time aug. | WTBD official test | with test-time aug. | val best (group / official) |
+|---|---|---|---|---|---|
+| BladeYOLO-v2 | **0.548 / 0.245** | 0.574 / 0.279 | 0.840 / 0.493 | 0.830 / 0.517 | 0.650 / 0.368 · 0.845 / 0.475 |
+| YOLO12-L | **0.438 / 0.206** | 0.440 / 0.230 | 0.704 / 0.388 | 0.734 / 0.438 | 0.419 / 0.269 · 0.665 / 0.394 |
+
+Per-class test mAP50 (Ultralytics):
+
+| class | BladeYOLO-v2 group | YOLO12-L group | BladeYOLO-v2 official | YOLO12-L official |
+|---|---|---|---|---|
+| craze | 0.076 | 0.065 | 0.909 | 0.622 |
+| corrosion | 0.538 | 0.608 | 0.527 | 0.460 |
+| surface_injure | 0.747 | 0.629 | 0.816 | 0.711 |
+| thunderstrike | 0.980 | 0.418 | 0.995 | 0.938 |
+| crack | 0.381 | 0.384 | 0.991 | 0.854 |
+| hide_craze | 0.569 | 0.526 | 0.800 | 0.639 |
+
+**Leakage inflation is model-independent.** The published split adds +0.266 mAP50 for YOLO12-L and +0.292 for BladeYOLO-v2; mAP50-95 rises ×1.9 and ×2.0.
+
+### Scene-level confidence intervals (`tools/bootstrap_ci.py`)
+Test images are grouped into scenes with the split's matching (DINOv2 + ORB). Each replicate redraws scene groups with replacement and scores both models on the same draw (2,000 replicates; COCO 101-point AP). Reports are in `runs/analysis/bootstrap/{wtbd_group,wtbd_official}/report.md`. This evaluator's point estimates differ slightly from Ultralytics': BladeYOLO-v2 0.561 vs 0.548 and YOLO12-L 0.400 vs 0.438 on the group test.
+
+| test set | scene groups | BladeYOLO-v2 mAP50 [95% CI] | YOLO12-L mAP50 [95% CI] | paired difference mAP50 | paired difference mAP50-95 |
+|---|---|---|---|---|---|
+| WTBD-group | **58** (craze 2, thunderstrike 3, crack 8, surface_injure 14, corrosion 18, hide_craze 19) | 0.561 [0.484, 0.809] | 0.400 [0.340, 0.675] | **+0.161 [0.025, 0.284]**, P(≤0) = 0.005 | +0.059 [0.005, 0.169], P(≤0) = 0.017 |
+| WTBD-group without craze and thunderstrike | 58 | 0.567 | 0.515 | **+0.052 [−0.027, 0.135]**, P(≤0) = 0.077 | +0.015 [−0.032, 0.067], P(≤0) = 0.236 |
+| WTBD official | 108 | 0.815 [0.775, 0.857] | 0.690 [0.635, 0.752] | +0.125 [0.074, 0.176], P(≤0) < 0.001 | +0.103 [0.065, 0.139], P(≤0) < 0.001 |
+
+The class-subset check is `runs/analysis/bootstrap/robust_check.py`. The upper CI bounds on the full group test are skewed high: replicates that miss the two craze scenes drop the weakest class from the mean.
+
+### Findings
+1. **BladeYOLO-v2 is better than YOLO12-L on the leak-free test overall, and the interval excludes zero.** Most of the gain is thunderstrike (1.00 vs 0.27 in the bootstrap evaluator), seen in only 3 test scenes. On the four classes with 8–19 scenes the gain is +0.05 mAP50, with an interval that includes zero.
+2. **On the official split BladeYOLO-v2 wins every class with a tight interval.** That split rewards memorising scenes seen in training, which a larger model with frozen DINOv3 features does well. It is not evidence of better generalisation.
+3. **The leak-free test set is small in the dimension that matters.** It has 161 images but only 58 independent scenes, versus 108 in the official test, because the group split keeps whole scenes together. Per-class results for craze, thunderstrike and crack rest on 2–8 scenes.
+4. **Box tightness remains the shared weakness.** Corrosion mAP50-95 is 0.13 for BladeYOLO-v2 and 0.22 for YOLO12-L on group test. Corrosion is the one class where YOLO12-L is ahead on both mAP50 and mAP50-95.
+
+### Conclusions
+- **The leakage result is robust:** both models, both metrics, about +0.27–0.29 mAP50 from the random split.
+- **The honest claim for the architecture:** "BladeYOLO-v2 scores 0.55 vs 0.44 mAP50 on a leak-free WTBD split (paired bootstrap +0.16, 95% CI 0.03–0.28). The gain is concentrated in lightning damage; on the other classes the evidence is inconclusive."
+- **More independent test scenes are needed** before per-class or architectural claims can be made with confidence. Options are group k-fold cross-validation or a second dataset (§17).
+
+### Cleanup in this phase
+- Removed `tools/diagnose_nan.py`: a one-off investigation of the fixed SS2D fp16 bug, superseded by `tools/probe_nan.py` and the trainer's per-layer NaN report.
+- Removed `tools/eval_by_source.py`: per-source evaluation on v3, which you judged not useful.
+- Removed the unused function `find_image` (`build_dataset.py`), two unused parameters of `gallery` (`error_analysis.py`) and an unused variable (`probe_nan.py`). `vulture` now reports no dead code.
+- Kept the v1 modules (`backbone.py`, `wavelet.py`, `C2fMorph`, `C2fSS2D`). `bladeyolo-l.yaml` and the v1 checkpoints need them.
+
+---
+
+## 13. Engineering problems solved
 
 | Problem | Root cause | Fix | Commit |
 |---|---|---|---|
@@ -441,7 +497,7 @@ Directionally consistent with leakage, but only 50 boxes.
 
 ---
 
-## 13. Corrections to earlier conclusions
+## 14. Corrections to earlier conclusions
 
 | Earlier conclusion | Status | Why |
 |---|---|---|
@@ -454,10 +510,11 @@ Directionally consistent with leakage, but only 50 boxes.
 | Mislabelling explains the poor v3 scores | **Rejected** | The review was worth only +0.03 mAP50 (§7) |
 | The first WTBD run's 0.649 val is its ceiling | **Corrected** | The completed run plateaus at ~0.63; 0.649 was noise |
 | The local thop segfault is a CPU-only quirk | **Corrected** | It is a real NaN-offset bug that also hit Kaggle (§11) |
+| BladeYOLO-v2's leak-free win over YOLO12-L shows the architecture generalises better | **Qualified** | The win rests mainly on thunderstrike (3 test scenes); without it the interval includes zero (§12) |
 
 ---
 
-## 14. Run registry
+## 15. Run registry
 
 | Run folder | Data | Model | Epochs | Val best (mAP50 / 50-95) | Test (mAP50 / 50-95) | Notes |
 |---|---|---|---|---|---|---|
@@ -473,12 +530,14 @@ Directionally consistent with leakage, but only 50 boxes.
 | `bladeyolo2_wtbd_group` (attempt 1) | WTBD-group | BladeYOLO-v2 | 99 of 150 | 0.649 / 0.379 | — | NaN at epoch 99; folder lost |
 | **`bladeyolo2_wtbd_group`** | WTBD-group (leak-free) | BladeYOLO-v2 | 150 | 0.650 / 0.368 (epoch 124) | **0.548 / 0.245**; TTA 0.574 / 0.279 | Test run locally |
 | **`bladeyolo2_wtbd_official`** | WTBD official (**leaky**) | BladeYOLO-v2 | 120 | 0.845 / 0.475 (epoch 105) | **0.840 / 0.493**; TTA 0.830 / 0.517 | TTA run locally |
+| **`yolo12l_wtbd_group`** | WTBD-group (leak-free) | YOLO12-L | 150 | 0.419 / 0.269 (epoch 130) | **0.438 / 0.206**; TTA 0.440 / 0.230 | Same recipe |
+| **`yolo12l_wtbd_official`** | WTBD official (**leaky**) | YOLO12-L | 120 | 0.665 / 0.394 (epoch 104) | **0.704 / 0.388**; TTA 0.734 / 0.438 | Same recipe |
 
 Val best is the best epoch in `results.csv` by fitness (0.1 × mAP50 + 0.9 × mAP50-95); the final validation of `best.pt` can differ slightly.
 
 ---
 
-## 15. Datasets and artefacts
+## 16. Datasets and artefacts
 
 | Item | Location | Notes |
 |---|---|---|
@@ -493,36 +552,41 @@ Val best is the best epoch in `results.csv` by fitness (0.1 × mAP50 + 0.9 × mA
 | Label review | `runs/analysis/review/` | `review_test.json` |
 | WTBD craze diagnosis | `runs/analysis/wtbd_craze/` | Contact sheets of test vs train craze |
 | WTBD leak subsets | `runs/analysis/wtbd_leak/` | `test_leak.csv`, subset metrics |
+| Scene bootstrap | `runs/analysis/bootstrap/` | Reports per split, scene groups, cached predictions, class-subset check |
 | Caches | `.dataset_cache/` | DINOv2 embeddings (38,324 images), ORB verifications, crop embeddings |
 
 **Tools:**
-- dataset building and auditing: `build_dataset.py`, `check_overlap.py`, `audit_datasets.py`, `wtbd_groups.py`, `convert_wtbd.py`, `leak_subsets.py`
-- labels and evaluation: `error_analysis.py`, `review_labels.py`, `apply_review.py`, `merge_regions.py`, `ensemble.py`, `eval_by_source.py`, `class_crops.py`
-- debugging and setup: `probe_nan.py`, `diagnose_nan.py`, `setup_windows.ps1`
+- dataset building and auditing: `build_dataset.py`, `check_overlap.py`, `audit_datasets.py`, `wtbd_groups.py`, `convert_wtbd.py`, `leak_subsets.py`, `bootstrap_ci.py`
+- labels and evaluation: `error_analysis.py`, `review_labels.py`, `apply_review.py`, `merge_regions.py`, `ensemble.py`, `class_crops.py`
+- debugging and setup: `probe_nan.py`, `setup_windows.ps1` (`diagnose_nan.py` and `eval_by_source.py` were removed on 14 Oct; they are in the git history)
 
 **Tests** (`tests/`): `test_ss2d`, `test_wiou`, `test_model`, `test_augment`, `test_fp32_blocks`, `test_merge_regions`, `test_deform_offsets`. All pass in `.venv`.
 
 ---
 
-## 16. Open work and next steps
+## 17. Open work and next steps
 
-1. **Baselines (next Kaggle session).** Stock YOLO12-L with the same recipe on both WTBD splits:
-   ```
-   python train.py --data .../WTBD-group/data.yaml    --model yolo12l.pt --box-loss ciou --name yolo12l_wtbd_group    --epochs 150
-   python train.py --data .../WTBD-official/data.yaml --model yolo12l.pt --box-loss ciou --name yolo12l_wtbd_official --epochs 120
-   ```
-   This gives a 2×2 table (BladeYOLO-v2 vs YOLO12-L × group vs official). It answers both "does the architecture help?" and "is the inflation model-independent?"
-2. **Confidence intervals:** bootstrap over WTBD test scene groups. Report mAP ± range rather than single numbers.
-3. **Box tightness:** train at 832 or 1024 px. WTBD images are 1024 px natively, and corrosion and crack mAP50-95 are the weakest.
-4. **Cross-dataset generalisation check:** run the WTBD model class-agnostically on fengChe (only 3 shared images) to support the industrial-use claim.
-5. **Optional:** pretrain on fengChe + WTBs2025, then fine-tune on WTBD, excluding Beijing (contains WTBD test photos). Only if overfitting appears.
-6. **Craze annotation convention:** a merged-region or segment-agnostic evaluation for elongated defects, to quantify the effect seen in §11.
-7. **Optional outreach:** send the WTBD authors the group-split CSV.
-8. **Commit:** `tools/leak_subsets.py` and this log are not yet committed.
+Ordered by how much each step strengthens the main claims, with rough Kaggle cost (2×T4; one WTBD run ≈ 2 h).
 
----
+**A. Make the architecture claim decidable**
+1. **Group k-fold cross-validation on WTBD.** Use 5 folds of whole scene groups, each fold's test about 70 scenes, so every one of the ~330–368 scenes is tested once. Pooling all folds gives about 6× more test scenes than the single split, and craze and thunderstrike get enough scenes to judge. Cost: 5 folds × 2 models × ~2 h ≈ 20 h, two to three sessions. Needs a fold option in `tools/wtbd_groups.py`.
+2. **Separate the loss from the architecture.** BladeYOLO-v2 trained with WIoU and YOLO12-L with CIoU, so they differ in both. Run `bladeyolo2-l.yaml --box-loss ciou` on WTBD-group (~2 h). This also tests whether WIoU explains YOLO12-L's lead on corrosion.
+3. **Component ablation.** Train BladeYOLO-v2 without DINOv3 fusion, and separately without the deformable/selective-scan refinements, to see which branch carries the thunderstrike gain. That is 2 runs (~4 h) and needs two small yaml variants.
+4. **Seeds.** Repeat the group-split pair with `--seed 1` and `--seed 2` (~8 h) to measure run-to-run variance next to the scene variance.
 
-## 17. Working conventions
+**B. A second, larger leak-free benchmark**
+5. **WTBlade / fengChe with its own classes.** It has 803 independent scenes (WTBD-group test has 58) and is CC BY 4.0. Its 7 native classes all have 80–425 scenes. Build a group split with the existing tools: `build_dataset.py` matching and `wtbd_groups.py`-style auditing. Running both models on it (~2 × 2–3 h) would give much tighter intervals and a second dataset for the claims.
+6. **Cross-dataset check, no training.** Run the WTBD models class-agnostically ("is there damage here?") on fengChe, which shares only 3 images with WTBD. This tests generalisation to another source.
+
+**C. Improve the model where it is weak**
+7. **Box tightness:** train at 832 or 1024 px (WTBD is natively 1024 px). Corrosion mAP50-95 (0.13) and crack are the weakest. Cost ~3–4 h per run at 1024 with a smaller batch.
+8. **Elongated defects:** the craze test scene is labelled as 2–3 segment boxes and predicted as one. Score with a region-merged convention (`tools/merge_regions.py`) as a diagnostic, and report it separately.
+9. **Optional pretraining** on fengChe + WTBs2025, then fine-tuning on WTBD, excluding Beijing, which contains WTBD test photos. Only worth it if cross-validation shows overfitting.
+
+**D. Write-up**
+10. **Results summary for the professor.** Cover the reproduction gap, the leakage evidence on two datasets, the leak-free protocol, the 2×2 table with intervals, and the honest architecture claim. Optionally send the WTBD authors the group-split CSV.
+
+## 18. Working conventions
 
 - **Testing:** tests and analyses run in the project's own `.venv`, with outputs under `runs/` and never `/tmp` ("research projects can have their own testing environments").
 - **NaN handling:** fix the root cause. Batches are only dropped by the guard as a last line of defence, logged and reported.

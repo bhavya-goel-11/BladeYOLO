@@ -119,7 +119,7 @@ def main():
         trace32, leaf32 = layer_trace(batch["img"], amp=False)
         preds32 = run(batch["img"], amp=False)
         with torch.no_grad():
-            loss32, items32 = model.loss(batch, [p.float() for p in preds32] if isinstance(preds32, list) else preds32)
+            _, items32 = model.loss(batch, [p.float() for p in preds32] if isinstance(preds32, list) else preds32)
         gt = batch["bboxes"]
         wh = gt[:, 2:4] if gt.numel() else gt
         report = dict(

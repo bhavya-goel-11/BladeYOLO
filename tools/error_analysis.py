@@ -259,7 +259,7 @@ def f1_conf(imgs, preds, nc):
     return best[1], best[0]
 
 
-def gallery(items, imgs_root, path, title, n=40, ctx=1.0, size=150, pred_boxes=None):
+def gallery(items, path, title, n=40, ctx=1.0, size=150):
     """Crops around boxes (green = GT, red = prediction), with a caption, n per sheet."""
     from PIL import Image, ImageDraw
 
@@ -416,13 +416,13 @@ def main():
                 miss = [miss[i] for i in rng.permutation(len(miss))]
                 gallery([dict(g, colour=(0, 255, 0), others=others(g["img"]),
                               caption=(f"{g['type']} {g['size']:.0f}px" + (f" ->{short[names[g['pred_cls']]]}" if g["pred_cls"] >= 0 else ""),
-                                       f"{g['source']} iou{g['iou']:.2f}")) for g in miss], data,
+                                       f"{g['source']} iou{g['iou']:.2f}")) for g in miss],
                         os.path.join(out, "galleries", f"{s}_{c}_{names[c]}_missed.jpg"),
                         f"{run} {s} {names[c]}: GT not detected (thick green = this GT, thin green = other GT, red = predictions >= {conf:.2f})")
                 fps = sorted([p for p in ps if p["cls"] == c and p["type"] != "tp"], key=lambda p: -p["conf"])
                 gallery([dict(p, colour=(255, 0, 0), others=others(p["img"]),
                               caption=(f"{p['type']} c{p['conf']:.2f}" + (f" on {short[names[p['gt_cls']]]}" if p["gt_cls"] >= 0 else ""),
-                                       f"{imgs[p['img']]['source']} {size_of(p['box']):.0f}px")) for p in fps], data,
+                                       f"{imgs[p['img']]['source']} {size_of(p['box']):.0f}px")) for p in fps],
                         os.path.join(out, "galleries", f"{s}_{c}_{names[c]}_false_pos.jpg"),
                         f"{run} {s} predicted {names[c]}: highest-confidence false positives (thick red = this prediction)")
         json.dump(report, open(os.path.join(out, "report.json"), "w"), indent=1, default=float)
