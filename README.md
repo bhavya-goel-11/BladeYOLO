@@ -92,6 +92,9 @@ Test results (Ultralytics mAP50 / mAP50-95; same recipe and seed for all four ru
 `tools/bootstrap_ci.py` gives 95% intervals by resampling test scene groups, and paired intervals for the difference
 between two runs (`runs/analysis/bootstrap/<name>/report.md`); the group test set has only 58 independent scenes.
 `tools/leak_subsets.py` scores a model separately on official test images with and without a twin in train.
+Evaluation experiments (research log, Phase 16): `tools/granularity_eval.py` (standard vs granularity-tolerant vs
+region AP), `tools/view_label_audit.py` (label consistency across verified views of the same surface) and
+`tools/conformal_recall.py` (recall guarantees by conformal risk control, calibrated on seen vs unseen scenes).
 (WTBs2025, *Scientific Data* 13:1310, 2026, was also audited with `tools/build_dataset.py --native wtbs`: of 7,544
 images, 1,486 unique, learnable ones remain after removing augmented copies, GAN images and sub-16 px defects.)
 

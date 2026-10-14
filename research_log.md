@@ -10,7 +10,7 @@
 | Repository | github.com/bhavya-goel-11/BladeYOLO (`master`) |
 | Reference papers | BladeYOLO (IEEE TGRS 2026, `BladeYOLO.pdf`); GFD-YOLOX / Wind Surface Defect dataset (Appl. Soft Comput. 2025, `1-s2.0-S156849462501227X-main.pdf`); WTBD (Ji et al., *Scientific Data* 13:396, 2026, `s41597-026-06762-x.pdf`); WTBs2025 (*Scientific Data* 13:1310, 2026) |
 
-This log covers the whole project. Phases 1–5 (Sep 3 – Oct 6) summarise the original tentative research log (commit `6f6638a`, 6 Oct). That commit was removed from `master` by the 9 Oct reset but is still in the local git object store: `git show 6f6638a:research_log.md`. Later phases come from the working sessions, the git history and the run folders under `runs/detect/BladeYOLO_WindSurface/`. Where a later audit corrected an earlier conclusion, the correction appears in that phase and in the corrections section (§14).
+This log covers the whole project. Phases 1–5 (Sep 3 – Oct 6) summarise the original tentative research log (commit `6f6638a`, 6 Oct). That commit was removed from `master` by the 9 Oct reset but is still in the local git object store: `git show 6f6638a:research_log.md`. Later phases come from the working sessions, the git history and the run folders under `runs/detect/BladeYOLO_WindSurface/`. Where a later audit corrected an earlier conclusion, the correction appears in that phase and in the corrections section (§15).
 
 ---
 
@@ -28,12 +28,12 @@ This log covers the whole project. Phases 1–5 (Sep 3 – Oct 6) summarise the 
 10. [Phase 13: new datasets and the content-based audit (12–13 Oct)](#10-phase-13-new-datasets-and-the-content-based-audit-1213-oct)
 11. [Phase 14: WTBD training: leak-free vs published split (13 Oct)](#11-phase-14-wtbd-training-leak-free-vs-published-split-13-oct)
 12. [Phase 15: YOLO12-L baselines and scene-level confidence intervals (14 Oct)](#12-phase-15-yolo12-l-baselines-and-scene-level-confidence-intervals-14-oct)
-13. [Engineering problems solved](#13-engineering-problems-solved)
-14. [Corrections to earlier conclusions](#14-corrections-to-earlier-conclusions)
-15. [Run registry](#15-run-registry)
-16. [Datasets and artefacts](#16-datasets-and-artefacts)
-17. [Open work and next steps](#17-open-work-and-next-steps)
-18. [Working conventions](#18-working-conventions)
+14. [Engineering problems solved](#14-engineering-problems-solved)
+15. [Corrections to earlier conclusions](#15-corrections-to-earlier-conclusions)
+16. [Run registry](#16-run-registry)
+17. [Datasets and artefacts](#17-datasets-and-artefacts)
+18. [Open work and next steps](#18-open-work-and-next-steps)
+19. [Working conventions](#19-working-conventions)
 
 ---
 
@@ -49,9 +49,11 @@ This log covers the whole project. Phases 1–5 (Sep 3 – Oct 6) summarise the 
 | **The same model on the published (leaky) WTBD split: 0.840 / 0.493 (0.830 / 0.517 with test-time augmentation).** | `runs/.../bladeyolo2_wtbd_official/test/` |
 | The random split inflates mAP50 by +0.29 and doubles mAP50-95. | Same model, same recipe, only the split differs. |
 | Stock YOLO12-L, same recipe: 0.438 / 0.206 leak-free, 0.704 / 0.388 published split. The inflation (+0.27 mAP50) is model-independent. | `runs/.../yolo12l_wtbd_*/test/` |
+| Annotation granularity (how a defect is cut into boxes) accounts for about +0.12 AP50 on the leak-free test, and WTBD's own copies of the same image agree on only 86% of labels (corrosion 65%; no class conflicts). | Phase 16, Experiments 1 and 3 |
+| A recall guarantee calibrated on scenes seen in training fails on new scenes (promised ≤ 10% missed, actual 31.5%); calibrated on unseen scenes it holds (6.3%). | Phase 16, Experiment 2 |
 | BladeYOLO-v2 beats YOLO12-L on the leak-free test: +0.161 mAP50 [95% CI 0.025, 0.284], +0.059 mAP50-95 [0.005, 0.169]. **But without the two classes seen in ≤ 3 test scenes the gain is +0.052 [−0.027, 0.135]: not established.** | Paired bootstrap over 58 test scene groups (§12) |
 
-The project's main contribution is now methodological: a reproducible, leakage-audited protocol for blade defect detection, plus measured evidence of how much random splits of augmented data inflate published numbers. The architecture is BladeYOLO-v2. Against stock YOLO12-L it wins on both splits, but on the leak-free split the win rests largely on one class with 3 test scenes (thunderstrike), so an architectural advantage is suggested, not demonstrated (§12).
+The project's main contribution is now methodological: a reproducible, leakage-audited protocol for blade defect detection, measured evidence of how much random splits of augmented data inflate published numbers, granularity-aware evaluation, a cross-view label audit, and the finding that leaked calibration breaks recall guarantees. The architecture is BladeYOLO-v2. Against stock YOLO12-L it wins on both splits, but on the leak-free split the win rests largely on one class with 3 test scenes (thunderstrike), so an architectural advantage is suggested, not demonstrated (§12).
 
 ---
 
@@ -470,7 +472,7 @@ The class-subset check is `runs/analysis/bootstrap/robust_check.py`. The upper C
 ### Conclusions
 - **The leakage result is robust:** both models, both metrics, about +0.27–0.29 mAP50 from the random split.
 - **The honest claim for the architecture:** "BladeYOLO-v2 scores 0.55 vs 0.44 mAP50 on a leak-free WTBD split (paired bootstrap +0.16, 95% CI 0.03–0.28). The gain is concentrated in lightning damage; on the other classes the evidence is inconclusive."
-- **More independent test scenes are needed** before per-class or architectural claims can be made with confidence. Options are group k-fold cross-validation or a second dataset (§17).
+- **More independent test scenes are needed** before per-class or architectural claims can be made with confidence. Options are group k-fold cross-validation or a second dataset (§18).
 
 ### Cleanup in this phase
 - Removed `tools/diagnose_nan.py`: a one-off investigation of the fixed SS2D fp16 bug, superseded by `tools/probe_nan.py` and the trainer's per-layer NaN report.
@@ -480,7 +482,126 @@ The class-subset check is `runs/analysis/bootstrap/robust_check.py`. The upper C
 
 ---
 
-## 13. Engineering problems solved
+## 13. Phase 16: evaluation experiments: granularity, label consistency, recall guarantees (14 Oct)
+
+**Motivation.** Earlier phases repeatedly found that box-level scores penalise *how* a defect is cut into boxes (v3 coverage vs IoU recall, §7; the merge experiment, §9; the craze test scene, §11). A literature check found:
+- many-to-one matching for evaluation in scene-text detection (TedEval, 2019)
+- box-noise-aware AP (Murrugarra-Llerena et al., CVPRW 2022 / WACV 2025)
+- conformal object detection (Andéol et al., 2023 / 2025), and conformal segmentation for steel defects (2025)
+
+Nothing combines these for amorphous surface defects, with leakage-aware calibration, or cross-view label audits. Three experiments, none needing new training:
+
+### Experiment 1: granularity-invariant evaluation (`tools/granularity_eval.py`)
+Three scores on the same cached test predictions:
+- **standard:** one-to-one, IoU ≥ 0.5
+- **tolerant:** one prediction may match several same-class labels whose union it fits at IoU ≥ 0.5 (each label counts towards recall), and fragments of an already-found defect are ignored
+- **region:** pixel-level precision/recall of the union of predicted boxes vs the union of labelled boxes per class (4 px grid)
+
+Scene-group bootstrap: 500 replicates. Unit tests: `tests/test_granularity_eval.py`. Reports: `runs/analysis/novel/granularity/{wtbd_group,wtbd_official}/report.md`.
+
+| test set | model | standard AP50 | tolerant AP50 | region AP | standard AP50-95 | tolerant AP50-95 |
+|---|---|---|---|---|---|---|
+| WTBD-group | BladeYOLO-v2 | 0.561 [0.483, 0.791] | **0.680** [0.604, 0.831] | 0.603 [0.552, 0.743] | 0.244 | 0.306 |
+| WTBD-group | YOLO12-L | 0.400 [0.339, 0.678] | **0.524** [0.465, 0.740] | 0.441 [0.402, 0.592] | 0.185 | 0.246 |
+| WTBD-group | difference | +0.161 [0.023, 0.284] | +0.156 [0.001, 0.237] | **+0.162 [0.077, 0.236]** | +0.059 | +0.061 |
+| WTBD official | BladeYOLO-v2 | 0.815 | 0.889 | 0.771 | 0.481 | 0.509 |
+| WTBD official | YOLO12-L | 0.690 | 0.800 | 0.666 | 0.377 | 0.433 |
+
+Per class on WTBD-group, BladeYOLO-v2 AP50 standard / tolerant / region:
+
+| class | standard | tolerant | region |
+|---|---|---|---|
+| craze | 0.099 | **0.661** | 0.427 |
+| corrosion | 0.626 | 0.676 | 0.684 |
+| surface_injure | 0.759 | 0.816 | 0.689 |
+| thunderstrike | 1.000 | 1.000 | 0.682 |
+| crack | 0.352 | 0.356 | 0.491 |
+| hide_craze | 0.530 | 0.568 | 0.645 |
+
+**Findings:**
+1. **Box splitting accounts for about +0.12 AP50 for both models.** That is roughly 27% of BladeYOLO-v2's apparent AP50 shortfall on the leak-free test. Craze goes from 0.099 to 0.661: the "craze failure" of §11 is almost entirely the split-segment labelling.
+2. **The model comparison is stable across all three scores** (+0.16 each). The region metric gives the tightest interval for the difference ([0.077, 0.236]). It also shows a crack gap (region 0.49 vs 0.25) that box AP hides (0.35 vs 0.39).
+3. **Hypothesis: part of the leakage inflation is memorised box splitting.** The gap between the official and leak-free splits shrinks as the metric becomes split-invariant:
+
+   | | standard | tolerant | region |
+   |---|---|---|---|
+   | BladeYOLO-v2 | +0.254 | +0.209 | +0.168 |
+   | YOLO12-L | +0.290 | +0.276 | +0.225 |
+
+   A test image whose twin was in training also carries that twin's box splitting, and a model can reproduce the splitting, not only find the defect. This is consistent with Experiment 3, but not proven.
+
+### Experiment 3: cross-view label audit (`tools/view_label_audit.py`)
+**Method:**
+- For every pair of WTBD images showing the same surface (DINOv2 nearest neighbours, then flip-aware ORB + RANSAC similarity transform, ≥ 25 inliers), project each label into the other image.
+- Classify it as agree (same class, IoU ≥ 0.5), class conflict, split (cut into boxes differently), loose, or missing.
+- **Local verification:** a label is audited only if ≥ 8 of the match's inlier keypoints fall inside its own box. Without this, matches on burned-in captions and sky linked different blades: blade numbers 324 vs 322 and 326 were seen on example sheets, and "missing" fell from 5.0% to 1.4% once the check was added.
+- **Strata:** same view (the moved frame covers ≥ 70% of the other image: augmented copies, exact alignment) vs other view (perspective not modelled: an upper bound on disagreement).
+
+Unit test: `tests/test_view_label_audit.py` (recovers a known flip + rotation + scale at IoU 0.985). Example sheets were checked by eye: `runs/analysis/novel/label_audit/wtbd/examples_*.jpg`.
+
+| class | same-view agreement | split | loose | missing | other-view agreement |
+|---|---|---|---|---|---|
+| corrosion | **65.4%** | 115 | 43 | 1 | 33.5% |
+| crack | 94.6% | 0 | 46 | 0 | 84.4% |
+| craze | 91.2% | 5 | 60 | 4 | 66.7% |
+| hide_craze | 82.9% | 5 | 25 | 3 | 40.0% |
+| surface_injure | 81.4% | 44 | 77 | 40 | 68.5% |
+| thunderstrike | 94.7% | 0 | 15 | 0 | 95.8% |
+| **all** | **86.0%** (2,957 of 3,440) | 4.9% | 7.7% | 1.4% | 64.1% (733 of 1,144) |
+
+The table covers 2,908 same-view and 1,133 other-view verified directed pairs.
+
+**Findings:**
+1. **WTBD's augmented copies were annotated independently, and inconsistently in extent, never in class.** 14% of labels on exactly aligned copies of the same image disagree, and there are **zero class conflicts**. The disagreement is about where damage starts and ends, and how it is cut into boxes. Corrosion along the blade edge is one long box in one copy and 3–4 pieces in another; the thunderstrike patch's edge strips are labelled in some copies and not others.
+2. **Self-consistency bounds what box AP can measure.**
+   - Corrosion copies agree only 65% of the time, and the models score 0.54–0.63 AP50. That is near the annotation's own consistency, so further corrosion "improvement" is mostly unmeasurable with these labels.
+   - Crack copies agree 95%, while the models score 0.35–0.39. **Crack is a genuine model weakness.**
+3. **This supports Experiment 1.** The label noise is the kind the tolerant and region metrics are designed to absorb (extent and splitting). It also explains how leakage can inflate box metrics beyond defect recognition.
+4. **Caveat:** disagreements concentrate in a few heavily duplicated scenes (e.g. the thunderstrike patch scene). Counts are per label occurrence, not per independent scene.
+
+### Experiment 2: conformal recall guarantees and leaked calibration (`tools/conformal_recall.py`)
+Conformal risk control picks a confidence threshold so that the expected share of missed defects is ≤ α. A defect counts as flagged if ≥ 50% of its box is covered by predictions above the threshold, of any class. Unit tests: `tests/test_conformal_recall.py` (the guarantee holds on synthetic data: mean miss 0.091 at α = 0.1).
+
+The comparison:
+- calibrating on **seen scenes** (group-train for the group model, or the official val split, 115 of 159 with train twins) vs on **unseen scenes** (group val)
+- deploying on unseen scenes in every case (group test, or the 36 official test images without a twin)
+
+Predictions were cached for the group-train, group-val and official-val splits (`runs/analysis/novel/predict_all.py`). Each setting uses 500 draws of 100 calibration images. Report: `runs/analysis/novel/conformal/report.md`.
+
+| model | calibrated on | deployed on | target α | realised miss rate | draws violating α | false alarms / image |
+|---|---|---|---|---|---|---|
+| BladeYOLO-v2 (group) | seen scenes (group-train) | unseen (group test) | 0.05 | 0.188 | 100% | 1.4 |
+| | | | **0.10** | **0.315** | **100%** | 1.0 |
+| | | | 0.20 | 0.570 | 100% | 0.6 |
+| BladeYOLO-v2 (group) | unseen scenes (group val) | unseen (group test) | 0.05 | 0.031 | 0% | 3.7 |
+| | | | **0.10** | **0.063** | **0%** | 2.4 |
+| | | | 0.20 | 0.116 | 0% | 1.7 |
+| YOLO12-L (group) | seen scenes | unseen | 0.10 | 0.376 | 100% | 1.1 |
+| YOLO12-L (group) | unseen scenes | unseen | 0.10 | 0.048 | 0% | 4.5 |
+| BladeYOLO-v2 (official) | official val (leaky) | test with a train twin (125) | 0.10 | 0.126 | 91% | 1.5 |
+| | | test without a twin (36) | **0.10** | **0.259** | **100%** | 1.3 |
+| YOLO12-L (official) | official val (leaky) | test with a twin | 0.10 | 0.071 | 8% | 3.1 |
+| | | test without a twin | 0.10 | 0.116 | 100% | 2.5 |
+
+**Findings:**
+1. **Calibrating on scenes the model has seen invalidates the guarantee.** Promised at most 10% missed defects, BladeYOLO-v2 misses 31.5% on new scenes, in every draw. Models are overconfident on what they memorised, so the calibrated threshold is far too high for new data.
+2. **Calibrating on unseen scenes restores it.** 6.3% missed at α = 0.1, zero violations, slightly conservative. The price is honest: 2.4 instead of 1.0 false alarms per image.
+3. **The published-split workflow fails in the same way.** Calibrating on the leaky official val split looks almost acceptable on test images that have a twin in train. On genuinely new images, the 36 without a twin, it misses 2.6× the promised rate. A leaky test set would hide the failure.
+4. **Practical rule for inspection systems:** calibration data must be split by scene from the training data, as test data must. A random split of augmented drone imagery gives a recall guarantee that does not hold in the field.
+
+**Caveats:**
+- Calibration units are images. Images of one scene are correlated, so group-level calibration (scene groups as units) would be the strict version.
+- The deployment sets are small: 161 images in 58 scenes, and 36 images.
+- Every deployment set comes from one wind farm.
+
+### Conclusions of Phase 16
+- **Box-level AP on amorphous defects mixes detection quality with annotation convention.** About 0.12 AP50 on WTBD is box splitting (Experiment 1), and WTBD's own copies of the same image agree on only 86% of labels, 65% for corrosion (Experiment 3). Granularity-tolerant and region scores should be reported alongside AP.
+- **Leakage does more than inflate scores.** Part of the inflation looks like memorised box splitting (Experiment 1, a hypothesis). Most consequentially, it breaks the statistical guarantees an industrial system would rely on (Experiment 2).
+- **Together with Phases 14–15,** this is a coherent methodological contribution: leakage in published blade datasets, measured inflation, granularity-aware evaluation, a label-consistency audit, and scene-aware calibration.
+
+---
+
+## 14. Engineering problems solved
 
 | Problem | Root cause | Fix | Commit |
 |---|---|---|---|
@@ -497,7 +618,7 @@ The class-subset check is `runs/analysis/bootstrap/robust_check.py`. The upper C
 
 ---
 
-## 14. Corrections to earlier conclusions
+## 15. Corrections to earlier conclusions
 
 | Earlier conclusion | Status | Why |
 |---|---|---|
@@ -514,7 +635,7 @@ The class-subset check is `runs/analysis/bootstrap/robust_check.py`. The upper C
 
 ---
 
-## 15. Run registry
+## 16. Run registry
 
 | Run folder | Data | Model | Epochs | Val best (mAP50 / 50-95) | Test (mAP50 / 50-95) | Notes |
 |---|---|---|---|---|---|---|
@@ -537,7 +658,7 @@ Val best is the best epoch in `results.csv` by fitness (0.1 × mAP50 + 0.9 × mA
 
 ---
 
-## 16. Datasets and artefacts
+## 17. Datasets and artefacts
 
 | Item | Location | Notes |
 |---|---|---|
@@ -553,18 +674,19 @@ Val best is the best epoch in `results.csv` by fitness (0.1 × mAP50 + 0.9 × mA
 | WTBD craze diagnosis | `runs/analysis/wtbd_craze/` | Contact sheets of test vs train craze |
 | WTBD leak subsets | `runs/analysis/wtbd_leak/` | `test_leak.csv`, subset metrics |
 | Scene bootstrap | `runs/analysis/bootstrap/` | Reports per split, scene groups, cached predictions, class-subset check |
+| Evaluation experiments | `runs/analysis/novel/` | `granularity/`, `label_audit/wtbd/` (with example sheets), `conformal/`, cached val/train predictions |
 | Caches | `.dataset_cache/` | DINOv2 embeddings (38,324 images), ORB verifications, crop embeddings |
 
 **Tools:**
-- dataset building and auditing: `build_dataset.py`, `check_overlap.py`, `audit_datasets.py`, `wtbd_groups.py`, `convert_wtbd.py`, `leak_subsets.py`, `bootstrap_ci.py`
-- labels and evaluation: `error_analysis.py`, `review_labels.py`, `apply_review.py`, `merge_regions.py`, `ensemble.py`, `class_crops.py`
+- dataset building and auditing: `build_dataset.py`, `check_overlap.py`, `audit_datasets.py`, `wtbd_groups.py`, `convert_wtbd.py`, `leak_subsets.py`, `bootstrap_ci.py`, `view_label_audit.py`
+- labels and evaluation: `error_analysis.py`, `review_labels.py`, `apply_review.py`, `merge_regions.py`, `ensemble.py`, `class_crops.py`, `granularity_eval.py`, `conformal_recall.py`
 - debugging and setup: `probe_nan.py`, `setup_windows.ps1` (`diagnose_nan.py` and `eval_by_source.py` were removed on 14 Oct; they are in the git history)
 
-**Tests** (`tests/`): `test_ss2d`, `test_wiou`, `test_model`, `test_augment`, `test_fp32_blocks`, `test_merge_regions`, `test_deform_offsets`. All pass in `.venv`.
+**Tests** (`tests/`): `test_ss2d`, `test_wiou`, `test_model`, `test_augment`, `test_fp32_blocks`, `test_merge_regions`, `test_deform_offsets`, `test_granularity_eval`, `test_view_label_audit`, `test_conformal_recall`. All pass in `.venv`.
 
 ---
 
-## 17. Open work and next steps
+## 18. Open work and next steps
 
 Ordered by how much each step strengthens the main claims, with rough Kaggle cost (2×T4; one WTBD run ≈ 2 h).
 
@@ -583,10 +705,17 @@ Ordered by how much each step strengthens the main claims, with rough Kaggle cos
 8. **Elongated defects:** the craze test scene is labelled as 2–3 segment boxes and predicted as one. Score with a region-merged convention (`tools/merge_regions.py`) as a diagnostic, and report it separately.
 9. **Optional pretraining** on fengChe + WTBs2025, then fine-tuning on WTBD, excluding Beijing, which contains WTBD test photos. Only worth it if cross-validation shows overfitting.
 
-**D. Write-up**
-10. **Results summary for the professor.** Cover the reproduction gap, the leakage evidence on two datasets, the leak-free protocol, the 2×2 table with intervals, and the honest architecture claim. Optionally send the WTBD authors the group-split CSV.
+**D. Follow-ups to the evaluation experiments (Phase 16)**
+10. **Train for the tolerant objective:** a many-to-one assignment in the detection loss, so the model isn't penalised during training for covering several annotator segments. One Kaggle run on WTBD-group, scored with all three metrics.
+11. **Reward fine-tuning on the region / tolerant score** (REINFORCE, as in "Tuning computer vision models with task rewards", 2023). This is the place where RL fits this project; it is riskier than step 10.
+12. **Group-level conformal calibration:** scene groups as units, and conformal risk control at the defect level per class. Report coverage vs false-alarm curves for an inspection operating point.
+13. **Run the label audit on WTBlade and Wind Surface Defect,** both of which contain augmented copies, to see whether inconsistent re-annotation of copies is common across published blade datasets.
+14. **Test the "memorised box splitting" hypothesis directly:** on the official test, compare tolerant-vs-standard gains for images with and without a train twin.
 
-## 18. Working conventions
+**E. Write-up**
+15. **Results summary for the professor.** Cover the reproduction gap, the leakage evidence on two datasets, the leak-free protocol, the 2×2 table with intervals, the honest architecture claim, and the Phase 16 evaluation findings. Optionally send the WTBD authors the group-split CSV.
+
+## 19. Working conventions
 
 - **Testing:** tests and analyses run in the project's own `.venv`, with outputs under `runs/` and never `/tmp` ("research projects can have their own testing environments").
 - **NaN handling:** fix the root cause. Batches are only dropped by the guard as a last line of defence, logged and reported.
