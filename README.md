@@ -94,7 +94,10 @@ between two runs (`runs/analysis/bootstrap/<name>/report.md`); the group test se
 `tools/leak_subsets.py` scores a model separately on official test images with and without a twin in train.
 Evaluation experiments (research log, Phase 16): `tools/granularity_eval.py` (standard vs granularity-tolerant vs
 region AP), `tools/view_label_audit.py` (label consistency across verified views of the same surface) and
-`tools/conformal_recall.py` (recall guarantees by conformal risk control, calibrated on seen vs unseen scenes).
+`tools/conformal_recall.py` (recall guarantees by conformal risk control on image or scene units, calibrated on seen
+vs unseen scenes, with a recall / false-alarm operating curve). `train.py --tolerant` trains with split-tolerant box
+targets (`models/tolerant.py`): a label or the region of touching same-class labels, whichever the prediction is closer
+to (research log, Phase 17).
 (WTBs2025, *Scientific Data* 13:1310, 2026, was also audited with `tools/build_dataset.py --native wtbs`: of 7,544
 images, 1,486 unique, learnable ones remain after removing augmented copies, GAN images and sub-16 px defects.)
 

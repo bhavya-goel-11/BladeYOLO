@@ -59,6 +59,8 @@ def parse_args():
     p.add_argument("--rot90", type=float, default=0.5,
                    help="probability of a random quarter turn (with the flips: all 8 orientations); 0 disables")
     p.add_argument("--no-amp", action="store_true", help="train in fp32 (slower; for debugging)")
+    p.add_argument("--tolerant", action="store_true",
+                   help="split-tolerant box targets: a label or the region of touching same-class labels (models/tolerant.py)")
     p.add_argument("--test", default=None, metavar="WEIGHTS",
                    help="only evaluate WEIGHTS (e.g. a run's best.pt) on the test split of --data, then exit")
     return p.parse_args()
@@ -102,6 +104,7 @@ def main():
     args = parse_args()
     os.environ["BLADEYOLO_BOX_LOSS"] = args.box_loss  # read by `import models`, inherited by DDP workers
     os.environ["BLADEYOLO_ROT90"] = str(args.rot90)  # read by BladeTrainer.build_dataset, inherited by DDP workers
+    os.environ["BLADEYOLO_TOLERANT"] = "1" if args.tolerant else "0"  # read by `import models`, inherited by DDP workers
     sys.path.insert(0, ROOT_DIR)  # DDP workers copy sys.path, so they can import `models` too
 
     import torch

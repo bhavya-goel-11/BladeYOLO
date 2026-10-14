@@ -55,7 +55,7 @@ def load(root):
         if not os.path.isdir(img_dir):
             continue
         for f in sorted(os.listdir(img_dir)):
-            p = os.path.abspath(os.path.join(img_dir, f))
+            p = os.path.join(img_dir, f)  # as given: the embedding cache is keyed by path (relative to the repo root)
             H, W = cv2.imread(p).shape[:2]
             lab = os.path.join(root, split, "labels", os.path.splitext(f)[0] + ".txt")
             rows = [list(map(float, l.split())) for l in open(lab) if l.strip()] if os.path.exists(lab) else []

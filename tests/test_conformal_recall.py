@@ -15,12 +15,27 @@ def test_flag_conf():
     part = np.array([[0, 0, 40, 100, 0.9, 0]])  # 40% only
     two = np.array([[0, 0, 40, 100, 0.9, 0], [40, 0, 100, 100, 0.3, 1]])  # 40% + 60%: flagged once both are on
     assert cr.flag_conf(gt, full)[0] == 0.8 and cr.flag_conf(gt, part)[0] == 0 and cr.flag_conf(gt, two)[0] == 0.3
+    assert cr.flag_conf(gt, full, class_aware=True)[0] == 0  # class 3 prediction on a class 0 defect
+    assert cr.flag_conf(gt, two, class_aware=True)[0] == 0  # only the class-0 half covers it
     print("ok test_flag_conf")
+
+
+def test_false_alarms_and_scene_units():
+    gt = np.array([[0, 0, 0, 100, 100]], float)
+    preds = np.array([[0, 0, 100, 100, 0.9, 0], [10, 10, 60, 60, 0.5, 1], [300, 300, 350, 350, 0.4, 2]])
+    assert list(cr.false_alarm_conf(gt, preds)) == [0.4]  # only the box away from the defect
+    imgs = {"a": dict(gt=gt), "b": dict(gt=gt), "c": dict(gt=np.zeros((0, 5)))}
+    P = {"a": preds, "b": preds[2:], "c": preds[2:]}
+    u = cr.units(imgs, P, groups=[["a", "b"], ["c"]])
+    assert len(u) == 1 and u[0][2] == 2  # scene of a and b; c has no defects
+    assert list(cr.loss_matrix(u, np.array([0.5, 0.95]))[0]) == [0.5, 1.0]  # b's defect is missed at any threshold
+    assert cr.alarm_matrix(u, np.array([0.3]))[0, 0] == 1.0  # two false alarms over two images
+    print("ok test_false_alarms_and_scene_units")
 
 
 def test_calibration_controls_risk():
     rng = np.random.default_rng(0)
-    pool = [(rng.uniform(0, 1, 3), np.zeros(0)) for _ in range(20000)]  # defects' flag thresholds ~ U(0, 1)
+    pool = [(rng.uniform(0, 1, 3), np.zeros(0), 1) for _ in range(20000)]  # defects' flag thresholds ~ U(0, 1)
     grid = np.linspace(0, 1, 1001)
     misses = []
     for _ in range(200):
@@ -34,4 +49,5 @@ def test_calibration_controls_risk():
 
 if __name__ == "__main__":
     test_flag_conf()
+    test_false_alarms_and_scene_units()
     test_calibration_controls_risk()

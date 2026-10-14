@@ -14,9 +14,16 @@ positive. Per class, at IoU 0.5 (or averaged over 0.50:0.95):
 Scene-group bootstrap intervals (groups.csv from tools/bootstrap_ci.py) for each score and for the difference between
 the first two runs.
 
+--subsets CSV (columns: image, <subset>) compares image subsets, e.g. official test images with and without a train
+twin (runs/analysis/wtbd_leak/test_leak.csv): the gain of the tolerant and region scores over the standard one per
+subset, over the classes with >= MIN_LABELS labels in every subset, and the paired difference of gains.
+
 Usage:
     python tools/granularity_eval.py runs/.../bladeyolo2_wtbd_group runs/.../yolo12l_wtbd_group \
         --data external/WTBD-group --preds runs/analysis/bootstrap/wtbd_group --name wtbd_group
+    python tools/granularity_eval.py runs/.../bladeyolo2_wtbd_official runs/.../yolo12l_wtbd_official \
+        --data external/WTBD-official --preds runs/analysis/bootstrap/wtbd_official --name wtbd_official_twins \
+        --subsets runs/analysis/wtbd_leak/test_leak.csv
 Writes runs/analysis/novel/granularity/<name>/{report.md, report.json}.
 """
 
@@ -37,6 +44,7 @@ import error_analysis as ea  # noqa: E402
 
 GRID = 4  # px per region cell at the 640 input
 N_TAU = 60  # confidence thresholds for the region curve
+MIN_LABELS = 5  # labels of a class in every subset for --subsets comparisons
 
 
 def inside_frac(a, b):
@@ -182,6 +190,7 @@ def main():
     ap.add_argument("--preds", required=True, help="folder of a tools/bootstrap_ci.py report (preds/, groups.csv)")
     ap.add_argument("--name", required=True)
     ap.add_argument("--n", type=int, default=500, help="bootstrap replicates")
+    ap.add_argument("--subsets", default=None, help="CSV image,<subset>: compare score gains between image subsets")
     args = ap.parse_args()
 
     out = os.path.join(ROOT, "runs", "analysis", "novel", "granularity", args.name)
@@ -225,6 +234,8 @@ def main():
         d = boot[:, 0] - boot[:, 1]
         report["difference"] = {x: dict(value=float(np.nanmean(point[0][x]) - np.nanmean(point[1][x])), ci=ci(d[:, j]),
                                          p_le_0=float(np.mean(d[:, j] <= 0))) for j, x in enumerate(keys)}
+    if args.subsets:
+        report["subsets"] = subset_gains(args, imgs, pre, groups, labels, names, data)
     json.dump(report, open(os.path.join(out, "report.json"), "w"), indent=2)
 
     f = lambda v: f"{v['value']:.3f} [{v['ci'][0]:.3f}, {v['ci'][1]:.3f}]"  # noqa: E731
@@ -240,8 +251,62 @@ def main():
     md += [f"| {names[c]} | " + " | ".join(
         f"{point[k]['standard50'][c]:.3f} / {point[k]['tolerant50'][c]:.3f} / {point[k]['region'][c]:.3f}"
         for k in range(len(labels))) + " |" for c in range(nc)]
+    if args.subsets:
+        sg = report["subsets"]
+        g = lambda v: f"{v['value']:+.3f} [{v['ci'][0]:+.3f}, {v['ci'][1]:+.3f}]"  # noqa: E731
+        md += ["", f"## Score gains by subset ({sg['column']}; classes with >= {MIN_LABELS} labels in every subset: "
+               + ", ".join(sg["classes"]) + ")", "",
+               "| run | subset | images | standard AP50 | tolerant − standard | region − standard |", "|---|---|---|---|---|---|"]
+        for r in labels:
+            for v, x in sg["runs"][r]["subsets"].items():
+                md.append(f"| {r} | {v} | {x['images']} | {x['standard50']:.3f} | {g(x['tolerant_gain'])} | "
+                          f"{g(x['region_gain'])} |")
+            d = sg["runs"][r]["difference"]
+            md.append(f"| {r} | {d['label']} | | | {g(d['tolerant_gain'])} P(≤0)={d['tolerant_gain']['p_le_0']:.2f} | "
+                      f"{g(d['region_gain'])} P(≤0)={d['region_gain']['p_le_0']:.2f} |")
     open(os.path.join(out, "report.md"), "w").write("\n".join(md) + "\n")
     print("\n".join(md))
+
+
+def subset_gains(args, imgs, pre, groups, labels, names, data):
+    """Gain of the tolerant / region score over the standard one per image subset, and the paired difference."""
+    col = None
+    sub = {}
+    for r in csv.DictReader(open(args.subsets)):
+        col = col or [k for k in r if k != "image"][0]
+        sub[os.path.join(data, args.split, "images", r["image"])] = r[col]
+    values = sorted(set(sub.values()))
+    files = {v: [f for f in sorted(imgs) if sub.get(f) == v] for v in values}
+    nc = len(names)
+    keep = [c for c in range(nc) if all(sum(int((imgs[f]["gt"][:, 0] == c).sum()) for f in files[v]) >= MIN_LABELS
+                                        for v in values)]
+
+    def gains(q, fs):
+        s = scores(q, fs, nc)
+        st, to, re = (np.nanmean(s[x][keep]) for x in ("standard50", "tolerant50", "region"))
+        return st, to - st, re - st
+
+    rng = np.random.default_rng(1)
+    draws = [[f for gi in rng.integers(0, len(groups), len(groups)) for f in groups[gi]] for _ in range(args.n)]
+    ci = lambda x: [float(np.nanpercentile(x, 2.5)), float(np.nanpercentile(x, 97.5))]  # noqa: E731
+    out = dict(column=col, classes=[names[c] for c in keep], runs={})
+    for k, r in enumerate(labels):
+        boot = {v: np.array([gains(pre[k], [f for f in d if sub.get(f) == v]) for d in draws]) for v in values}
+        res = {}
+        for v in values:
+            st, tg, rg = gains(pre[k], files[v])
+            res[v] = dict(images=len(files[v]), standard50=float(st), tolerant_gain=dict(value=float(tg), ci=ci(boot[v][:, 1])),
+                          region_gain=dict(value=float(rg), ci=ci(boot[v][:, 2])))
+        a, b = values[-1], values[0]
+        dt, dr = boot[a][:, 1] - boot[b][:, 1], boot[a][:, 2] - boot[b][:, 2]
+        diff = dict(label=f"{col}={a} − {col}={b}",
+                    tolerant_gain=dict(value=res[a]["tolerant_gain"]["value"] - res[b]["tolerant_gain"]["value"], ci=ci(dt),
+                                       p_le_0=float(np.mean(dt <= 0))),
+                    region_gain=dict(value=res[a]["region_gain"]["value"] - res[b]["region_gain"]["value"], ci=ci(dr),
+                                     p_le_0=float(np.mean(dr <= 0))))
+        out["runs"][r] = dict(subsets=res, difference=diff)
+        print(f"  subsets done for {r}", flush=True)
+    return out
 
 
 if __name__ == "__main__":
