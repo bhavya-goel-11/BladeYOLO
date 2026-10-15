@@ -12,26 +12,25 @@ import os
 from ultralytics.nn import tasks
 
 from . import precision, tolerant, wiou
-from .backbone import BladeBackbone, ensure_dinov3_importable
+from .dino_weights import ensure_dinov3_importable
 from .dino_fusion import DinoConv, DinoFuse
-from .morphology import C2fMorph, C2fMorphRes
-from .ss2d import C2fSS2D, C2fSS2DRes
+from .morphology import C2fMorphRes
+from .ss2d import C2fSS2DRes
 
-__all__ = ("BladeBackbone", "C2fMorph", "C2fMorphRes", "C2fSS2D", "C2fSS2DRes", "DinoConv", "DinoFuse")
+__all__ = ("C2fMorphRes", "C2fSS2DRes", "DinoConv", "DinoFuse")
 
 # parse_model only infers channels (and inserts the repeat count) for blocks it recognises by identity, so while a
 # model is being parsed our blocks are bound to built-in slots with the same call signature that our YAMLs never use:
-#   C3x, C3Ghost, C3TR, C2 (c1, c2, n, shortcut, g, e)  CSP blocks
+#   C3TR, C2     (c1, c2, n, shortcut, g, e)  CSP blocks
 #   GhostConv    (c1, c2, k, s)               conv layer, output width scaled like Conv
 #   CBFuse       list input, output channels = those of the last input
-_SLOTS = {"C3x": C2fMorph, "C3Ghost": C2fSS2D, "C3TR": C2fMorphRes, "C2": C2fSS2DRes, "GhostConv": DinoConv,
-          "CBFuse": DinoFuse}
+_SLOTS = {"C3TR": C2fMorphRes, "C2": C2fSS2DRes, "GhostConv": DinoConv, "CBFuse": DinoFuse}
 
 
 def _register():
     if getattr(tasks, "_bladeyolo_registered", False):
         return
-    for cls in (BladeBackbone, C2fMorph, C2fMorphRes, C2fSS2D, C2fSS2DRes, DinoConv, DinoFuse):
+    for cls in (C2fMorphRes, C2fSS2DRes, DinoConv, DinoFuse):
         setattr(tasks, cls.__name__, cls)
 
     parse_model = tasks.parse_model

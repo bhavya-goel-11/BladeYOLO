@@ -20,7 +20,7 @@ import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
-import build_dataset as B  # noqa: E402
+import matching as mt  # noqa: E402
 
 
 def main():
@@ -35,10 +35,10 @@ def main():
     names = {s: sorted(os.listdir(os.path.join(args.official, s, "images"))) for s in ("train", "test")}
     # embeddings and verifications are cached under the source image paths (tools/wtbd_groups.py)
     src = {s: [os.path.abspath(os.path.join(args.src, "JPEGImages", n)) for n in names[s]] for s in names}
-    E = B.dinov2_embeddings(src["train"] + src["test"], os.path.join(args.cache, "dinov2_vits14.npz"))
+    E = mt.dinov2_embeddings(src["train"] + src["test"], os.path.join(args.cache, "dinov2_vits14.npz"))
     Etr, Ete = E[:len(src["train"])], E[len(src["train"]):]
     sims = Ete @ Etr.T
-    top = np.argsort(-sims, axis=1)[:, :B.KNN]
+    top = np.argsort(-sims, axis=1)[:, :mt.KNN]
 
     vcache = os.path.join(args.cache, "verify.json")
     known = json.load(open(vcache)) if os.path.exists(vcache) else {}
@@ -48,7 +48,7 @@ def main():
     if todo:
         idx = sorted({p for t in todo for p in t})
         pos = {p: i for i, p in enumerate(idx)}
-        res = B.verify_pairs(idx, [(pos[a], pos[b]) for a, b in todo], args.workers)
+        res = mt.verify_pairs(idx, [(pos[a], pos[b]) for a, b in todo], args.workers)
         known.update({key(idx[a], idx[b]): list(v) for (a, b), v in res.items()})
         json.dump(known, open(vcache, "w"))
 
@@ -56,7 +56,7 @@ def main():
     for i, n in enumerate(names["test"]):
         twins = [(names["train"][int(j)], float(sims[i, j]), known[key(src["test"][i], src["train"][int(j)])][0])
                  for j in top[i]]
-        twins = [t for t in twins if t[1] >= B.DINO_GROUP or t[2] >= B.MIN_INLIERS]
+        twins = [t for t in twins if t[1] >= mt.DINO_GROUP or t[2] >= mt.MIN_INLIERS]
         rows.append((n, bool(twins), twins[0] if twins else None))
 
     os.makedirs(args.out, exist_ok=True)

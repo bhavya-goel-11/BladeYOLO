@@ -2,18 +2,16 @@
 
 WTBD's 1,065 images are 1024 px crops of ~2,500 raw drone photos with turbine metadata removed, and the authors'
 split is a seeded random shuffle of image indices, so neighbouring crops of one blade can sit in train and test.
-Same matching as tools/build_dataset.py: DINOv2 retrieval (k nearest neighbours), flip-aware ORB/RANSAC verification;
+Matching (tools/matching.py): DINOv2 retrieval (k nearest neighbours), flip-aware ORB/RANSAC verification;
 two images are the same scene if verified (>= MIN_INLIERS inliers) or embedding cosine >= DINO_GROUP.
   1. authors' split: held-out images with a same-scene image in train
   2. group split: connected same-scene groups assigned whole to train/val/test (class-stratified), audited until no
      held-out image matches a train image; written as <out>/split_groups.csv for tools/convert_wtbd.py --split-file
-  3. overlap with WindSurface-Defect-v3 (any split): WTBD images matching a v3 image
 Usage:
     python tools/wtbd_groups.py "external/WTBD/WT blade defect dataset" --out runs/analysis/wtbd
 """
 
 import argparse
-import collections
 import csv
 import json
 import os
@@ -24,7 +22,7 @@ import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
-import build_dataset as B  # noqa: E402
+import matching as mt  # noqa: E402
 from convert_wtbd import CLASSES  # noqa: E402
 
 
@@ -32,7 +30,6 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("src")
     ap.add_argument("--out", default=os.path.join(ROOT, "runs", "analysis", "wtbd"))
-    ap.add_argument("--v3", default=os.path.join(ROOT, "WindSurface-Defect-v3"))
     ap.add_argument("--cache", default=os.path.join(ROOT, ".dataset_cache"))
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--seed", type=int, default=0)
@@ -48,11 +45,7 @@ def main():
         boxes.append([CLASSES.index(o.find("name").text.strip()) for o in root.iter("object")])
     N = len(paths)
 
-    v3 = [os.path.join(args.v3, r["file"]) for r in csv.DictReader(open(os.path.join(args.v3, "manifest.csv")))]
-    v3_split = {os.path.join(args.v3, r["file"]): r["split"] for r in csv.DictReader(open(os.path.join(args.v3, "manifest.csv")))}
-    allp = paths + v3
-    E = B.dinov2_embeddings(allp, os.path.join(args.cache, "dinov2_vits14.npz"))
-    Ew, Ev = E[:N], E[N:]
+    Ew = mt.dinov2_embeddings(paths, os.path.join(args.cache, "dinov2_vits14.npz"))
 
     vcache = os.path.join(args.cache, "verify.json")
     known = json.load(open(vcache)) if os.path.exists(vcache) else {}
@@ -64,21 +57,21 @@ def main():
         if todo:
             idx = sorted({p for t in todo for p in t})
             pos = {p: i for i, p in enumerate(idx)}
-            res = B.verify_pairs(idx, [(pos[a], pos[b]) for a, b in todo], args.workers)
+            res = mt.verify_pairs(idx, [(pos[a], pos[b]) for a, b in todo], args.workers)
             known.update({key(idx[a], idx[b]): list(v) for (a, b), v in res.items()})
             json.dump(known, open(vcache, "w"))
         return {(a, b): known[key(a, b)][0] for a, b in pairs}
 
     # same-scene graph inside WTBD
-    nn_idx, nn_sim = B.knn(Ew, B.KNN)
+    nn_idx, nn_sim = mt.knn(Ew, mt.KNN)
     pairs = [(paths[a], paths[int(b)]) for a in range(N) for b in nn_idx[a]]
     inl = verified(pairs)
-    dsu = B.DSU(N)
+    dsu = mt.DSU(N)
     edges = set()
     for a in range(N):
         for b, s in zip(nn_idx[a], nn_sim[a]):
             b = int(b)
-            if s >= B.DINO_GROUP or inl[(paths[a], paths[b])] >= B.MIN_INLIERS:
+            if s >= mt.DINO_GROUP or inl[(paths[a], paths[b])] >= mt.MIN_INLIERS:
                 dsu.union(a, b)
                 edges.add((min(a, b), max(a, b)))
 
@@ -103,7 +96,7 @@ def main():
     for rnd in range(1, 13):
         groups = dsu.groups()
         counts = np.array([np.bincount([c for i in g for c in boxes[i]], minlength=len(CLASSES)) for g in groups])
-        assign = B.split_groups(counts, np.array([len(g) for g in groups]), args.seed)
+        assign = mt.split_groups(counts, np.array([len(g) for g in groups]), args.seed)
         split_of = [None] * N
         for g, s in zip(groups, assign):
             for i in g:
@@ -113,7 +106,7 @@ def main():
         top = train[np.argsort(-(Ew[held] @ Ew[train].T), axis=1)[:, :10]]
         ap_ = [(paths[int(a)], paths[int(b)]) for a, bs in zip(held, top) for b in bs]
         v = verified(ap_)
-        bad = [(a, b) for (a, b), n in v.items() if n >= B.MIN_INLIERS]
+        bad = [(a, b) for (a, b), n in v.items() if n >= mt.MIN_INLIERS]
         print(f"round {rnd}: {len(groups)} groups, {len(bad)} held-out/train matches")
         if not bad:
             break
@@ -129,20 +122,6 @@ def main():
         f.write("ImageID,Subset\n")
         f.writelines(f"{n},{s}\n" for n, s in zip(names, split_of))
 
-    # 3. overlap with v3
-    sims = Ew @ Ev.T
-    top = np.argsort(-sims, axis=1)[:, :5]
-    cand = [(paths[a], v3[int(b)]) for a in range(N) for b in top[a]]
-    v = verified(cand)
-    match = collections.defaultdict(set)
-    for (a, b), n in v.items():
-        if n >= B.MIN_INLIERS:
-            match[a].add(v3_split[b])
-    for a in range(N):
-        if sims[a, top[a, 0]] >= B.DINO_GROUP:
-            match[paths[a]].add(v3_split[v3[int(top[a, 0])]])
-    report["overlap_with_v3"] = dict(wtbd_images_matching_v3=len(match),
-                                     by_v3_split=dict(collections.Counter(s for ss in match.values() for s in ss)))
     json.dump(report, open(os.path.join(args.out, "report.json"), "w"), indent=2)
     print(json.dumps(report, indent=2))
 

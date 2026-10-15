@@ -40,7 +40,7 @@ import yaml
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import bootstrap_ci as bc  # noqa: E402
-import error_analysis as ea  # noqa: E402
+import detection_metrics as dm  # noqa: E402
 
 GRID = 4  # px per region cell at the 640 input
 N_TAU = 60  # confidence thresholds for the region curve
@@ -76,7 +76,7 @@ def match_image(g, p, t, tolerant):
     """g: (n,4) labels, p: (m,5) [x1,y1,x2,y2,conf] sorted by conf. Returns per prediction (recall weight, is_tp, keep)."""
     used = np.zeros(len(g), bool)
     out = []
-    iou = ea.iou_matrix(p[:, :4], g) if len(p) and len(g) else np.zeros((len(p), len(g)))
+    iou = dm.iou_matrix(p[:, :4], g) if len(p) and len(g) else np.zeros((len(p), len(g)))
     gin = inside_frac(g, p[:, :4]).T if len(p) and len(g) else np.zeros((len(p), len(g)))  # label inside prediction
     pin = inside_frac(p[:, :4], g) if len(p) and len(g) else np.zeros((len(p), len(g)))  # prediction inside label
     for i in range(len(p)):
@@ -96,7 +96,7 @@ def match_image(g, p, t, tolerant):
         group = np.where(((iou[i] >= t) | (gin[i] >= 0.5)) & free)[0]
         if len(group) > 1:
             u = np.array([g[group, 0].min(), g[group, 1].min(), g[group, 2].max(), g[group, 3].max()])
-            if ea.iou_matrix(p[i:i + 1, :4], u[None])[0, 0] >= t:
+            if dm.iou_matrix(p[i:i + 1, :4], u[None])[0, 0] >= t:
                 best = list(group)
         if best is not None:
             used[best] = True
@@ -125,7 +125,7 @@ def per_image(imgs, preds, nc, taus):
             p = p_all[p_all[:, 5] == c]
             p = p[np.argsort(-p[:, 4])]
             for m in box:
-                for k, t in enumerate(ea.IOU_THRS):
+                for k, t in enumerate(dm.IOU_THRS):
                     r = [(q[4], w, tp) for (w, tp, keep), q in zip(match_image(g, p[:, :5], t, m == "tolerant"), p) if keep]
                     x = np.array(r, float).reshape(-1, 3)
                     box[m][f][(c, k)] = (x[:, 0], x[:, 1], x[:, 2], len(g))
@@ -148,9 +148,9 @@ def per_image(imgs, preds, nc, taus):
 
 def box_ap(pre, files, nc, mode):
     """(nc, len(IOU_THRS)) AP over a multiset of images from precomputed matches."""
-    aps = np.full((nc, len(ea.IOU_THRS)), np.nan)
+    aps = np.full((nc, len(dm.IOU_THRS)), np.nan)
     for c in range(nc):
-        for k in range(len(ea.IOU_THRS)):
+        for k in range(len(dm.IOU_THRS)):
             ms = [pre[0][mode][f][(c, k)] for f in files]
             n = sum(m[3] for m in ms)
             if n:

@@ -9,7 +9,7 @@ import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
-import error_analysis as ea  # noqa: E402
+import detection_metrics as dm  # noqa: E402
 import view_label_audit as va  # noqa: E402
 
 
@@ -34,7 +34,7 @@ def test_projection_through_flip_rotation_scale():
     c[:, 0] = W - 1 - c[:, 0]  # the flip
     c = np.c_[c, np.ones(4)] @ R.T
     want = np.array([c[:, 0].min(), c[:, 1].min(), c[:, 0].max(), c[:, 1].max()])
-    iou = ea.iou_matrix(got[None], want[None])[0, 0]
+    iou = dm.iou_matrix(got[None], want[None])[0, 0]
     assert iou > 0.9, (iou, got, want, fl)
     # a label on the matched texture is supported; one on blank surface is not
     s = max(H, W) / 480

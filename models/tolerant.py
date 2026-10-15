@@ -4,7 +4,7 @@ Annotators cut one crack, crazing or eroded edge into several boxes, or draw one
 across copies of the same image (research log, Phase 16). The standard loss then penalises a prediction that covers
 the whole defect when the label happens to be split. Here every label also has an alternative target: the union of
 the touching same-class labels it belongs to (its "region"), if that union is not mostly background (member area
->= MIN_FILL of the union, the rule tools/merge_regions.py uses against diagonal staircases). Both places where boxes
+>= MIN_FILL of the union, the rule the retired v3.2 region merging used against diagonal staircases). Both places where boxes
 are compared accept either target:
   assignment  the task-aligned assigner scores an anchor by its better overlap with the label or with its region
   box loss    each positive anchor regresses towards whichever of the two its prediction already overlaps more

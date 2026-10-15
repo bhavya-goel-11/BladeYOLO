@@ -36,7 +36,7 @@ import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import bootstrap_ci as bc  # noqa: E402
-import error_analysis as ea  # noqa: E402
+import detection_metrics as dm  # noqa: E402
 
 RUNS = os.path.join(ROOT, "runs", "detect", "BladeYOLO_WindSurface")
 OUT = os.path.join(ROOT, "runs", "analysis", "novel", "conformal")
@@ -77,7 +77,7 @@ def false_alarm_conf(gt, preds):
     if not len(gt):
         return preds[:, 4]
     p, g = preds[:, :4], gt[:, 1:]
-    iou = ea.iou_matrix(p, g).max(1)
+    iou = dm.iou_matrix(p, g).max(1)
     x1 = np.maximum(p[:, None, 0], g[None, :, 0])
     y1 = np.maximum(p[:, None, 1], g[None, :, 1])
     x2 = np.minimum(p[:, None, 2], g[None, :, 2])

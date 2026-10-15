@@ -5,12 +5,12 @@
 | | |
 |---|---|
 | Researcher | Bhavya Goel |
-| Period | 3 Sep 2026 – 14 Oct 2026 |
+| Period | 3 Sep 2026 – 15 Oct 2026 |
 | Compute | Kaggle 2× Tesla T4 (all training since 9 Oct); A100 for Runs 5–7; local CPU machine (analysis only) |
 | Repository | github.com/bhavya-goel-11/BladeYOLO (`master`) |
 | Reference papers | BladeYOLO (IEEE TGRS 2026, `BladeYOLO.pdf`); GFD-YOLOX / Wind Surface Defect dataset (Appl. Soft Comput. 2025, `1-s2.0-S156849462501227X-main.pdf`); WTBD (Ji et al., *Scientific Data* 13:396, 2026, `s41597-026-06762-x.pdf`); WTBs2025 (*Scientific Data* 13:1310, 2026) |
 
-This log covers the whole project. Phases 1–5 (Sep 3 – Oct 6) summarise the original tentative research log (commit `6f6638a`, 6 Oct). That commit was removed from `master` by the 9 Oct reset but is still in the local git object store: `git show 6f6638a:research_log.md`. Later phases come from the working sessions, the git history and the run folders under `runs/detect/BladeYOLO_WindSurface/`. Where a later audit corrected an earlier conclusion, the correction appears in that phase and in the corrections section (§17).
+This log covers the whole project. Phases 1–5 (Sep 3 – Oct 6) summarise the original tentative research log (commit `6f6638a`, 6 Oct). That commit was removed from `master` by the 9 Oct reset but is still in the local git object store: `git show 6f6638a:research_log.md`. Later phases come from the working sessions, the git history and the run folders under `runs/detect/BladeYOLO_WindSurface/`. Where a later audit corrected an earlier conclusion, the correction appears in that phase and in the corrections section (§18).
 
 ---
 
@@ -28,12 +28,12 @@ This log covers the whole project. Phases 1–5 (Sep 3 – Oct 6) summarise the 
 10. [Phase 13: new datasets and the content-based audit (12–13 Oct)](#10-phase-13-new-datasets-and-the-content-based-audit-1213-oct)
 11. [Phase 14: WTBD training: leak-free vs published split (13 Oct)](#11-phase-14-wtbd-training-leak-free-vs-published-split-13-oct)
 12. [Phase 15: YOLO12-L baselines and scene-level confidence intervals (14 Oct)](#12-phase-15-yolo12-l-baselines-and-scene-level-confidence-intervals-14-oct)
-16. [Engineering problems solved](#16-engineering-problems-solved)
-17. [Corrections to earlier conclusions](#17-corrections-to-earlier-conclusions)
-18. [Run registry](#18-run-registry)
-19. [Datasets and artefacts](#19-datasets-and-artefacts)
-20. [Open work and next steps](#20-open-work-and-next-steps)
-21. [Working conventions](#21-working-conventions)
+17. [Engineering problems solved](#17-engineering-problems-solved)
+18. [Corrections to earlier conclusions](#18-corrections-to-earlier-conclusions)
+19. [Run registry](#19-run-registry)
+20. [Datasets and artefacts](#20-datasets-and-artefacts)
+21. [Open work and next steps](#21-open-work-and-next-steps)
+22. [Working conventions](#22-working-conventions)
 
 ---
 
@@ -474,7 +474,7 @@ The class-subset check is `runs/analysis/bootstrap/robust_check.py`. The upper C
 ### Conclusions
 - **The leakage result is robust:** both models, both metrics, about +0.27–0.29 mAP50 from the random split.
 - **The honest claim for the architecture:** "BladeYOLO-v2 scores 0.55 vs 0.44 mAP50 on a leak-free WTBD split (paired bootstrap +0.16, 95% CI 0.03–0.28). The gain is concentrated in lightning damage; on the other classes the evidence is inconclusive."
-- **More independent test scenes are needed** before per-class or architectural claims can be made with confidence. Options are group k-fold cross-validation or a second dataset (§20).
+- **More independent test scenes are needed** before per-class or architectural claims can be made with confidence. Options are group k-fold cross-validation or a second dataset (§21).
 
 ### Cleanup in this phase
 - Removed `tools/diagnose_nan.py`: a one-off investigation of the fixed SS2D fp16 bug, superseded by `tools/probe_nan.py` and the trainer's per-layer NaN report.
@@ -764,7 +764,87 @@ Ultralytics per-class mAP50-95 for corrosion: 0.13 → **0.26**.
 
 ---
 
-## 16. Engineering problems solved
+## 16. Phase 19: repository cleanup and a new direction: real-view consistency for data-limited detection (15 Oct)
+
+### Decision
+The analysis results of Phases 13–18 (leakage, label self-consistency, broken guarantees) are solid, but they are evaluation work. The goal from here is a **computer-vision method contribution**: reliable defect detectors from limited labelled data.
+
+What is no longer new, from a literature check:
+- **Box-to-dense supervision with foundation models:** Boxes2Pixels (2026) turns boxes into SAM masks and trains on frozen DINOv2, evaluated on wind-turbine inspection.
+- **DINOv3 as an inspection backbone:** benchmarked against ImageNet pretraining (2026).
+- **Training-free few-shot defect segmentation** with DINO and SAM (2025).
+
+### What limits us (from Phases 13–18)
+1. **Few independent scenes, not few images.** WTBD has about 330 scenes. Synthetic augmentation adds pixels, not new views of a defect.
+2. **Drone inspection produces overlapping real views of the same surface,** and `tools/matching.py` registers them with verified similarity transforms (about 4,000 WTBD pairs, about 70,000 WTBlade pairs). Until now they were only a leakage hazard.
+3. **Most available imagery is unlabelled** (sweeps, video frames, DTU NordTank).
+
+### Method to develop: real-view consistency (semi-supervised detection)
+In teacher–student semi-supervised detection, a teacher (an exponential moving average of the student) pseudo-labels unlabelled images, and the student learns to match them under synthetic augmentations.
+
+**Here, the second view is a genuinely different photograph of the same surface.** The teacher's detections on view A are mapped through the verified transform into view B, and become pseudo-labels for the student on B. Optionally, a feature-consistency loss is added at matched locations. Only regions with local keypoint support count, as in the label audit.
+
+**Hypotheses:**
+- real viewpoint, lighting and blur changes teach invariances that synthetic augmentation cannot
+- every unlabelled overlapping image becomes training signal
+- detecting a defect consistently across views favours whole-defect regions over arbitrary splits
+
+**Novelty check:** multi-view pseudo-labelling exists for aerial detection with synchronised cameras (MAVREC, CVPR 2024), and correspondence-based self-supervision exists for dense features. I found no teacher–student detection that uses geometric registration of real overlapping views as the consistency signal, evaluated on scene-leak-free splits. A deeper literature pass is due before writing.
+
+### Evaluation protocol
+- **Leak-free scene splits** (WTBD-group, then a WTBlade group split), several seeds, scene-level bootstrap intervals (`tools/bootstrap_ci.py`).
+- **Reliability as well as AP:** the conformal recall guarantee and the recall / false-alarm curve on new scenes (`tools/conformal_recall.py`).
+- **Baselines:**
+  - supervised only
+  - standard teacher–student with synthetic augmentations only
+  - real-view consistency
+- **Learning curves first** (step 1 below): if accuracy is flat between 50% and 100% of the labelled scenes, extra (pseudo-)labelled views will not pay, and the method would be redirected before any heavy engineering.
+
+### Cleanup
+All results and decisions are documented in this log. The working tree now holds only what the current work uses.
+
+**Code**
+- **Removed after `b374f4c`** (restore with `git checkout b374f4c -- <path>`):
+  - the merged-dataset builder and audit: `build_dataset.py`, `audit_datasets.py`, `check_overlap.py`, `class_crops.py`
+  - the v3 analysis and label tools: `error_analysis.py`, `review_labels.py`, `review_page.html`, `apply_review.py`, `merge_regions.py`, `ensemble.py`
+  - `setup_windows.ps1`
+  - the v1 model: `bladeyolo-l.yaml`, `models/backbone.py`'s `BladeBackbone`, `models/wavelet.py`
+  - `tests/test_merge_regions.py`
+- **Moved into small modules:** the shared image matching to `tools/matching.py`, the box metrics to `tools/detection_metrics.py`, and the DINOv3 loader to `models/dino_weights.py`.
+- **Checked:**
+  - `tools/wtbd_groups.py` reproduces the committed WTBD split byte-for-byte
+  - the bootstrap, granularity, conformal and leak tools reproduce their logged numbers
+  - all 28 unit tests pass
+
+**Data and artefacts deleted** (about 9 GB):
+- transfer bundles and upload zips
+- the derived builds of the retired v3 taxonomy (v2, v3, v3.1, v3.2, WTBs2025-clean)
+- the WTBD download archive (re-downloadable from figshare) and its unpacked copy
+- scratch, debug and per-source evaluation outputs
+- the v3 error-analysis, review and ensemble artefacts
+- the weights of retired runs
+
+**Kept:**
+- every raw source dataset (WindSurface-Defect, WTBlade-Defect, the two Beijing exports, WTBs2025, WTBD raw, WTBD-group/-official)
+- the five WTBD runs
+- `runs/analysis/archive/` (`results.csv`, `args.yaml` and test metrics of the seven retired runs, plus the human v3 label review `review_test_v3.json`)
+- the embedding and verification caches
+- the reference papers
+
+The root `bladeyolo.log` moved into `runs/detect/BladeYOLO_WindSurface/bladeyolo2_wtbd_group/` as that run's log.
+
+### Learning curves (step 1, ready)
+`tools/scene_fractions.py` draws nested subsets of WTBD-group's 224 training scenes: the best of 1,000 random scene orders, so each subset matches the full class mix and every class is present. The lists are committed. `train.py --train-subset` trains on them with the unchanged Kaggle dataset.
+
+| subset | scenes | images | craze / corrosion / surface_injure / thunderstrike / crack / hide_craze boxes |
+|---|---|---|---|
+| `tools/splits/wtbd_group_train_f25.txt` | 51 | 189 | 45 / 38 / 79 / 10 / 39 / 60 |
+| `tools/splits/wtbd_group_train_f50.txt` | 107 | 373 | 77 / 90 / 168 / 33 / 75 / 122 |
+| full train | 224 | 745 | 180 / 180 / 286 / 66 / 157 / 240 |
+
+---
+
+## 17. Engineering problems solved
 
 | Problem | Root cause | Fix | Commit |
 |---|---|---|---|
@@ -782,7 +862,7 @@ Ultralytics per-class mAP50-95 for corrosion: 0.13 → **0.26**.
 
 ---
 
-## 17. Corrections to earlier conclusions
+## 18. Corrections to earlier conclusions
 
 | Earlier conclusion | Status | Why |
 |---|---|---|
@@ -803,7 +883,7 @@ Ultralytics per-class mAP50-95 for corrosion: 0.13 → **0.26**.
 
 ---
 
-## 18. Run registry
+## 19. Run registry
 
 | Run folder | Data | Model | Epochs | Val best (mAP50 / 50-95) | Test (mAP50 / 50-95) | Notes |
 |---|---|---|---|---|---|---|
@@ -823,68 +903,64 @@ Ultralytics per-class mAP50-95 for corrosion: 0.13 → **0.26**.
 | **`yolo12l_wtbd_group`** | WTBD-group (leak-free) | YOLO12-L | 150 | 0.419 / 0.269 (epoch 130) | **0.438 / 0.206**; TTA 0.440 / 0.230 | Same recipe |
 | **`yolo12l_wtbd_official`** | WTBD official (**leaky**) | YOLO12-L | 120 | 0.665 / 0.394 (epoch 104) | **0.704 / 0.388**; TTA 0.734 / 0.438 | Same recipe |
 
-Val best is the best epoch in `results.csv` by fitness (0.1 × mAP50 + 0.9 × mAP50-95); the final validation of `best.pt` can differ slightly.
+Val best is the best epoch in `results.csv` by fitness (0.1 × mAP50 + 0.9 × mAP50-95); the final validation of `best.pt` can differ slightly. Since Phase 19 the retired runs (everything before WTBD) keep only `results.csv`, `args.yaml` and test metrics, in `runs/analysis/archive/run_<name>/`; their weights were deleted.
 
 ---
 
-## 19. Datasets and artefacts
+## 20. Datasets and artefacts
 
 | Item | Location | Notes |
 |---|---|---|
-| WindSurface-Defect (original) | `WindSurface-Defect/` | Leaky random split |
-| v2 / v3 / v3.1 / v3.2 | `WindSurface-Defect-v*/` | v3.1 = test review applied; v3.2 = region-merged labels |
-| WTBD raw | `external/WTBD/` | figshare download |
-| WTBD-group / WTBD-official | `external/WTBD-group/`, `external/WTBD-official/`; Kaggle `beegee11/wind-surface-defect/WTBD-yolo` | Built by `tools/convert_wtbd.py` |
-| WTBD group split | `tools/splits/wtbd_group_split.csv` (committed) | Zero-leak audited |
-| WTBs2025-clean | `WTBs2025-clean/` | Native 7-class audit set |
-| Dataset audit | `runs/analysis/datasets/report.md` | Scenes, purity, cross-dataset equivalence |
-| Error analysis (v3) | `runs/analysis/errors/report.md` | |
-| Label review | `runs/analysis/review/` | `review_test.json` |
-| WTBD craze diagnosis | `runs/analysis/wtbd_craze/` | Contact sheets of test vs train craze |
-| WTBD leak subsets | `runs/analysis/wtbd_leak/` | `test_leak.csv`, subset metrics |
-| Scene bootstrap | `runs/analysis/bootstrap/` | Reports per split, scene groups, cached predictions, class-subset check |
-| Evaluation experiments | `runs/analysis/novel/` | `granularity/`, `label_audit/wtbd/` (with example sheets), `conformal/`, cached val/train predictions |
-| Caches | `.dataset_cache/` | DINOv2 embeddings (38,324 images), ORB verifications, crop embeddings |
+| WTBD raw | `external/WTBD/` | figshare 10.6084/m9.figshare.30210175 |
+| WTBD-group / WTBD-official | `external/WTBD-group/`, `external/WTBD-official/`; Kaggle `beegee11/wind-surface-defect/WTBD-yolo` | `tools/convert_wtbd.py` |
+| WTBD group split, scene fractions | `tools/splits/` (committed) | Zero-leak audited split; nested 25% / 50% training subsets |
+| Other raw datasets | `WindSurface-Defect/`, `WTBlade-Defect/`, `wind-turbine.v1i.yolov12/`, `wind_turbine_check.v1i.yolov12/`, `WTBs2025/` | Official classes only |
+| Current runs | `runs/detect/BladeYOLO_WindSurface/` | `bladeyolo2_wtbd_{group,official,group_tolerant}`, `yolo12l_wtbd_{group,official}` |
+| Retired runs and the v3 label review | `runs/analysis/archive/` | `results.csv`, `args.yaml`, test metrics; `review_test_v3.json` |
+| Dataset audit (Phase 13) | `runs/analysis/datasets/report.md` | |
+| WTBD leakage and craze diagnosis | `runs/analysis/{wtbd, wtbd_leak, wtbd_craze}/` | |
+| Scene bootstrap | `runs/analysis/bootstrap/` | Reports, scene groups, cached predictions |
+| Evaluation experiments | `runs/analysis/novel/` | `granularity/`, `label_audit/{wtbd,windsurface,wtblade}/`, `conformal/`, cached predictions |
+| NaN replay | `runs/analysis/nan_probe/` | Layer-6 replay of the tolerant run's NaN batches |
+| Caches | `.dataset_cache/` | DINOv2 embeddings, ORB verifications |
 
 **Tools:**
-- dataset building and auditing: `build_dataset.py`, `check_overlap.py`, `audit_datasets.py`, `wtbd_groups.py`, `convert_wtbd.py`, `leak_subsets.py`, `bootstrap_ci.py`, `view_label_audit.py`
-- labels and evaluation: `error_analysis.py`, `review_labels.py`, `apply_review.py`, `merge_regions.py`, `ensemble.py`, `class_crops.py`, `granularity_eval.py`, `conformal_recall.py`
-- debugging and setup: `probe_nan.py`, `setup_windows.ps1` (`diagnose_nan.py` and `eval_by_source.py` were removed on 14 Oct; they are in the git history)
+- matching and splits: `matching.py`, `wtbd_groups.py`, `convert_wtbd.py`, `scene_fractions.py`
+- evaluation: `detection_metrics.py`, `bootstrap_ci.py`, `leak_subsets.py`, `granularity_eval.py`, `view_label_audit.py`, `conformal_recall.py`
+- debugging: `probe_nan.py`
 
-**Tests** (`tests/`): `test_ss2d`, `test_wiou`, `test_model`, `test_augment`, `test_fp32_blocks`, `test_merge_regions`, `test_deform_offsets`, `test_granularity_eval`, `test_view_label_audit`, `test_conformal_recall`, `test_tolerant` (fp16 attention test in `test_fp32_blocks`). All pass in `.venv`.
+Everything retired is restorable from commit `b374f4c`.
+
+**Tests** (`tests/`): `test_ss2d`, `test_wiou`, `test_model`, `test_augment`, `test_fp32_blocks` (incl. fp16 attention), `test_deform_offsets`, `test_granularity_eval`, `test_view_label_audit`, `test_conformal_recall`, `test_tolerant`. All pass in `.venv`.
 
 ---
 
-## 20. Open work and next steps
+## 21. Open work and next steps
 
-Ordered by how much each step strengthens the main claims, with rough Kaggle cost (2×T4; one WTBD run ≈ 2 h).
+**A. Real-view consistency for data-limited detection (Phase 19)**
+1. **Learning curves** (Kaggle, 4 runs at 25% and 50% of the training scenes; the 100% runs exist). Same recipe, full val and test:
+   ```
+   python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --name bladeyolo2_wtbd_group_f25 --epochs 150
+   python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --train-subset tools/splits/wtbd_group_train_f50.txt --name bladeyolo2_wtbd_group_f50 --epochs 150
+   python train.py --data .../WTBD-group/data.yaml --model yolo12l.pt --box-loss ciou --train-subset tools/splits/wtbd_group_train_f25.txt --name yolo12l_wtbd_group_f25 --epochs 150
+   python train.py --data .../WTBD-group/data.yaml --model yolo12l.pt --box-loss ciou --train-subset tools/splits/wtbd_group_train_f50.txt --name yolo12l_wtbd_group_f50 --epochs 150
+   ```
+2. **Registered-view pair index:**
+   - verified view pairs within the training images, from the label audit's transforms
+   - an unlabelled pool: WTBlade and Wind Surface frames, and DTU NordTank raw imagery after a licence check (CC BY-NC, fine for research)
+   - no test or validation scene, and no image matching one, enters the pool (checked with `tools/matching.py`)
+3. **Teacher–student training:**
+   - an EMA teacher, with pseudo-labels transferred through the verified transform and confidence filtering
+   - the synthetic-augmentation variant as the baseline
+   - unit tests for the box transfer and the EMA
+4. **Runs:** supervised vs synthetic teacher–student vs real-view teacher–student on WTBD-group (2 seeds each), then on a WTBlade group split. Scored with the scene bootstrap and the conformal operating curve.
 
-**A. Make the architecture claim decidable**
-1. **Group k-fold cross-validation on WTBD.** Use 5 folds of whole scene groups, each fold's test about 70 scenes, so every one of the ~330–368 scenes is tested once. Pooling all folds gives about 6× more test scenes than the single split, and craze and thunderstrike get enough scenes to judge. Cost: 5 folds × 2 models × ~2 h ≈ 20 h, two to three sessions. Needs a fold option in `tools/wtbd_groups.py`.
-2. **Separate the loss from the architecture.** BladeYOLO-v2 trained with WIoU and YOLO12-L with CIoU, so they differ in both. Run `bladeyolo2-l.yaml --box-loss ciou` on WTBD-group (~2 h). This also tests whether WIoU explains YOLO12-L's lead on corrosion.
-3. **Component ablation.** Train BladeYOLO-v2 without DINOv3 fusion, and separately without the deformable/selective-scan refinements, to see which branch carries the thunderstrike gain. That is 2 runs (~4 h) and needs two small yaml variants.
-4. **Seeds.** Repeat the group-split pair with `--seed 1` and `--seed 2` (~8 h) to measure run-to-run variance next to the scene variance.
+**B. Carried over**
+5. **Class-selective split tolerance:** apply `--tolerant` only to classes with low label self-consistency (corrosion; possibly craze and hide_craze), chosen from the label audit (§14–§15). It can be combined with A as the box loss.
+6. **Seeds** for the existing WTBD-group pair, and the **loss vs architecture separation** (`bladeyolo2-l.yaml --box-loss ciou`).
+7. **WTBlade group split** with its official classes, for a second benchmark. Licence: it contains DTU NordTank (CC BY-NC) and synthetic copy-paste images (§14).
 
-**B. A second, larger leak-free benchmark**
-5. **WTBlade / fengChe with its own classes.** It has 803 independent scenes (WTBD-group test has 58) and is CC BY 4.0. Its 7 native classes all have 80–425 scenes. Build a group split with the existing tools: `build_dataset.py` matching and `wtbd_groups.py`-style auditing. Running both models on it (~2 × 2–3 h) would give much tighter intervals and a second dataset for the claims.
-6. **Cross-dataset check, no training.** Run the WTBD models class-agnostically ("is there damage here?") on fengChe, which shares only 3 images with WTBD. This tests generalisation to another source.
-
-**C. Improve the model where it is weak**
-7. **Box tightness:** train at 832 or 1024 px (WTBD is natively 1024 px). Corrosion mAP50-95 (0.13) and crack are the weakest. Cost ~3–4 h per run at 1024 with a smaller batch.
-8. **Elongated defects:** the craze test scene is labelled as 2–3 segment boxes and predicted as one. Score with a region-merged convention (`tools/merge_regions.py`) as a diagnostic, and report it separately.
-9. **Optional pretraining** on fengChe + WTBs2025, then fine-tuning on WTBD, excluding Beijing, which contains WTBD test photos. Only worth it if cross-validation shows overfitting.
-
-**D. Follow-ups to the evaluation experiments (Phase 16), status after Phase 17**
-10. **Split-tolerant training** (`--tolerant`): run done (§15). No overall effect; corrosion improves, surface_injure worsens. Next: class-selective tolerance, chosen from the label audit, plus seeds.
-11. **Reward fine-tuning (RL):** remains deferred; blanket split tolerance did not move the aggregate (§15).
-12. **Scene-level and class-aware conformal calibration, operating curve:** done (§14).
-13. **Label audit on other datasets:** done. Axis-aligned agreement: WTBD 87.3%, WTBlade 86.0%, Wind Surface 83.8%. WTBlade contains synthetic copy-paste images and DTU NordTank imagery (§14).
-14. **Memorised box splitting:** tested, not supported (§14).
-
-**E. Write-up**
-15. **Results summary for the professor.** Cover the reproduction gap, the leakage evidence on two datasets, the leak-free protocol, the 2×2 table with intervals, the honest architecture claim, and the Phase 16 evaluation findings. Optionally send the WTBD authors the group-split CSV.
-
-## 21. Working conventions
+## 22. Working conventions
 
 - **Classes:** datasets are used with their official classes only; the custom v3 taxonomy (Phase 9) is retired.
 - **Testing:** tests and analyses run in the project's own `.venv`, with outputs under `runs/` and never `/tmp` ("research projects can have their own testing environments").

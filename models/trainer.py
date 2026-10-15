@@ -51,7 +51,7 @@ class BladeTrainer(DetectionTrainer):
     """DetectionTrainer that keeps DINOv3 frozen and initialises pretrained backbones.
 
     Ultralytics re-enables requires_grad on every parameter not listed in `freeze`, so the DINOv3 weights are named
-    there (layer 0 is BladeBackbone or DinoConv, its ViT lives under `.dino`). For models without them, e.g. a stock
+    there (layer 0 is DinoConv, its ViT lives under `.dino`). For models without them, e.g. a stock
     YOLO baseline, the pattern matches nothing. A model YAML with a `pretrained` section (weights, layer map) is
     initialised from that checkpoint when training starts from the YAML (not when resuming or fine-tuning a .pt).
     BLADEYOLO_ROT90=p adds random quarter turns to the training augmentation (an environment variable, so DDP

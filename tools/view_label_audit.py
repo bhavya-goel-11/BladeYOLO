@@ -1,7 +1,7 @@
 """Cross-view label audit: are the same defects labelled the same way in different images of the same surface?
 
 Pairs of images showing the same surface (augmented copies, overlapping crops, neighbouring frames) are found as in
-tools/build_dataset.py: DINOv2 nearest neighbours, then flip-aware ORB matching with a RANSAC similarity transform
+tools/matching.py: DINOv2 nearest neighbours, then flip-aware ORB matching with a RANSAC similarity transform
 (>= MIN_INLIERS inliers). Every label of image a that the transform places inside image b (>= 80% of its area) is
 compared with b's labels:
   agree           a b label of the same class with IoU >= 0.5
@@ -41,8 +41,8 @@ import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
-import build_dataset as B  # noqa: E402
-import error_analysis as ea  # noqa: E402
+import matching as mt  # noqa: E402
+import detection_metrics as dm  # noqa: E402
 
 FLIPS = (None, 1, 0, -1)
 OUTCOMES = ("agree", "class_conflict", "split", "loose", "missing")
@@ -73,13 +73,13 @@ def transform_job(args):
     """Best flip + similarity transform a -> b on 480 px greyscale.
     Returns (inliers, flip, M, inlier points in a's 480 px frame before flipping) or (0, None, None, [])."""
     a_path, b_path = args
-    ga, gb = B._gray(a_path), B._gray(b_path)
+    ga, gb = mt._gray(a_path), mt._gray(b_path)
     bf = cv2.BFMatcher(cv2.NORM_HAMMING)
-    kb, db = B._orb(gb)
+    kb, db = mt._orb(gb)
     best = (0, None, None, None)
     h, w = ga.shape
     for fl in FLIPS:
-        ka, da = B._orb(ga if fl is None else cv2.flip(ga, fl))
+        ka, da = mt._orb(ga if fl is None else cv2.flip(ga, fl))
         if da is None or db is None or len(da) < 8 or len(db) < 8:
             continue
         good = [m[0] for m in bf.knnMatch(da, db, k=2) if len(m) == 2 and m[0].distance < 0.75 * m[1].distance]
@@ -148,7 +148,7 @@ def classify(c, box, gb):
     """Outcome of one projected label against b's labels."""
     if not len(gb):
         return "missing"
-    iou = ea.iou_matrix(box[None], gb[:, 1:])[0]
+    iou = dm.iou_matrix(box[None], gb[:, 1:])[0]
     same = gb[:, 0] == c
     if (iou[same] >= 0.5).any():
         return "agree"
@@ -218,7 +218,7 @@ def main():
     ap.add_argument("--name", required=True)
     ap.add_argument("--cache", default=os.path.join(ROOT, ".dataset_cache"))
     ap.add_argument("--workers", type=int, default=4)
-    ap.add_argument("--min-inliers", type=int, default=B.MIN_INLIERS)
+    ap.add_argument("--min-inliers", type=int, default=mt.MIN_INLIERS)
     args = ap.parse_args()
 
     out = os.path.join(ROOT, "runs", "analysis", "novel", "label_audit", args.name)
@@ -227,8 +227,8 @@ def main():
     items = load(args.data)
     paths = [p for p, _, _ in items]
     print(f"{len(items)} images, {sum(len(g) for _, _, g in items)} labels")
-    E = B.dinov2_embeddings(paths, os.path.join(args.cache, "dinov2_vits14.npz"))
-    nn_idx, _ = B.knn(E, min(B.KNN, len(paths) - 1))
+    E = mt.dinov2_embeddings(paths, os.path.join(args.cache, "dinov2_vits14.npz"))
+    nn_idx, _ = mt.knn(E, min(mt.KNN, len(paths) - 1))
     pairs = sorted({(min(a, int(b)), max(a, int(b))) for a in range(len(paths)) for b in nn_idx[a] if a != int(b)})
 
     tcache = os.path.join(out, "transforms_v3.json")  # (inliers, flip, M, inlier keypoints inside each label of a)
@@ -260,7 +260,7 @@ def main():
                 cov = view_coverage(sa, sb, fl, M)
                 ang = np.degrees(np.arctan2(M[1][0], M[0][0])) % 90
                 axis = min(ang, 90 - ang) <= ROT_TOL
-                st = "other_view" if cov < B.SAME_VIEW else "same_view_axis" if axis else "same_view_rotated"
+                st = "other_view" if cov < mt.SAME_VIEW else "same_view_axis" if axis else "same_view_rotated"
                 n_pairs[st] += 1
                 proj = project(ga[:, 1:], sa, sb, fl, M) if len(ga) else np.zeros((0, 4))
                 row = collections.Counter()
@@ -283,7 +283,7 @@ def main():
     report = dict(data=args.data, images=len(items), candidate_pairs=len(pairs), strata={})
     md = [f"# Cross-view label audit: {args.name}", "",
           f"{len(items)} images, {len(pairs)} candidate pairs. Directed pairs with >= {args.min_inliers} inliers: "
-          + ", ".join(f"{st} {n_pairs[st]}" for st in STRATA) + f" (same view = moved frame covers >= {B.SAME_VIEW:.0%} "
+          + ", ".join(f"{st} {n_pairs[st]}" for st in STRATA) + f" (same view = moved frame covers >= {mt.SAME_VIEW:.0%} "
           f"of the other image; axis-aligned = rotation within {ROT_TOL:.0f} degrees of a multiple of 90: exact alignment, "
           "differences are annotation differences; rotated: 'loose' includes the enlargement of rotated boxes).", ""]
     for st in STRATA:

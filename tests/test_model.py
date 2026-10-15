@@ -1,4 +1,4 @@
-"""BladeYOLO end to end on CPU: build through Ultralytics, forward, WIoU loss, backward, frozen DINOv3.
+"""BladeYOLO-v2 end to end on CPU: build through Ultralytics, forward, WIoU loss, backward, frozen DINOv3.
 
 DINOv3 weights are gated, so a randomly initialised ViT-S/16 checkpoint is written under runs/ and used
 in their place; this checks wiring and key matching, not accuracy.
@@ -32,7 +32,7 @@ def test_forward_loss_backward():
     from ultralytics.nn.tasks import DetectionModel
 
     assert yolo_loss.bbox_iou.__name__ == "wiou_v3" and yolo_tal.bbox_iou.__name__ == "bbox_iou"
-    m = DetectionModel(os.path.join(ROOT, "bladeyolo-l.yaml"), nc=5, verbose=False)
+    m = DetectionModel(os.path.join(ROOT, "bladeyolo2-l.yaml"), nc=5, verbose=False)
     m.args = get_cfg()
     m.train()
     x = torch.rand(2, 3, 320, 256)

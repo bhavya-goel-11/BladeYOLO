@@ -12,7 +12,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from ultralytics.nn.modules.conv import Conv
 
-from .backbone import build_dinov3_vits16
+from .dino_weights import build_dinov3_vits16
 
 
 class DinoConv(Conv):

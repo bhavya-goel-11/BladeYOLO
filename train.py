@@ -4,6 +4,7 @@ Examples (WTBD = the folder holding WTBD-group/ and WTBD-official/):
     python train.py --data WTBD/WTBD-group/data.yaml --model bladeyolo2-l.yaml --name bladeyolo2_wtbd_group --epochs 150
     python train.py --data WTBD/WTBD-group/data.yaml --model yolo12l.pt --box-loss ciou --name yolo12l_wtbd_group --epochs 150
     python train.py --data WTBD/WTBD-group/data.yaml --model bladeyolo2-l.yaml --tolerant --name bladeyolo2_wtbd_group_tolerant
+    python train.py --data WTBD/WTBD-group/data.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --name bladeyolo2_wtbd_group_f25
     python train.py --data WTBD/WTBD-group/data.yaml --test runs/detect/BladeYOLO_WindSurface/bladeyolo2_wtbd_group/weights/best.pt
     python train.py --resume runs/detect/BladeYOLO_WindSurface/bladeyolo2_wtbd_group/weights/last.pt
 """
@@ -38,9 +39,9 @@ RECIPE = dict(
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--model", default=os.path.join(ROOT_DIR, "bladeyolo-l.yaml"), help="model YAML")
+    p.add_argument("--model", default=os.path.join(ROOT_DIR, "bladeyolo2-l.yaml"), help="model YAML or .pt")
     p.add_argument("--data", default=None, help="dataset YAML with the dataset's official classes (required unless --resume)")
-    p.add_argument("--name", default="bladeyolo_l", help="run name under runs/detect/BladeYOLO_WindSurface")
+    p.add_argument("--name", default="bladeyolo2", help="run name under runs/detect/BladeYOLO_WindSurface")
     p.add_argument("--resume", default=None, help="last.pt of an interrupted run to resume")
     p.add_argument("--epochs", type=int, default=150, help="v2 runs peaked at epochs ~90-170")
     p.add_argument("--seed", type=int, default=0, help="change for repeat runs to measure run-to-run variance")
@@ -53,6 +54,8 @@ def parse_args():
     p.add_argument("--rot90", type=float, default=0.5,
                    help="probability of a random quarter turn (with the flips: all 8 orientations); 0 disables")
     p.add_argument("--no-amp", action="store_true", help="train in fp32 (slower; for debugging)")
+    p.add_argument("--train-subset", default=None, metavar="LIST",
+                   help="train only on the images named in LIST (e.g. tools/splits/wtbd_group_train_f25.txt)")
     p.add_argument("--tolerant", action="store_true",
                    help="split-tolerant box targets: a label or the region of touching same-class labels (models/tolerant.py)")
     p.add_argument("--test", default=None, metavar="WEIGHTS",
@@ -79,8 +82,9 @@ def local_copy(root):
     return dst
 
 
-def resolve_data(path):
-    """Write a copy of the dataset YAML with an absolute root, on a writable copy of the dataset (see local_copy)."""
+def resolve_data(path, train_subset=None):
+    """Write a copy of the dataset YAML with an absolute root, on a writable copy of the dataset (see local_copy).
+    train_subset: file of training image names (tools/scene_fractions.py); training then uses only those images."""
     if not path or not os.path.exists(path):
         raise FileNotFoundError(f"Dataset YAML not found: {path!r}. Pass --data <dataset>/data.yaml")
     with open(path) as f:
@@ -91,6 +95,16 @@ def resolve_data(path):
             cfg[split] = os.path.join(split, "images")
     out = os.path.join(ROOT_DIR, "runs", "data.yaml")
     os.makedirs(os.path.dirname(out), exist_ok=True)
+    if train_subset:
+        names = [n.strip() for n in open(train_subset) if n.strip()]
+        imgs = [os.path.join(root, cfg["train"], n) for n in names]
+        missing = [p for p in imgs if not os.path.exists(p)]
+        if missing:
+            raise FileNotFoundError(f"{len(missing)} images of {train_subset} not in the training split, e.g. {missing[0]}")
+        cfg["train"] = os.path.join(ROOT_DIR, "runs", "train_subset.txt")
+        with open(cfg["train"], "w") as f:
+            f.write("\n".join(imgs) + "\n")
+        print(f"Training on {len(imgs)} images listed in {train_subset}")
     with open(out, "w") as f:
         yaml.safe_dump(cfg, f, sort_keys=False)
     return out
@@ -119,7 +133,7 @@ def main():
         return
 
     device = args.device or ",".join(str(i) for i in range(max(torch.cuda.device_count(), 1)))
-    data = resolve_data(args.data)
+    data = resolve_data(args.data, args.train_subset)
     model = YOLO(args.model)
     model.train(
         trainer=BladeTrainer,
@@ -155,7 +169,7 @@ def test_in_new_process(weights, data, batch, imgsz):
 def evaluate_test(weights, data, batch, device, imgsz=640, **info):
     """Report the held-out test split once, with the checkpoint selected on val; also with test-time augmentation
     (flips and rescaling, merged predictions), reported separately as metrics_tta.json. A failure is printed and the
-    other evaluation still runs (they can be rerun with tools/ensemble.py on a single run)."""
+    other evaluation still runs (rerun with train.py --test)."""
     import traceback
 
     with open(data) as f:

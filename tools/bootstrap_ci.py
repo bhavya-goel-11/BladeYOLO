@@ -1,6 +1,6 @@
 """Confidence intervals for test mAP by resampling scene groups, and paired intervals for differences between models.
 
-Test images are grouped into scenes with the matching used for the splits (tools/build_dataset.py: DINOv2 retrieval,
+Test images are grouped into scenes with the matching used for the splits (tools/matching.py: DINOv2 retrieval,
 flip-aware ORB/RANSAC verification; same scene if cosine >= DINO_GROUP or >= MIN_INLIERS inliers), because images of
 one scene are not independent samples. Each run predicts the test split once (conf 0.001, NMS IoU 0.7, the run's
 training image size; cached). Every bootstrap replicate draws scene groups with replacement and scores all runs on the
@@ -14,7 +14,6 @@ Writes runs/analysis/bootstrap/<name>/{report.md, report.json, groups.csv}.
 """
 
 import argparse
-import collections
 import json
 import os
 import sys
@@ -24,10 +23,10 @@ import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
-import build_dataset as B  # noqa: E402
-import error_analysis as ea  # noqa: E402
+import matching as mt  # noqa: E402
+import detection_metrics as dm  # noqa: E402
 
-IOU_THRS = ea.IOU_THRS
+IOU_THRS = dm.IOU_THRS
 
 
 def load_yolo_split(data, split):
@@ -59,8 +58,8 @@ def predict(run, imgs, cache_dir, batch=8):
     model = YOLO(os.path.join(run, "weights", "best.pt"))
     preds, files = {}, sorted(imgs)
     for i in range(0, len(files), batch):
-        for f, r in zip(files[i:i + batch], model.predict(files[i:i + batch], imgsz=ea.run_imgsz(run), conf=0.001,
-                                                          iou=0.7, max_det=300, verbose=False, device=ea.device())):
+        for f, r in zip(files[i:i + batch], model.predict(files[i:i + batch], imgsz=dm.run_imgsz(run), conf=0.001,
+                                                          iou=0.7, max_det=300, verbose=False, device=dm.device())):
             b = r.boxes.cpu()
             preds[f] = np.concatenate([b.xyxy.numpy() * imgs[f]["scale"], b.conf.numpy()[:, None],
                                        b.cls.numpy()[:, None]], 1).round(3)
@@ -72,23 +71,23 @@ def predict(run, imgs, cache_dir, batch=8):
 
 def scene_groups(paths, cache, workers):
     """Connected components of the same-scene graph among the given images."""
-    E = B.dinov2_embeddings(paths, os.path.join(cache, "dinov2_vits14.npz"))
-    k = min(B.KNN, len(paths) - 1)
-    nn_idx, nn_sim = B.knn(E, k)
+    E = mt.dinov2_embeddings(paths, os.path.join(cache, "dinov2_vits14.npz"))
+    k = min(mt.KNN, len(paths) - 1)
+    nn_idx, nn_sim = mt.knn(E, k)
     vcache = os.path.join(cache, "verify.json")
     known = json.load(open(vcache)) if os.path.exists(vcache) else {}
     key = lambda a, b: f"{min(a, b)}\t{max(a, b)}"  # noqa: E731
     pairs = {(min(a, int(b)), max(a, int(b))) for a in range(len(paths)) for b in nn_idx[a] if a != int(b)}
     todo = sorted(p for p in pairs if key(paths[p[0]], paths[p[1]]) not in known)
     if todo:
-        res = B.verify_pairs(paths, todo, workers)
+        res = mt.verify_pairs(paths, todo, workers)
         known.update({key(paths[a], paths[b]): list(v) for (a, b), v in res.items()})
         json.dump(known, open(vcache, "w"))
-    dsu = B.DSU(len(paths))
+    dsu = mt.DSU(len(paths))
     for a in range(len(paths)):
         for b, s in zip(nn_idx[a], nn_sim[a]):
             b = int(b)
-            if a != b and (s >= B.DINO_GROUP or known[key(paths[a], paths[b])][0] >= B.MIN_INLIERS):
+            if a != b and (s >= mt.DINO_GROUP or known[key(paths[a], paths[b])][0] >= mt.MIN_INLIERS):
                 dsu.union(a, b)
     return dsu.groups()
 
@@ -102,7 +101,7 @@ def per_image_matches(imgs, preds, nc):
         for c in range(nc):
             gc, pc = g[g[:, 0] == c], p[p[:, 5] == c]
             pc = pc[np.argsort(-pc[:, 4])]
-            iou = ea.iou_matrix(pc[:, :4], gc[:, 1:]) if len(pc) and len(gc) else np.zeros((len(pc), len(gc)))
+            iou = dm.iou_matrix(pc[:, :4], gc[:, 1:]) if len(pc) and len(gc) else np.zeros((len(pc), len(gc)))
             for t in IOU_THRS:
                 used, tp = np.zeros(len(gc), bool), np.zeros(len(pc), bool)
                 for i in range(len(pc)):
@@ -123,7 +122,7 @@ def score(matches, files, nc):
             ms = [matches[f][(c, round(float(t), 2))] for f in files]
             n = sum(m[2] for m in ms)
             if n:
-                ap[c, k] = ea.ap_from(np.concatenate([m[0] for m in ms]), np.concatenate([m[1] for m in ms]), n)
+                ap[c, k] = dm.ap_from(np.concatenate([m[0] for m in ms]), np.concatenate([m[1] for m in ms]), n)
     return float(np.nanmean(ap[:, 0])), float(np.nanmean(ap.mean(1))), ap[:, 0]
 
 
