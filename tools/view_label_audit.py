@@ -13,8 +13,11 @@ compared with b's labels:
 Only labels whose own box holds >= LOCAL_MIN of the match's inlier keypoints are audited: the defect itself must be
 matched, not a burned-in caption, the sky or the tower (such matches can link different blades that look alike).
 A pair counts once per direction. Pairs are reported in two strata:
-  same view       the moved frame covers >= SAME_VIEW of the other image (augmented copies, re-crops): the similarity
-                  transform is exact, so every difference is an annotation difference
+  same view, axis-aligned  the moved frame covers >= SAME_VIEW of the other image (augmented copies, re-crops) and
+                  the rotation is within ROT_TOL of a multiple of 90 degrees (flips included): the transform is exact and
+                  boxes map to boxes, so every difference is an annotation difference (the headline stratum)
+  same view, rotated  as above but rotated by another angle: an axis-aligned box of a rotated box is larger, so
+                  "loose" also contains this geometric enlargement (twice, when both images are rotated copies)
   other view      partially overlapping or different viewpoints: perspective is not modelled, so projected boxes can be
                   off and "loose"/"missing" are upper bounds
 Example sheets per stratum and outcome let the transform be checked by eye.
@@ -43,7 +46,8 @@ import error_analysis as ea  # noqa: E402
 
 FLIPS = (None, 1, 0, -1)
 OUTCOMES = ("agree", "class_conflict", "split", "loose", "missing")
-STRATA = ("same_view", "other_view")
+STRATA = ("same_view_axis", "same_view_rotated", "other_view")
+ROT_TOL = 3.0  # degrees from a multiple of 90 for a transform to count as axis-aligned
 LOCAL_MIN = 8  # inlier keypoints inside a label box for it to be audited
 
 
@@ -254,7 +258,9 @@ def main():
                     continue
                 (pa, sa, ga), (pb, sb, gb) = items[x], items[y]
                 cov = view_coverage(sa, sb, fl, M)
-                st = "same_view" if cov >= B.SAME_VIEW else "other_view"
+                ang = np.degrees(np.arctan2(M[1][0], M[0][0])) % 90
+                axis = min(ang, 90 - ang) <= ROT_TOL
+                st = "other_view" if cov < B.SAME_VIEW else "same_view_axis" if axis else "same_view_rotated"
                 n_pairs[st] += 1
                 proj = project(ga[:, 1:], sa, sb, fl, M) if len(ga) else np.zeros((0, 4))
                 row = collections.Counter()
@@ -278,7 +284,8 @@ def main():
     md = [f"# Cross-view label audit: {args.name}", "",
           f"{len(items)} images, {len(pairs)} candidate pairs. Directed pairs with >= {args.min_inliers} inliers: "
           + ", ".join(f"{st} {n_pairs[st]}" for st in STRATA) + f" (same view = moved frame covers >= {B.SAME_VIEW:.0%} "
-          "of the other image: exact alignment, differences are annotation differences).", ""]
+          f"of the other image; axis-aligned = rotation within {ROT_TOL:.0f} degrees of a multiple of 90: exact alignment, "
+          "differences are annotation differences; rotated: 'loose' includes the enlargement of rotated boxes).", ""]
     for st in STRATA:
         total = sum(counts[st].values())
         report["strata"][st] = dict(directed_pairs=n_pairs[st], projected_labels=total,

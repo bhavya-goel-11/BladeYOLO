@@ -539,7 +539,7 @@ Per class on WTBD-group, BladeYOLO-v2 AP50 standard / tolerant / region:
 - **Local verification:** a label is audited only if ≥ 8 of the match's inlier keypoints fall inside its own box. Without this, matches on burned-in captions and sky linked different blades: blade numbers 324 vs 322 and 326 were seen on example sheets, and "missing" fell from 5.0% to 1.4% once the check was added.
 - **Strata:** same view (the moved frame covers ≥ 70% of the other image: augmented copies, exact alignment) vs other view (perspective not modelled: an upper bound on disagreement).
 
-Unit test: `tests/test_view_label_audit.py` (recovers a known flip + rotation + scale at IoU 0.985). Example sheets were checked by eye: `runs/analysis/novel/label_audit/wtbd/examples_*.jpg`.
+Unit test: `tests/test_view_label_audit.py` (recovers a known flip + rotation + scale at IoU 0.985). *(Phase 17 refines the strata: on axis-aligned same-view copies WTBD agreement is 87.3%; rotated copies 77.9%, where "loose" includes the geometric enlargement of rotated boxes.)* Example sheets were checked by eye: `runs/analysis/novel/label_audit/wtbd/examples_*.jpg`.
 
 | class | same-view agreement | split | loose | missing | other-view agreement |
 |---|---|---|---|---|---|
@@ -645,18 +645,36 @@ Operating points (scene units, calibrated on unseen scenes, any class):
 2. **With unseen-scene calibration and scene units,** BladeYOLO-v2 keeps the guarantee (4.7% missed, 1% of draws violate). YOLO12-L misses 12.3% on average, violated in 71% of draws. Conformal guarantees hold in expectation over exchangeable calibration and deployment scenes; with only 60 calibration and 58 deployment scenes from one site, the val and test scene groups are not perfectly exchangeable. Treat the YOLO12-L figure as a real-world shortfall, not a bug.
 3. **The operating curve is the most practical comparison so far.** At every operating point up to about 1 false alarm per image, BladeYOLO-v2 finds more defects than YOLO12-L: at 0.1 false alarms per image, about 90% vs about 71% of defects on new scenes. Requiring the correct class costs BladeYOLO-v2 little, but YOLO12-L a lot (4.1 false alarms per image at α = 0.1). Caveat: one test set of 58 scenes, no interval on the curve yet.
 
-### Step 13: cross-view label audit on Wind Surface Defect (and WTBlade, running)
-`tools/view_label_audit.py` now keeps paths as given, so cached embeddings are reused. It also keeps only each label's local keypoint support instead of the keypoints themselves. Stored keypoints would have needed several GB of RAM for WTBlade's 143,344 transforms; the WTBD report recomputed this way is byte-for-byte identical. Example sheets were checked by eye. The Wind Surface "same view" pairs are mostly overlapping tiles of one drone photo at different zoom, so the alignment is exact and the labels were drawn independently per tile.
+### Step 13: cross-view label audit on Wind Surface Defect and WTBlade-Defect (done)
+`tools/view_label_audit.py` changes in this phase:
+- **Paths kept as given,** so cached embeddings are reused.
+- **Only each label's local keypoint support is kept,** not the keypoints themselves. Stored keypoints would have needed several GB of RAM for WTBlade's 143,344 transforms; the WTBD report recomputed this way is byte-for-byte identical.
+- **Same-view pairs are split by rotation.** The example sheets showed that Roboflow and WTBD copies include arbitrary-angle rotations; the axis-aligned box of a rotated box is larger, which inflates "loose". The **axis-aligned** stratum (rotation within 3° of a multiple of 90°, flips included) is now the headline: there boxes map to boxes and every difference is an annotation difference.
 
-| dataset | same-view labels | agree | split | loose | missing | class conflicts | other-view agreement |
-|---|---|---|---|---|---|---|---|
-| WTBD | 3,440 | 86.0% | 4.9% | 7.7% | 1.4% | 0 | 64.1% |
-| Wind Surface Defect | 10,279 | **83.7%** | **9.2%** | 5.9% | 1.1% | **0** | 44.2% |
-| WTBlade-Defect | *running* | | | | | | |
+Example sheets were checked by eye for every dataset and outcome.
 
-Wind Surface, per class (same view): corrosion 80.7%, dirt 81.2%, hide_craze 97.0%, surface_eye 79.2%, thunderstrike 87.8%.
+| dataset | same-view axis-aligned labels | agree | split | loose | missing | class conflicts | same-view rotated agreement | other-view agreement |
+|---|---|---|---|---|---|---|---|---|
+| WTBD | 2,965 | **87.3%** | 4.6% | 6.7% | 1.5% | 0 | 77.9% | 64.1% |
+| WTBlade-Defect | 42,812 | **86.0%** (85.9% without dirt) | 2.5% | 8.2% | 3.1% (1.1% without dirt) | 91 (0.2%) | 80.7% | 59.8% |
+| Wind Surface Defect | 10,261 | **83.8%** | **9.2%** | 5.9% | 1.1% | 0 | (18 labels only) | 44.2% |
 
-**Finding:** the dataset used by the original BladeYOLO paper shows the same pattern as WTBD. About 1 in 6 labels on exactly aligned views disagree; leading-edge erosion is drawn as chains of boxes that differ from tile to tile; and there are no class conflicts. Inconsistent extent and splitting is a property of blade-defect annotation, not of one dataset.
+Agreement by class on axis-aligned copies. The amorphous classes disagree most; compact, distinct defects least.
+
+| dataset | lowest | highest |
+|---|---|---|
+| WTBD | corrosion 69.0%, surface_injure 82.7%, hide_craze 84.4% | thunderstrike 96.4%, crack 95.1%, craze 93.7% |
+| WTBlade | crack 81.5%, peeling 83.7%, rust 85.2% | deformity 96.9%, oil 96.1%, burn 91.7% |
+| Wind Surface | surface_eye 79.2%, corrosion 80.7%, dirt 81.2% | hide_craze 97.0%, thunderstrike 87.8% |
+
+**Findings from the WTBlade sheets** (not documented by its Roboflow page):
+1. **Copy-paste synthetic images.** Several images are a blade with lettering ("NON…") and defect patches pasted onto it. The same pasted patch is labelled *peeling* in one copy and *crack* in another; these are most of the 91 class conflicts.
+2. **DTU NordTank imagery.** "NORDTANK" is legible on many nacelles, so the set contains the DTU drone inspection images (Shihavuddin et al.), whose licence is CC BY-NC, not the CC BY 4.0 the Roboflow page states. **Any publication using WTBlade must cite and respect the original licence.**
+3. **Drone video of a rotating rotor.** Consecutive frames align on the static ground and tower while the blades move, so a dirt label on a blade lands on empty ground in the next frame. That is a matching artefact, not an annotation error. It accounts for most WTBlade "missing" (dirt: 1,080 of 1,320), which is why results are also given without dirt.
+
+Wind Surface's same-view pairs are mostly overlapping tiles of one drone photo at different zoom, each labelled independently. Leading-edge erosion is drawn as a different chain of boxes in each tile, hence the high split share.
+
+**Conclusion:** on exactly aligned, unrotated copies of the same image, **13–16% of labels disagree** in all three datasets: WTBD (2026, double-annotated), WTBlade and Wind Surface (the original BladeYOLO paper's dataset). Almost all of it is extent and box splitting, not class. Box-level AP on these datasets therefore has a ceiling well below 1.0 that differs by class. The amorphous classes (corrosion, peeling, crack) are the least self-consistent.
 
 ### Step 10: split-tolerant training (`models/tolerant.py`, `train.py --tolerant`), ready for Kaggle
 Every label gets an alternative target: the union of the touching same-class labels it belongs to (gap ≤ 8 px), used only if the union is not mostly background (member area ≥ 60% of the union, the v3.2 staircase rule).
@@ -717,6 +735,8 @@ REINFORCE fine-tuning on the region or tolerant score ("Tuning computer vision m
 | The local thop segfault is a CPU-only quirk | **Corrected** | It is a real NaN-offset bug that also hit Kaggle (§11) |
 | BladeYOLO-v2's leak-free win over YOLO12-L shows the architecture generalises better | **Qualified** | The win rests mainly on thunderstrike (3 test scenes); without it the interval includes zero (§12) |
 | Honest calibration costs 2.4 instead of 1.0 false alarms per image (Phase 16) | **Corrected** | That column counted all predictions; real false alarms are 0.2 vs 0.1 per image (§14) |
+| WTBD copies agree on 86.0% of labels (Phase 16) | **Refined** | Rotated copies inflate "loose"; axis-aligned copies agree on 87.3% (§14) |
+| WTBlade is CC BY 4.0 (Roboflow page) | **Questioned** | It contains DTU NordTank images (CC BY-NC) and synthetic copy-paste images (§14) |
 | Part of the leakage inflation is memorised box splitting (Phase 16 hypothesis) | **Not supported** | The tolerant gain is not smaller on test images with a train twin (§14, step 14) |
 
 ---
@@ -795,7 +815,7 @@ Ordered by how much each step strengthens the main claims, with rough Kaggle cos
 10. **Split-tolerant training** (`--tolerant`): implemented and tested; **Kaggle run pending** (§14).
 11. **Reward fine-tuning (RL):** deferred until step 10's result (§14).
 12. **Scene-level and class-aware conformal calibration, operating curve:** done (§14).
-13. **Label audit on other datasets:** Wind Surface done (83.7% agreement, no class conflicts); WTBlade running (§14).
+13. **Label audit on other datasets:** done. Axis-aligned agreement: WTBD 87.3%, WTBlade 86.0%, Wind Surface 83.8%. WTBlade contains synthetic copy-paste images and DTU NordTank imagery (§14).
 14. **Memorised box splitting:** tested, not supported (§14).
 
 **E. Write-up**
