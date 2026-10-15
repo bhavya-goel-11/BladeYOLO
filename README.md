@@ -85,6 +85,11 @@ refinement of the P3/P4 outputs (`models/morphology.py`) and selective-scan refi
 turns (`--rot90`). `--tolerant` uses split-tolerant box targets (`models/tolerant.py`): a label or the region of
 touching same-class labels, whichever the prediction is closer to.
 
+`--ssl real|synthetic --ssl-pairs <view-pool>/pairs.csv` adds teacher-student training on unlabelled view pairs
+(`models/view_consistency.py`): the EMA teacher's detections on one view are moved into the other through the verified
+transform and become its labels; `real` pairs are different photographs of the same surface, `synthetic` the same
+images with random augmentations (baseline). See the research log, Phases 19-21.
+
 Mixed precision: the refinement blocks run in fp32 and YOLOv12's area-attention scores are computed in fp32
 (`models/precision.py`; the stock fp16 scores overflow late in training). As a last line of defence `BladeTrainer`
 (`models/trainer.py`) drops a non-finite batch, restores the BatchNorm statistics and writes a per-layer report to
@@ -103,6 +108,7 @@ Mixed precision: the refinement blocks run in fp32 and YOLOv12's area-attention 
 | `tools/view_label_audit.py` | label consistency across verified views of the same surface |
 | `tools/conformal_recall.py` | recall guarantees by conformal risk control; calibrated on seen vs unseen scenes; operating curve |
 | `tools/detection_metrics.py` | shared box IoU and COCO AP |
+| `tools/view_pool.py` | unlabelled view pairs from other blade datasets (WTBD matches excluded); real views = different source photos; `--export` for Kaggle |
 
 Unit tests: `python tests/<test>.py` in the project `.venv` (outputs under `runs/`).
 

@@ -5,12 +5,12 @@
 | | |
 |---|---|
 | Researcher | Bhavya Goel |
-| Period | 3 Sep 2026 – 15 Oct 2026 |
+| Period | 3 Sep 2026 – 16 Oct 2026 |
 | Compute | Kaggle 2× Tesla T4 (all training since 9 Oct); A100 for Runs 5–7; local CPU machine (analysis only) |
 | Repository | github.com/bhavya-goel-11/BladeYOLO (`master`) |
 | Reference papers | BladeYOLO (IEEE TGRS 2026, `BladeYOLO.pdf`); GFD-YOLOX / Wind Surface Defect dataset (Appl. Soft Comput. 2025, `1-s2.0-S156849462501227X-main.pdf`); WTBD (Ji et al., *Scientific Data* 13:396, 2026, `s41597-026-06762-x.pdf`); WTBs2025 (*Scientific Data* 13:1310, 2026) |
 
-This log covers the whole project. Phases 1–5 (Sep 3 – Oct 6) summarise the original tentative research log (commit `6f6638a`, 6 Oct). That commit was removed from `master` by the 9 Oct reset but is still in the local git object store: `git show 6f6638a:research_log.md`. Later phases come from the working sessions, the git history and the run folders under `runs/detect/BladeYOLO_WindSurface/`. Where a later audit corrected an earlier conclusion, the correction appears in that phase and in the corrections section (§19).
+This log covers the whole project. Phases 1–5 (Sep 3 – Oct 6) summarise the original tentative research log (commit `6f6638a`, 6 Oct). That commit was removed from `master` by the 9 Oct reset but is still in the local git object store: `git show 6f6638a:research_log.md`. Later phases come from the working sessions, the git history and the run folders under `runs/detect/BladeYOLO_WindSurface/`. Where a later audit corrected an earlier conclusion, the correction appears in that phase and in the corrections section (§20).
 
 ---
 
@@ -28,12 +28,12 @@ This log covers the whole project. Phases 1–5 (Sep 3 – Oct 6) summarise the 
 10. [Phase 13: new datasets and the content-based audit (12–13 Oct)](#10-phase-13-new-datasets-and-the-content-based-audit-1213-oct)
 11. [Phase 14: WTBD training: leak-free vs published split (13 Oct)](#11-phase-14-wtbd-training-leak-free-vs-published-split-13-oct)
 12. [Phase 15: YOLO12-L baselines and scene-level confidence intervals (14 Oct)](#12-phase-15-yolo12-l-baselines-and-scene-level-confidence-intervals-14-oct)
-18. [Engineering problems solved](#18-engineering-problems-solved)
-19. [Corrections to earlier conclusions](#19-corrections-to-earlier-conclusions)
-20. [Run registry](#20-run-registry)
-21. [Datasets and artefacts](#21-datasets-and-artefacts)
-22. [Open work and next steps](#22-open-work-and-next-steps)
-23. [Working conventions](#23-working-conventions)
+19. [Engineering problems solved](#19-engineering-problems-solved)
+20. [Corrections to earlier conclusions](#20-corrections-to-earlier-conclusions)
+21. [Run registry](#21-run-registry)
+22. [Datasets and artefacts](#22-datasets-and-artefacts)
+23. [Open work and next steps](#23-open-work-and-next-steps)
+24. [Working conventions](#24-working-conventions)
 
 ---
 
@@ -474,7 +474,7 @@ The class-subset check is `runs/analysis/bootstrap/robust_check.py`. The upper C
 ### Conclusions
 - **The leakage result is robust:** both models, both metrics, about +0.27–0.29 mAP50 from the random split.
 - **The honest claim for the architecture:** "BladeYOLO-v2 scores 0.55 vs 0.44 mAP50 on a leak-free WTBD split (paired bootstrap +0.16, 95% CI 0.03–0.28). The gain is concentrated in lightning damage; on the other classes the evidence is inconclusive."
-- **More independent test scenes are needed** before per-class or architectural claims can be made with confidence. Options are group k-fold cross-validation or a second dataset (§22).
+- **More independent test scenes are needed** before per-class or architectural claims can be made with confidence. Options are group k-fold cross-validation or a second dataset (§23).
 
 ### Cleanup in this phase
 - Removed `tools/diagnose_nan.py`: a one-off investigation of the fixed SS2D fp16 bug, superseded by `tools/probe_nan.py` and the trainer's per-layer NaN report.
@@ -884,7 +884,63 @@ Without the classes seen in ≤ 3 test scenes (craze, thunderstrike; `runs/analy
 
 ---
 
-## 18. Engineering problems solved
+## 18. Phase 21: the unlabelled view pool and the real-view teacher–student implementation (15–16 Oct)
+
+### The unlabelled view pool (`tools/view_pool.py`)
+WTBD has no unlabelled images, so the pool comes from other blade datasets, used **without their labels**: WTBlade-Defect (10,660 files) and Wind Surface Defect (3,570). The Beijing exports are left out entirely: they share 184 images with WTBD (Phase 13), too high a leakage risk to filter.
+
+1. **Exclusion.** A pool image is dropped if it matches *any* WTBD image: embedding cosine ≥ 0.93 with one of its 5 nearest WTBD images, or ≥ 25 verified ORB/RANSAC inliers. Val/test matches would leak; train matches add nothing new. **363 of 14,230 pool images were excluded** (WTBlade 133, Wind Surface 230), matching WTBD train 191, **val 89 and test 97** times. The check was needed.
+2. **Pairs.** The verified same-surface transforms of the label audit (§14) between the remaining images: **77,530 directed pairs**.
+3. **Real second view vs augmented copy.**
+   - **First attempt: photometric similarity after alignment** (ZNCC of intensities and of gradient magnitudes). It does not work. The example sheets per band show:
+     - Roboflow copies with cutout squares and colour shifts fall as low as 0.7.
+     - Video frames of a turning rotor score high on intensity, because the ground dominates, while the blades have moved.
+     - Near-identical consecutive frames sit at ≥ 0.98.
+     - So photometric similarity cannot separate copies from new views in augmented Roboflow data.
+   - **Adopted: the source photograph, read from the file name** (`photo_id`). Roboflow copies share `<source>_jpg.rf.*`, Wind Surface twins differ in `_0`/`_1`, and tiles encode their parent DJI photo. A **real second view** is a verified same-surface pair from **different source photos** (another frame or shot). Copies and tiles of one photo are synthetic views. `pairs.csv` carries `same_photo`, the transform matrix, and the ZNCC values for description.
+   - **Result:** **49,886 real-view pairs** (WTBlade 45,777, Wind Surface 4,109) from 2,791 and 315 source photos. Copies make up the other 27,644 pairs.
+   - **Visual check** (`runs/analysis/novel/view_pool/examples_real_pairs.jpg`, 16 random pairs): these are genuinely different photographs.
+     - video frames at different moments (rotor in different positions)
+     - separate shots of the same blade tip
+     - frames from different points of a DTU NordTank flight
+     - some WTBlade sources were uploaded already augmented (cutout squares), but they are still different frames
+4. **Balanced sampling.** Video sources have many neighbouring frames, so uniform pair sampling would be dominated by a few videos. Pairs are drawn so that every view-A image is equally likely (weights 1/31 to 1; 7,090 distinct A images). The synthetic mode uses the same 7,384 images, one item each.
+5. **Export:** `python tools/view_pool.py --export view-pool` gives 358 MB with paths relative to `pairs.csv`, to upload as a Kaggle dataset. It contains WTBlade imagery including DTU NordTank frames (CC BY-NC): use it for research only.
+
+### Method implementation (`models/view_consistency.py`, `BladeTrainer`, `train.py --ssl`)
+- **Teacher:** the trainer's EMA model, which exists and is updated identically on every DDP rank.
+- **Each batch, from epoch `--ssl-start` (default 30, a supervised burn-in):**
+  1. `--ssl-ratio` × the per-GPU batch of unlabelled pairs is drawn (default 0.25: 2 pairs next to 8 labelled images).
+  2. The teacher detects on view A, and detections with confidence ≥ `--ssl-tau` (0.5) are moved into view B.
+  3. B is appended to the labelled batch with those pseudo-labels, and the unchanged loss trains on both.
+- **Safeguards:**
+  - **B is masked to the area A covers,** so defects outside A's view are not trained as background.
+  - **A moved box is kept only if** ≥ 50% of it lies in that area, its sides are ≥ 4 px, and **the warped A and B agree inside the box** (gradient ZNCC ≥ 0.5). This is per-box local verification: the global transform fits the static scene, but labels on a blade that turned between frames must not move (the same artefact the label audit found).
+- **Exact pixel maps:** A's letterbox → A's pixels → 480-px matching frame → flip → transform → B's pixels → B's letterbox, composed as 3×3 matrices.
+- **Synthetic baseline (`--ssl synthetic`):** **the same images** as the real pairs, each paired with a random augmentation of itself (flip, quarter turn, scale 0.75–1.25, shift, colour, blur) with its exact matrix. The two modes differ only in where the second view comes from.
+- **Statistics:** per epoch, pairs used, confident teacher boxes, transferred pseudo-labels and their classes (`<run>/ssl_stats.csv`).
+- **`--export DIR`** writes the real pairs with relative paths plus only their images, as a self-contained Kaggle dataset.
+
+### Tests
+`tests/test_view_pool.py`: an augmented copy aligns at ZNCC 0.987 (gradients 0.979), a different image at ≈ 0.
+
+`tests/test_view_consistency.py`:
+- the composed matrix equals the audit's verified projection
+- synthetic augmentations move a marker exactly where their matrix says (20 random draws)
+- the letterbox chain of the dataset is exact
+- the transfer filter drops low-confidence, outside and degenerate boxes
+- the local check drops a box whose content changed between views
+
+CPU smoke runs through `BladeTrainer`, fine-tuned from a trained checkpoint so the teacher detects:
+- **synthetic:** 10 pairs → 14 teacher boxes → 14 pseudo-labels
+- **real:** 10 pairs → 10 → 10
+- finite losses in both
+
+From a random initialisation, no pseudo-labels appear even at τ = 0.01, as expected. That is why `--ssl-start` gives a supervised burn-in.
+
+---
+
+## 19. Engineering problems solved
 
 | Problem | Root cause | Fix | Commit |
 |---|---|---|---|
@@ -902,7 +958,7 @@ Without the classes seen in ≤ 3 test scenes (craze, thunderstrike; `runs/analy
 
 ---
 
-## 19. Corrections to earlier conclusions
+## 20. Corrections to earlier conclusions
 
 | Earlier conclusion | Status | Why |
 |---|---|---|
@@ -923,7 +979,7 @@ Without the classes seen in ≤ 3 test scenes (craze, thunderstrike; `runs/analy
 
 ---
 
-## 20. Run registry
+## 21. Run registry
 
 | Run folder | Data | Model | Epochs | Val best (mAP50 / 50-95) | Test (mAP50 / 50-95) | Notes |
 |---|---|---|---|---|---|---|
@@ -951,7 +1007,7 @@ Val best is the best epoch in `results.csv` by fitness (0.1 × mAP50 + 0.9 × mA
 
 ---
 
-## 21. Datasets and artefacts
+## 22. Datasets and artefacts
 
 | Item | Location | Notes |
 |---|---|---|
@@ -969,17 +1025,17 @@ Val best is the best epoch in `results.csv` by fitness (0.1 × mAP50 + 0.9 × mA
 | Caches | `.dataset_cache/` | DINOv2 embeddings, ORB verifications |
 
 **Tools:**
-- matching and splits: `matching.py`, `wtbd_groups.py`, `convert_wtbd.py`, `scene_fractions.py`
+- matching and splits: `matching.py`, `wtbd_groups.py`, `convert_wtbd.py`, `scene_fractions.py`, `view_pool.py`
 - evaluation: `detection_metrics.py`, `bootstrap_ci.py`, `leak_subsets.py`, `granularity_eval.py`, `view_label_audit.py`, `conformal_recall.py`
 - debugging: `probe_nan.py`
 
 Everything retired is restorable from commit `b374f4c`.
 
-**Tests** (`tests/`): `test_ss2d`, `test_wiou`, `test_model`, `test_augment`, `test_fp32_blocks` (incl. fp16 attention), `test_deform_offsets`, `test_granularity_eval`, `test_view_label_audit`, `test_conformal_recall`, `test_tolerant`. All pass in `.venv`.
+**Tests** (`tests/`): `test_ss2d`, `test_wiou`, `test_model`, `test_augment`, `test_fp32_blocks` (incl. fp16 attention), `test_deform_offsets`, `test_granularity_eval`, `test_view_label_audit`, `test_conformal_recall`, `test_tolerant`, `test_view_pool`, `test_view_consistency`. All pass in `.venv`.
 
 ---
 
-## 22. Open work and next steps
+## 23. Open work and next steps
 
 **A. Real-view consistency for data-limited detection (Phase 19)**
 1. **Learning curves: done (§17).** Steep and significant for both detectors; BladeYOLO-v2 is the more data-efficient base model. Commands used:
@@ -989,15 +1045,19 @@ Everything retired is restorable from commit `b374f4c`.
    python train.py --data .../WTBD-group/data.yaml --model yolo12l.pt --box-loss ciou --train-subset tools/splits/wtbd_group_train_f25.txt --name yolo12l_wtbd_group_f25 --epochs 150
    python train.py --data .../WTBD-group/data.yaml --model yolo12l.pt --box-loss ciou --train-subset tools/splits/wtbd_group_train_f50.txt --name yolo12l_wtbd_group_f50 --epochs 150
    ```
-2. **Registered-view pair index:**
+2. **Registered-view pair index: done (§18),** with real views identified by source photo, not photometric similarity:
    - verified view pairs within the training images, from the label audit's transforms
    - an unlabelled pool: WTBlade and Wind Surface frames, and DTU NordTank raw imagery after a licence check (CC BY-NC, fine for research)
    - no test or validation scene, and no image matching one, enters the pool (checked with `tools/matching.py`)
-3. **Teacher–student training:**
+3. **Teacher–student training: implemented and tested (§18):**
    - an EMA teacher, with pseudo-labels transferred through the verified transform and confidence filtering
    - the synthetic-augmentation variant as the baseline
    - unit tests for the box transfer and the EMA
-4. **Runs:** supervised vs synthetic teacher–student vs real-view teacher–student, with BladeYOLO-v2 as the base model, at 25 / 50 / 100% of the labelled scenes on WTBD-group (2 seeds), then on a WTBlade group split. Scored with the scene bootstrap and the conformal operating curve.
+4. **Runs:** supervised vs synthetic teacher–student vs real-view teacher–student, with BladeYOLO-v2 as the base model, at 25 / 50 / 100% of the labelled scenes on WTBD-group (2 seeds), then on a WTBlade group split. Scored with the scene bootstrap and the conformal operating curve. **First: 25% of the labelled scenes** (supervised run exists: `bladeyolo2_wtbd_group_f25`):
+   ```
+   python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --ssl synthetic --ssl-pairs .../view-pool/pairs.csv --name bladeyolo2_wtbd_group_f25_sslsyn --epochs 150
+   python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --ssl real --ssl-pairs .../view-pool/pairs.csv --name bladeyolo2_wtbd_group_f25_sslreal --epochs 150
+   ```
    - **The unlabelled pool needs care.** WTBD has no unlabelled images, so the pool comes from the other datasets used without their labels. Beijing shares 184 images with WTBD, so anything matching a WTBD val or test scene is excluded.
    - **Real views vs augmented copies:** most WTBlade "same-surface" pairs are Roboflow augmented copies (synthetic). Real second views are video frames and overlapping photos, and must be told apart (e.g. by the photometric residual after alignment), or the method silently becomes synthetic consistency.
 
@@ -1006,7 +1066,7 @@ Everything retired is restorable from commit `b374f4c`.
 6. **Seeds** for the existing WTBD-group pair, the **loss vs architecture separation** (`bladeyolo2-l.yaml --box-loss ciou`), and a **component ablation** (without DINOv3 fusion) to test whether the low-data advantage comes from the DINOv3 features.
 7. **WTBlade group split** with its official classes, for a second benchmark. Licence: it contains DTU NordTank (CC BY-NC) and synthetic copy-paste images (§14).
 
-## 23. Working conventions
+## 24. Working conventions
 
 - **Classes:** datasets are used with their official classes only; the custom v3 taxonomy (Phase 9) is retired.
 - **Testing:** tests and analyses run in the project's own `.venv`, with outputs under `runs/` and never `/tmp` ("research projects can have their own testing environments").

@@ -6,6 +6,7 @@ from ultralytics.utils import DEFAULT_CFG, LOGGER, RANK
 from ultralytics.utils.torch_utils import unwrap_model
 
 import models  # noqa: F401  (registers BladeYOLO layers and WIoU in this process, incl. DDP workers)
+from models import view_consistency
 
 
 def load_pretrained(model, weights, layer_map):
@@ -130,7 +131,82 @@ class BladeTrainer(DetectionTrainer):
         self._repair_bn()  # catches a bad previous batch that was not followed by an optimizer step
         self._last_batch = {k: v for k, v in batch.items()}  # CPU tensors as loaded, before moving to the GPU
         self._tloss_prev = self.tloss  # running epoch loss before this batch
-        return super().preprocess_batch(batch)
+        batch = super().preprocess_batch(batch)
+        ssl = view_consistency.config()
+        if ssl and self.epoch >= ssl["start"]:
+            batch = self._add_view_pseudo_labels(batch, ssl)
+        return batch
+
+    # Real-view consistency (models/view_consistency.py): unlabelled view pairs, pseudo-labelled by the EMA teacher on
+    # view A and moved into view B, are appended to each labelled batch from epoch ssl["start"] on.
+    def _pair_iter(self, ssl):
+        if getattr(self, "_pairs", None) is None:
+            per_gpu = max(self.batch_size // max(self.world_size, 1), 1)
+            self._pair_ds = view_consistency.PairDataset(ssl["mode"], ssl["pairs"], size=self.args.imgsz,
+                                                         seed=max(RANK, 0))
+            self._pair_bs = max(1, round(per_gpu * ssl["ratio"]))
+            g = torch.Generator()
+            g.manual_seed(1000 + max(RANK, 0))
+            sampler = torch.utils.data.WeightedRandomSampler(self._pair_ds.sample_weights(), len(self._pair_ds),
+                                                             replacement=True, generator=g)
+            loader = torch.utils.data.DataLoader(self._pair_ds, batch_size=self._pair_bs, sampler=sampler,
+                                                 num_workers=2, drop_last=True, persistent_workers=True)
+            self._pairs = (loader, iter(loader))
+            self._ssl_stats = {}
+            LOGGER.info(f"[BladeYOLO] view consistency ({ssl['mode']}): {len(self._pair_ds)} unlabelled pairs, "
+                        f"{self._pair_bs} per GPU batch, tau {ssl['tau']}, from epoch {ssl['start'] + 1}")
+        loader, it = self._pairs
+        try:
+            return next(it)
+        except StopIteration:
+            self._pair_ds.epoch += 1
+            it = iter(loader)
+            self._pairs = (loader, it)
+            return next(it)
+
+    @torch.no_grad()
+    def _add_view_pseudo_labels(self, batch, ssl):
+        from ultralytics.utils.nms import non_max_suppression
+
+        A, B, T, mask, grads = self._pair_iter(ssl)
+        A = A.to(self.device, non_blocking=True).float() / 255
+        teacher = self.ema.ema
+        teacher.eval()
+        with torch.autocast(self.device.type, enabled=bool(self.amp)):
+            out = teacher(A)
+        dets = non_max_suppression(out[0] if isinstance(out, (list, tuple)) else out, conf_thres=ssl["tau"],
+                                   iou_thres=0.7, max_det=100)
+        n = batch["img"].shape[0]
+        idx, cls, boxes = [batch["batch_idx"]], [batch["cls"]], [batch["bboxes"]]
+        st = self._ssl_stats.setdefault(self.epoch, dict(pairs=0, teacher=0, boxes=0, per_class=[0] * self.data["nc"]))
+        for i, d in enumerate(dets):
+            lab = view_consistency.transfer(d.float().cpu().numpy(), T[i].numpy().astype("float64"), mask[i].numpy(),
+                                            self.args.imgsz, ssl["tau"], grads[i].float().numpy())
+            st["pairs"] += 1
+            st["teacher"] += int((d[:, 4] >= ssl["tau"]).sum())
+            st["boxes"] += len(lab)
+            for c in lab[:, 0].astype(int):
+                st["per_class"][c] += 1
+            if len(lab):
+                lab = torch.from_numpy(lab).to(self.device)
+                idx.append(torch.full((len(lab),), n + i, device=self.device, dtype=batch["batch_idx"].dtype))
+                cls.append(lab[:, :1].to(batch["cls"].dtype))
+                boxes.append(lab[:, 1:].to(batch["bboxes"].dtype))
+        batch["img"] = torch.cat([batch["img"], B.to(self.device, non_blocking=True).float() / 255])
+        batch["batch_idx"], batch["cls"], batch["bboxes"] = torch.cat(idx), torch.cat(cls), torch.cat(boxes)
+        if "im_file" in batch:
+            batch["im_file"] = list(batch["im_file"]) + [f"view_pair_{i}" for i in range(len(dets))]
+        return batch
+
+    def _write_ssl_stats(self):
+        stats = getattr(self, "_ssl_stats", None)
+        if not stats or RANK not in {-1, 0}:
+            return
+        names = list(self.data["names"].values()) if isinstance(self.data["names"], dict) else list(self.data["names"])
+        with open(os.path.join(self.save_dir, "ssl_stats.csv"), "w") as f:
+            f.write("epoch,pairs,teacher_boxes,pseudo_boxes," + ",".join(names) + "\n")
+            for e, v in sorted(stats.items()):
+                f.write(f"{e + 1},{v['pairs']},{v['teacher']},{v['boxes']}," + ",".join(map(str, v["per_class"])) + "\n")
 
     def optimizer_step(self):
         self._repair_bn()  # before the EMA copies the BatchNorm statistics
@@ -181,6 +257,10 @@ class BladeTrainer(DetectionTrainer):
                        f"saved {stem}.json")
 
     def validate(self):
+        self._write_ssl_stats()
+        return self._validate_guarded()
+
+    def _validate_guarded(self):
         """Validate, unless the model or EMA still holds non-finite state (last resort behind the per-batch repair).
         Reporting NaN fitness makes Ultralytics reload last.pt and redo the epoch (up to 3 times)."""
         self._repair_bn()  # the epoch's last batch is not followed by a preprocess_batch
