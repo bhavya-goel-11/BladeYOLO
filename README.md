@@ -71,6 +71,10 @@ split measures how much the leak inflates scores.
 | BladeYOLO-v2, `--tolerant` | 0.523 / 0.249 | – |
 | YOLO12-L | 0.438 / 0.206 | 0.704 / 0.388 |
 
+Learning curves on WTBD-group (`--train-subset tools/splits/wtbd_group_train_f{25,50}.txt`, scene-level subsets from
+`tools/scene_fractions.py`): BladeYOLO-v2 0.232 / 0.413 / 0.548 and YOLO12-L 0.106 / 0.244 / 0.438 test mAP50 at
+25 / 50 / 100% of the labelled scenes.
+
 ### Model
 
 BladeYOLO-v2 (`bladeyolo2-l.yaml`) is the COCO-pretrained YOLOv12-L (backbone, neck and head; `yolo12l.pt` is downloaded
