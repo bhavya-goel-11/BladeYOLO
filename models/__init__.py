@@ -1,7 +1,8 @@
 """BladeYOLO modules and their registration with Ultralytics.
 
-Importing this package makes the custom layers usable by name in model YAMLs, switches the box
-loss to WIoU v3 and, with BLADEYOLO_TOLERANT=1, uses split-tolerant box targets (models/tolerant.py).
+Importing this package makes the custom layers usable by name in model YAMLs, computes YOLOv12 area-attention scores
+in fp32 (models/precision.py), switches the box loss to WIoU v3 and, with BLADEYOLO_TOLERANT=1, uses split-tolerant
+box targets (models/tolerant.py).
 DDP workers import it too, because they unpickle BladeTrainer from models.trainer.
 """
 
@@ -10,7 +11,7 @@ import os
 
 from ultralytics.nn import tasks
 
-from . import tolerant, wiou
+from . import precision, tolerant, wiou
 from .backbone import BladeBackbone, ensure_dinov3_importable
 from .dino_fusion import DinoConv, DinoFuse
 from .morphology import C2fMorph, C2fMorphRes
@@ -48,6 +49,7 @@ def _register():
 
     tasks.parse_model = parse_model_with_blade_blocks
     ensure_dinov3_importable()  # saved checkpoints reference DINOv3 classes by module path
+    precision.install_stable_area_attention()  # YOLOv12 attention scores in fp32 (fp16 overflow -> NaN)
     if os.environ.get("BLADEYOLO_BOX_LOSS", "wiou").lower() == "wiou":  # env so DDP workers agree
         wiou.install()
     if os.environ.get("BLADEYOLO_TOLERANT", "0") == "1":  # split-tolerant box targets (models/tolerant.py)

@@ -10,7 +10,7 @@
 | Repository | github.com/bhavya-goel-11/BladeYOLO (`master`) |
 | Reference papers | BladeYOLO (IEEE TGRS 2026, `BladeYOLO.pdf`); GFD-YOLOX / Wind Surface Defect dataset (Appl. Soft Comput. 2025, `1-s2.0-S156849462501227X-main.pdf`); WTBD (Ji et al., *Scientific Data* 13:396, 2026, `s41597-026-06762-x.pdf`); WTBs2025 (*Scientific Data* 13:1310, 2026) |
 
-This log covers the whole project. Phases 1–5 (Sep 3 – Oct 6) summarise the original tentative research log (commit `6f6638a`, 6 Oct). That commit was removed from `master` by the 9 Oct reset but is still in the local git object store: `git show 6f6638a:research_log.md`. Later phases come from the working sessions, the git history and the run folders under `runs/detect/BladeYOLO_WindSurface/`. Where a later audit corrected an earlier conclusion, the correction appears in that phase and in the corrections section (§16).
+This log covers the whole project. Phases 1–5 (Sep 3 – Oct 6) summarise the original tentative research log (commit `6f6638a`, 6 Oct). That commit was removed from `master` by the 9 Oct reset but is still in the local git object store: `git show 6f6638a:research_log.md`. Later phases come from the working sessions, the git history and the run folders under `runs/detect/BladeYOLO_WindSurface/`. Where a later audit corrected an earlier conclusion, the correction appears in that phase and in the corrections section (§17).
 
 ---
 
@@ -28,12 +28,12 @@ This log covers the whole project. Phases 1–5 (Sep 3 – Oct 6) summarise the 
 10. [Phase 13: new datasets and the content-based audit (12–13 Oct)](#10-phase-13-new-datasets-and-the-content-based-audit-1213-oct)
 11. [Phase 14: WTBD training: leak-free vs published split (13 Oct)](#11-phase-14-wtbd-training-leak-free-vs-published-split-13-oct)
 12. [Phase 15: YOLO12-L baselines and scene-level confidence intervals (14 Oct)](#12-phase-15-yolo12-l-baselines-and-scene-level-confidence-intervals-14-oct)
-15. [Engineering problems solved](#15-engineering-problems-solved)
-16. [Corrections to earlier conclusions](#16-corrections-to-earlier-conclusions)
-17. [Run registry](#17-run-registry)
-18. [Datasets and artefacts](#18-datasets-and-artefacts)
-19. [Open work and next steps](#19-open-work-and-next-steps)
-20. [Working conventions](#20-working-conventions)
+16. [Engineering problems solved](#16-engineering-problems-solved)
+17. [Corrections to earlier conclusions](#17-corrections-to-earlier-conclusions)
+18. [Run registry](#18-run-registry)
+19. [Datasets and artefacts](#19-datasets-and-artefacts)
+20. [Open work and next steps](#20-open-work-and-next-steps)
+21. [Working conventions](#21-working-conventions)
 
 ---
 
@@ -474,7 +474,7 @@ The class-subset check is `runs/analysis/bootstrap/robust_check.py`. The upper C
 ### Conclusions
 - **The leakage result is robust:** both models, both metrics, about +0.27–0.29 mAP50 from the random split.
 - **The honest claim for the architecture:** "BladeYOLO-v2 scores 0.55 vs 0.44 mAP50 on a leak-free WTBD split (paired bootstrap +0.16, 95% CI 0.03–0.28). The gain is concentrated in lightning damage; on the other classes the evidence is inconclusive."
-- **More independent test scenes are needed** before per-class or architectural claims can be made with confidence. Options are group k-fold cross-validation or a second dataset (§19).
+- **More independent test scenes are needed** before per-class or architectural claims can be made with confidence. Options are group k-fold cross-validation or a second dataset (§20).
 
 ### Cleanup in this phase
 - Removed `tools/diagnose_nan.py`: a one-off investigation of the fixed SS2D fp16 bug, superseded by `tools/probe_nan.py` and the trainer's per-layer NaN report.
@@ -703,7 +703,68 @@ REINFORCE fine-tuning on the region or tolerant score ("Tuning computer vision m
 
 ---
 
-## 15. Engineering problems solved
+## 15. Phase 18: split-tolerant training run and the YOLOv12 attention fp16 overflow (15 Oct)
+
+### The run
+`bladeyolo2_wtbd_group_tolerant`: BladeYOLO-v2 on WTBD-group with `--tolerant` (models/tolerant.py), otherwise the same recipe and seed as `bladeyolo2_wtbd_group`. 150 epochs on Kaggle. The log is `runs/detect/BladeYOLO_WindSurface/bladeyolo2_wtbd_group_tolerant/bladeyolo2_wtbd_group_tolerant.log`.
+
+**Five non-finite batches** (epochs 111, 113, 140, 148, 149, on both GPUs) were each dropped by the per-batch guard (§11). No reload was needed, and the run completed with test and test-time-augmentation metrics.
+
+### Root cause of the late-training NaN: YOLOv12 area attention in fp16
+**Diagnosis:**
+- The guard's per-layer reports (`nan_batches/*.json`) put the first non-finite output at **layer 6 (stock `A2C2f`, P4)** in all five batches, in fp16 only (fp32 finite). The block's input was small (absmax 50–70).
+- Replaying the saved batches through layer 6 (`runs/analysis/nan_probe/layer6.py`, final weights) reproduces three of the five. The NaN first appears at `m.1.0.attn.proj`, whose input, the attention output, is already non-finite.
+
+**Cause:** Ultralytics' `AAttn.forward` forms the scores as an explicit fp16 product, `(q * d^-0.5)^T @ k`. With q/k activations around 270 and 32-dimensional heads, a score reaches about 270/√32 × 270 × 32 ≈ 4×10⁵ > 65,504 (the fp16 maximum). It becomes inf, and the softmax returns NaN. This is a latent fp16 bug in stock YOLOv12 that appears late in training as activations grow. It is not caused by the tolerant loss (the layer is stock YOLO12-L), and it is the likely cause of the lost run's epoch-99 NaN (§11).
+
+**Fix (`models/precision.py`):** `AAttn.forward` is replaced at import (8.4.174 only, version-guarded) by the same code with the scores and softmax computed in fp32. The probabilities are ≤ 1, so the product with v stays in fp16. Attention runs only in backbone layers 6 and 8, on ≤ 400 tokens per area, so the cost is negligible.
+
+**Tests** (`tests/test_fp32_blocks.py::test_area_attention_scores_fp32`):
+- identical to stock in fp32
+- in fp16 below overflow, no further from fp32 than stock
+- above overflow, stock is non-finite and the fix is finite
+
+All five real NaN batches pass layer 6 finite with the fix.
+
+### Results: split-tolerant vs standard training
+Test, Ultralytics metrics: tolerant **0.523 / 0.249** (with test-time augmentation 0.552 / 0.282); standard 0.548 / 0.245 (0.574 / 0.279). Best val epoch 83 vs 124.
+
+Paired scene bootstrap (`runs/analysis/bootstrap/wtbd_group_tolerant/`, `runs/analysis/novel/granularity/wtbd_group_tolerant/`):
+
+| score (tolerant − standard) | difference | 95% interval |
+|---|---|---|
+| standard AP50 | −0.031 | [−0.157, 0.038] |
+| tolerant AP50 | +0.015 | [−0.111, 0.064] |
+| region AP | −0.015 | [−0.093, 0.042] |
+| standard AP50-95 | −0.003 | [−0.054, 0.032] |
+| tolerant AP50-95 | +0.014 | [−0.041, 0.046] |
+
+Per class, standard / tolerant / region AP50:
+
+| class | split-tolerant training | standard training |
+|---|---|---|
+| corrosion | 0.498 / **0.836** / **0.757** | 0.626 / 0.676 / 0.684 |
+| crack | 0.399 / 0.409 / **0.572** | 0.352 / 0.356 / 0.506 |
+| surface_injure | 0.698 / 0.748 / **0.532** | 0.759 / 0.816 / 0.735 |
+| hide_craze | 0.545 / 0.617 / 0.644 | 0.530 / 0.568 / 0.646 |
+| craze | 0.095 / 0.605 / 0.423 | 0.099 / 0.661 / 0.429 |
+| thunderstrike | 0.945 / 0.950 / 0.662 | 1.000 / 1.000 / 0.681 |
+
+Ultralytics per-class mAP50-95 for corrosion: 0.13 → **0.26**.
+
+**Findings:**
+1. **No measurable overall effect** on any score: every interval spans zero.
+2. **The effect is class-specific, in the direction the label audit predicts.** Corrosion, the least self-consistent class (69% agreement on aligned copies), improves strongly on the split-invariant scores, and its mAP50-95 doubles. Crack improves on region AP. **surface_injure gets worse** (region 0.74 → 0.53): its touching labels are more often genuinely distinct defects, so the region target is wrong for it.
+3. **One run and one seed:** per-class shifts cannot yet be separated from run-to-run variance.
+
+**Conclusions:**
+- Blanket split tolerance is not an improvement.
+- The evidence points to **class-selective tolerance**: apply it only to classes whose labels are inconsistently split (corrosion; possibly craze and hide_craze), chosen from the label audit, not from test results.
+- Step 11 (RL fine-tuning on the region score) stays deferred: it would optimise the same blanket objective, which did not move the aggregate.
+
+---
+
+## 16. Engineering problems solved
 
 | Problem | Root cause | Fix | Commit |
 |---|---|---|---|
@@ -712,6 +773,7 @@ REINFORCE fine-tuning on the region or tolerant score ("Tuning computer vision m
 | NaN epoch 4 (v2) | Poisoned WIoU global + aggressive warmup | Finite-only running mean; lr0 0.001, `warmup_bias_lr` 0 | `2efd069` |
 | NaN epoch 17 (v2) | fp16 overflow, layer 26 conv into BN | `FP32Block` for the refinement blocks | `08f9a4b` |
 | NaN epoch 99 (WTBD) leaving val at 0 | NaN batch poisons BN running stats + EMA | Per-batch BN repair + step skip + per-layer report | `91ae01f` |
+| NaN batches late in training (epochs 99–149) | YOLOv12 `AAttn` forms attention scores in fp16; they overflow (~4e5) | Scores and softmax in fp32 (`models/precision.py`), version-guarded | Phase 18 |
 | Test evaluation silently missing (twice) | `deform_conv2d` segfault on NaN offsets from the FLOPs probe | Finite, clamped offsets; test in a fresh process | `b8721bc` |
 | Strict pretrained loading mismatch | YOLOv12 checkpoint carries `attn.pe.conv.bias` | Fold the bias exactly into BN `running_mean` | `e77dc0d` |
 | Ultralytics label cache on a read-only Kaggle input | Input mount not writable | Copy the dataset into the project folder once | `1d58ea2` |
@@ -720,7 +782,7 @@ REINFORCE fine-tuning on the region or tolerant score ("Tuning computer vision m
 
 ---
 
-## 16. Corrections to earlier conclusions
+## 17. Corrections to earlier conclusions
 
 | Earlier conclusion | Status | Why |
 |---|---|---|
@@ -741,7 +803,7 @@ REINFORCE fine-tuning on the region or tolerant score ("Tuning computer vision m
 
 ---
 
-## 17. Run registry
+## 18. Run registry
 
 | Run folder | Data | Model | Epochs | Val best (mAP50 / 50-95) | Test (mAP50 / 50-95) | Notes |
 |---|---|---|---|---|---|---|
@@ -757,6 +819,7 @@ REINFORCE fine-tuning on the region or tolerant score ("Tuning computer vision m
 | `bladeyolo2_wtbd_group` (attempt 1) | WTBD-group | BladeYOLO-v2 | 99 of 150 | 0.649 / 0.379 | — | NaN at epoch 99; folder lost |
 | **`bladeyolo2_wtbd_group`** | WTBD-group (leak-free) | BladeYOLO-v2 | 150 | 0.650 / 0.368 (epoch 124) | **0.548 / 0.245**; TTA 0.574 / 0.279 | Test run locally |
 | **`bladeyolo2_wtbd_official`** | WTBD official (**leaky**) | BladeYOLO-v2 | 120 | 0.845 / 0.475 (epoch 105) | **0.840 / 0.493**; TTA 0.830 / 0.517 | TTA run locally |
+| **`bladeyolo2_wtbd_group_tolerant`** | WTBD-group (leak-free) | BladeYOLO-v2, split-tolerant targets | 150 | 0.609 / 0.352 (epoch 83) | **0.523 / 0.249**; TTA 0.552 / 0.282 | 5 NaN batches dropped (attention overflow, since fixed) |
 | **`yolo12l_wtbd_group`** | WTBD-group (leak-free) | YOLO12-L | 150 | 0.419 / 0.269 (epoch 130) | **0.438 / 0.206**; TTA 0.440 / 0.230 | Same recipe |
 | **`yolo12l_wtbd_official`** | WTBD official (**leaky**) | YOLO12-L | 120 | 0.665 / 0.394 (epoch 104) | **0.704 / 0.388**; TTA 0.734 / 0.438 | Same recipe |
 
@@ -764,7 +827,7 @@ Val best is the best epoch in `results.csv` by fitness (0.1 × mAP50 + 0.9 × mA
 
 ---
 
-## 18. Datasets and artefacts
+## 19. Datasets and artefacts
 
 | Item | Location | Notes |
 |---|---|---|
@@ -788,11 +851,11 @@ Val best is the best epoch in `results.csv` by fitness (0.1 × mAP50 + 0.9 × mA
 - labels and evaluation: `error_analysis.py`, `review_labels.py`, `apply_review.py`, `merge_regions.py`, `ensemble.py`, `class_crops.py`, `granularity_eval.py`, `conformal_recall.py`
 - debugging and setup: `probe_nan.py`, `setup_windows.ps1` (`diagnose_nan.py` and `eval_by_source.py` were removed on 14 Oct; they are in the git history)
 
-**Tests** (`tests/`): `test_ss2d`, `test_wiou`, `test_model`, `test_augment`, `test_fp32_blocks`, `test_merge_regions`, `test_deform_offsets`, `test_granularity_eval`, `test_view_label_audit`, `test_conformal_recall`, `test_tolerant`. All pass in `.venv`.
+**Tests** (`tests/`): `test_ss2d`, `test_wiou`, `test_model`, `test_augment`, `test_fp32_blocks`, `test_merge_regions`, `test_deform_offsets`, `test_granularity_eval`, `test_view_label_audit`, `test_conformal_recall`, `test_tolerant` (fp16 attention test in `test_fp32_blocks`). All pass in `.venv`.
 
 ---
 
-## 19. Open work and next steps
+## 20. Open work and next steps
 
 Ordered by how much each step strengthens the main claims, with rough Kaggle cost (2×T4; one WTBD run ≈ 2 h).
 
@@ -812,8 +875,8 @@ Ordered by how much each step strengthens the main claims, with rough Kaggle cos
 9. **Optional pretraining** on fengChe + WTBs2025, then fine-tuning on WTBD, excluding Beijing, which contains WTBD test photos. Only worth it if cross-validation shows overfitting.
 
 **D. Follow-ups to the evaluation experiments (Phase 16), status after Phase 17**
-10. **Split-tolerant training** (`--tolerant`): implemented and tested; **Kaggle run pending** (§14).
-11. **Reward fine-tuning (RL):** deferred until step 10's result (§14).
+10. **Split-tolerant training** (`--tolerant`): run done (§15). No overall effect; corrosion improves, surface_injure worsens. Next: class-selective tolerance, chosen from the label audit, plus seeds.
+11. **Reward fine-tuning (RL):** remains deferred; blanket split tolerance did not move the aggregate (§15).
 12. **Scene-level and class-aware conformal calibration, operating curve:** done (§14).
 13. **Label audit on other datasets:** done. Axis-aligned agreement: WTBD 87.3%, WTBlade 86.0%, Wind Surface 83.8%. WTBlade contains synthetic copy-paste images and DTU NordTank imagery (§14).
 14. **Memorised box splitting:** tested, not supported (§14).
@@ -821,7 +884,7 @@ Ordered by how much each step strengthens the main claims, with rough Kaggle cos
 **E. Write-up**
 15. **Results summary for the professor.** Cover the reproduction gap, the leakage evidence on two datasets, the leak-free protocol, the 2×2 table with intervals, the honest architecture claim, and the Phase 16 evaluation findings. Optionally send the WTBD authors the group-split CSV.
 
-## 20. Working conventions
+## 21. Working conventions
 
 - **Classes:** datasets are used with their official classes only; the custom v3 taxonomy (Phase 9) is retired.
 - **Testing:** tests and analyses run in the project's own `.venv`, with outputs under `runs/` and never `/tmp` ("research projects can have their own testing environments").
