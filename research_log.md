@@ -5,12 +5,12 @@
 | | |
 |---|---|
 | Researcher | Bhavya Goel |
-| Period | 3 Sep 2026 – 16 Oct 2026 |
+| Period | 3 Sep 2026 – 17 Oct 2026 |
 | Compute | Kaggle 2× Tesla T4 (all training since 9 Oct); A100 for Runs 5–7; local CPU machine (analysis only) |
 | Repository | github.com/bhavya-goel-11/BladeYOLO (`master`) |
 | Reference papers | BladeYOLO (IEEE TGRS 2026, `BladeYOLO.pdf`); GFD-YOLOX / Wind Surface Defect dataset (Appl. Soft Comput. 2025, `1-s2.0-S156849462501227X-main.pdf`); WTBD (Ji et al., *Scientific Data* 13:396, 2026, `s41597-026-06762-x.pdf`); WTBs2025 (*Scientific Data* 13:1310, 2026) |
 
-This log covers the whole project. Phases 1–5 (Sep 3 – Oct 6) summarise the original tentative research log (commit `6f6638a`, 6 Oct). That commit was removed from `master` by the 9 Oct reset but is still in the local git object store: `git show 6f6638a:research_log.md`. Later phases come from the working sessions, the git history and the run folders under `runs/detect/BladeYOLO_WindSurface/`. Where a later audit corrected an earlier conclusion, the correction appears in that phase and in the corrections section (§20).
+This log covers the whole project. Phases 1–5 (Sep 3 – Oct 6) summarise the original tentative research log (commit `6f6638a`, 6 Oct). That commit was removed from `master` by the 9 Oct reset but is still in the local git object store: `git show 6f6638a:research_log.md`. Later phases come from the working sessions, the git history and the run folders under `runs/detect/BladeYOLO_WindSurface/`. Where a later audit corrected an earlier conclusion, the correction appears in that phase and in the corrections section (§21).
 
 ---
 
@@ -28,12 +28,12 @@ This log covers the whole project. Phases 1–5 (Sep 3 – Oct 6) summarise the 
 10. [Phase 13: new datasets and the content-based audit (12–13 Oct)](#10-phase-13-new-datasets-and-the-content-based-audit-1213-oct)
 11. [Phase 14: WTBD training: leak-free vs published split (13 Oct)](#11-phase-14-wtbd-training-leak-free-vs-published-split-13-oct)
 12. [Phase 15: YOLO12-L baselines and scene-level confidence intervals (14 Oct)](#12-phase-15-yolo12-l-baselines-and-scene-level-confidence-intervals-14-oct)
-19. [Engineering problems solved](#19-engineering-problems-solved)
-20. [Corrections to earlier conclusions](#20-corrections-to-earlier-conclusions)
-21. [Run registry](#21-run-registry)
-22. [Datasets and artefacts](#22-datasets-and-artefacts)
-23. [Open work and next steps](#23-open-work-and-next-steps)
-24. [Working conventions](#24-working-conventions)
+20. [Engineering problems solved](#20-engineering-problems-solved)
+21. [Corrections to earlier conclusions](#21-corrections-to-earlier-conclusions)
+22. [Run registry](#22-run-registry)
+23. [Datasets and artefacts](#23-datasets-and-artefacts)
+24. [Open work and next steps](#24-open-work-and-next-steps)
+25. [Working conventions](#25-working-conventions)
 
 ---
 
@@ -474,7 +474,7 @@ The class-subset check is `runs/analysis/bootstrap/robust_check.py`. The upper C
 ### Conclusions
 - **The leakage result is robust:** both models, both metrics, about +0.27–0.29 mAP50 from the random split.
 - **The honest claim for the architecture:** "BladeYOLO-v2 scores 0.55 vs 0.44 mAP50 on a leak-free WTBD split (paired bootstrap +0.16, 95% CI 0.03–0.28). The gain is concentrated in lightning damage; on the other classes the evidence is inconclusive."
-- **More independent test scenes are needed** before per-class or architectural claims can be made with confidence. Options are group k-fold cross-validation or a second dataset (§23).
+- **More independent test scenes are needed** before per-class or architectural claims can be made with confidence. Options are group k-fold cross-validation or a second dataset (§24).
 
 ### Cleanup in this phase
 - Removed `tools/diagnose_nan.py`: a one-off investigation of the fixed SS2D fp16 bug, superseded by `tools/probe_nan.py` and the trainer's per-layer NaN report.
@@ -940,7 +940,42 @@ From a random initialisation, no pseudo-labels appear even at τ = 0.01, as expe
 
 ---
 
-## 19. Engineering problems solved
+## 19. Phase 22: first semi-supervised runs at 25%: no effect, and why (16–17 Oct)
+
+**Runs:** BladeYOLO-v2 on 25% of WTBD-group's labelled scenes (189 images), with the view pool of Phase 21: `--ssl synthetic` and `--ssl real`. Defaults: ratio 0.25 (2 unlabelled pairs next to 8 labelled images per GPU), τ = 0.5, pseudo-labels from epoch 31. Same recipe and seed as the supervised `bladeyolo2_wtbd_group_f25`.
+
+| run | test mAP50 / 50-95 | with test-time aug. | val best | pseudo-labels over training (GPU 0) |
+|---|---|---|---|---|
+| supervised | 0.232 / 0.082 | 0.269 / 0.105 | 0.444 / 0.226 | – |
+| synthetic views | 0.221 / 0.071 | 0.233 / 0.089 | 0.427 / 0.203 | 2,880 pairs → 751 teacher boxes → 678 pseudo-labels (90% kept) |
+| real views | 0.213 / 0.085 | 0.268 / 0.107 | 0.450 / 0.210 | 2,880 pairs → 124 teacher boxes → **66** pseudo-labels (53% kept) |
+
+Paired scene bootstrap, supervised − semi-supervised (`runs/analysis/bootstrap/ssl_f25/report.md`):
+- **synthetic:** +0.028 mAP50 [−0.188, 0.069]
+- **real:** +0.018 [−0.068, 0.057]
+- mAP50-95: +0.010 and −0.000
+
+**No detectable effect either way.**
+
+**Why the hypothesis was not actually tested:**
+1. **The unlabelled signal was tiny.** With 189 labelled images an epoch is about 12 batches, so about 2,900 pairs per GPU over the whole run, and only a few hundred pseudo-labels, against 189 labelled images seen 150 times.
+2. **The real-view teacher collapsed.** Confident teacher boxes per epoch on the pool fell from 2.4 (first third) to 0.3–0.4 (last two thirds). Cause, a design flaw: an unlabelled image whose pseudo-labels were all removed (low confidence, or the local and area checks, which real pairs fail more often: 53% kept vs 90%) still joined the batch as an image *without defects*. The student learned that pool images contain no damage, which made the teacher less confident, a feedback loop.
+3. **Domain shift.** The pool comes from other wind farms, and the WTBD-trained teacher is rarely confident there at τ = 0.5. The synthetic run had the same domain gap but kept 90% of its few boxes.
+
+**Fix implemented** (`models/view_consistency.py`, `BladeTrainer`):
+- an unlabelled image with no surviving pseudo-label is no longer used
+- the regions of confident teacher boxes that fail a check are greyed out in B, so they are ignored, not trained as background
+- `ssl_stats.csv` now also records images used and ignored boxes
+
+Tests updated (`tests/test_view_consistency.py`: dropped boxes are returned for ignoring).
+
+**Still open:**
+- **Throughput:** more unlabelled pairs per step does not fit in T4 memory (8 + 2 images ≈ 11 GB of 15).
+- **Domain:** the standard protocol draws unlabelled data from the same dataset (the 75% of WTBD training scenes outside the labelled subset). But WTBD's numbered file names carry no source-photo provenance, so its real second views cannot be separated from its augmented copies the way WTBlade's can (§18).
+
+---
+
+## 20. Engineering problems solved
 
 | Problem | Root cause | Fix | Commit |
 |---|---|---|---|
@@ -958,7 +993,7 @@ From a random initialisation, no pseudo-labels appear even at τ = 0.01, as expe
 
 ---
 
-## 20. Corrections to earlier conclusions
+## 21. Corrections to earlier conclusions
 
 | Earlier conclusion | Status | Why |
 |---|---|---|
@@ -979,7 +1014,7 @@ From a random initialisation, no pseudo-labels appear even at τ = 0.01, as expe
 
 ---
 
-## 21. Run registry
+## 22. Run registry
 
 | Run folder | Data | Model | Epochs | Val best (mAP50 / 50-95) | Test (mAP50 / 50-95) | Notes |
 |---|---|---|---|---|---|---|
@@ -1000,6 +1035,8 @@ From a random initialisation, no pseudo-labels appear even at τ = 0.01, as expe
 | `bladeyolo2_wtbd_group_f50` | WTBD-group, 50% of train scenes | BladeYOLO-v2 | 150 | 0.472 / 0.263 (epoch 140) | **0.413 / 0.183**; TTA 0.473 / 0.211 | Learning curve |
 | `yolo12l_wtbd_group_f25` | WTBD-group, 25% of train scenes | YOLO12-L | 150 | 0.233 / 0.139 (epoch 150) | **0.106 / 0.037**; TTA 0.144 / 0.059 | Learning curve |
 | `yolo12l_wtbd_group_f50` | WTBD-group, 50% of train scenes | YOLO12-L | 150 | 0.279 / 0.167 (epoch 120) | **0.244 / 0.105**; TTA 0.259 / 0.125 | Learning curve |
+| `bladeyolo2_wtbd_group_f25_sslsyn` | WTBD-group 25% + view pool | BladeYOLO-v2, synthetic-view teacher–student | 150 | 0.427 / 0.203 (epoch 142) | **0.221 / 0.071**; TTA 0.233 / 0.089 | Phase 22 |
+| `bladeyolo2_wtbd_group_f25_sslreal` | WTBD-group 25% + view pool | BladeYOLO-v2, real-view teacher–student | 150 | 0.450 / 0.210 (epoch 107) | **0.213 / 0.085**; TTA 0.268 / 0.107 | Phase 22; teacher collapsed |
 | **`yolo12l_wtbd_group`** | WTBD-group (leak-free) | YOLO12-L | 150 | 0.419 / 0.269 (epoch 130) | **0.438 / 0.206**; TTA 0.440 / 0.230 | Same recipe |
 | **`yolo12l_wtbd_official`** | WTBD official (**leaky**) | YOLO12-L | 120 | 0.665 / 0.394 (epoch 104) | **0.704 / 0.388**; TTA 0.734 / 0.438 | Same recipe |
 
@@ -1007,7 +1044,7 @@ Val best is the best epoch in `results.csv` by fitness (0.1 × mAP50 + 0.9 × mA
 
 ---
 
-## 22. Datasets and artefacts
+## 23. Datasets and artefacts
 
 | Item | Location | Notes |
 |---|---|---|
@@ -1035,7 +1072,7 @@ Everything retired is restorable from commit `b374f4c`.
 
 ---
 
-## 23. Open work and next steps
+## 24. Open work and next steps
 
 **A. Real-view consistency for data-limited detection (Phase 19)**
 1. **Learning curves: done (§17).** Steep and significant for both detectors; BladeYOLO-v2 is the more data-efficient base model. Commands used:
@@ -1066,7 +1103,7 @@ Everything retired is restorable from commit `b374f4c`.
 6. **Seeds** for the existing WTBD-group pair, the **loss vs architecture separation** (`bladeyolo2-l.yaml --box-loss ciou`), and a **component ablation** (without DINOv3 fusion) to test whether the low-data advantage comes from the DINOv3 features.
 7. **WTBlade group split** with its official classes, for a second benchmark. Licence: it contains DTU NordTank (CC BY-NC) and synthetic copy-paste images (§14).
 
-## 24. Working conventions
+## 25. Working conventions
 
 - **Classes:** datasets are used with their official classes only; the custom v3 taxonomy (Phase 9) is retired.
 - **Testing:** tests and analyses run in the project's own `.venv`, with outputs under `runs/` and never `/tmp` ("research projects can have their own testing environments").

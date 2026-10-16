@@ -105,8 +105,9 @@ def test_transfer_filters():
                     [150, 150, 250, 250, 0.3, 1],   # below tau: dropped
                     [450, 450, 600, 600, 0.9, 0],   # mostly outside the valid area: dropped
                     [300, 300, 302, 400, 0.9, 3]])  # too thin: dropped
-    lab = vc.transfer(det, T, mask, 640, tau=0.5)
+    lab, drop = vc.transfer(det, T, mask, 640, tau=0.5)
     assert lab.shape == (1, 5) and lab[0, 0] == 2
+    assert drop.tolist() == [[450, 450, 500, 500]]  # the half-outside box, clipped to the view: ignored (the 2 px one is negligible)
     assert np.allclose(lab[0, 1:], [200 / 640, 200 / 640, 100 / 640, 100 / 640])
     print("ok test_transfer_filters")
 
@@ -119,8 +120,9 @@ def test_local_check_drops_moved_content():
     gb[300:400, 300:400] = rng.random((100, 100))  # content changed inside the second box only
     det = np.array([[100, 100, 200, 200, 0.9, 0], [300, 300, 400, 400, 0.9, 1]])
     mask = np.ones((640, 640), bool)
-    lab = vc.transfer(det, np.eye(3), mask, 640, 0.5, np.stack([ga, gb]))
+    lab, drop = vc.transfer(det, np.eye(3), mask, 640, 0.5, np.stack([ga, gb]))
     assert lab.shape == (1, 5) and lab[0, 0] == 0, lab
+    assert drop.tolist() == [[300, 300, 400, 400]]  # ignored in B, not trained as background
     print("ok test_local_check_drops_moved_content")
 
 

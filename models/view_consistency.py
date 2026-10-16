@@ -5,7 +5,9 @@ transform verified by ORB/RANSAC). The teacher (the trainer's EMA model) detects
 >= tau are mapped into B and become B's labels for the student. B is masked to the area A covers, so defects outside
 A's view are not trained as background, and a moved box is kept only if A (warped into B) and B show the same
 structure inside it (gradient ZNCC >= LOCAL_ZNCC): a global transform fits the static scene, but a rotor turns
-between video frames, so labels on moving blades must not be moved. Mode "real": B is another photograph of the
+between video frames, so labels on moving blades must not be moved. Regions of confident boxes that fail a check are
+greyed out in B (ignored), and a B image without any pseudo-label is not used at all: an unlabelled defect image
+trained as "background" teaches the student to miss defects, which in turn starves the teacher (Phase 22). Mode "real": B is another photograph of the
 surface (pairs.csv rows with same_photo = 0). Mode "synthetic" (the standard teacher-student baseline): B is a random
 augmentation of A with a known T, so the two modes differ only in where the second view comes from.
 
@@ -162,30 +164,32 @@ def local_zncc(ga, gb, box):
 
 
 def transfer(det, T, mask, size, tau, grads=None):
-    """Teacher detections on A (n, 6: xyxy, conf, cls; letterboxed px) -> B labels (m, 5: cls, xc, yc, w, h normalised).
+    """Teacher detections on A (n, 6: xyxy, conf, cls; letterboxed px) -> (B labels (m, 5: cls, xc, yc, w, h
+    normalised), dropped boxes (k, 4: xyxy in B's letterboxed px)).
     A moved box is kept if >= MIN_KEEP of it lies in B's valid area, its sides are >= 4 px and, given grads (gradient
-    magnitudes of A warped into B and of B), the two agree inside it (ZNCC >= LOCAL_ZNCC)."""
+    magnitudes of A warped into B and of B), the two agree inside it (ZNCC >= LOCAL_ZNCC). A confident box that fails a
+    check is returned as dropped: the teacher saw a defect there, so the region must be ignored, not trained as
+    background."""
+    out, dropped = [], []
+    empty = np.zeros((0, 5), np.float32), np.zeros((0, 4), np.float32)
     det = det[det[:, 4] >= tau]
-    if not len(det):
-        return np.zeros((0, 5), np.float32)
-    moved = move_boxes(det[:, :4].astype(np.float64), T)
-    out = []
     ys, xs = np.nonzero(mask)
-    if not len(xs):
-        return np.zeros((0, 5), np.float32)
+    if not len(det) or not len(xs):
+        return empty
+    moved = move_boxes(det[:, :4].astype(np.float64), T)
     vx1, vy1, vx2, vy2 = xs.min(), ys.min(), xs.max() + 1, ys.max() + 1
     for (x1, y1, x2, y2), c in zip(moved, det[:, 5]):
         cx1, cy1, cx2, cy2 = max(x1, vx1), max(y1, vy1), min(x2, vx2), min(y2, vy2)
         if cx2 - cx1 < 4 or cy2 - cy1 < 4:
-            continue
-        inside = mask[int(cy1):int(math.ceil(cy2)), int(cx1):int(math.ceil(cx2))].mean()
-        if (cx2 - cx1) * (cy2 - cy1) / max((x2 - x1) * (y2 - y1), 1e-9) * inside < MIN_KEEP:
-            continue
-        if grads is not None and local_zncc(grads[0], grads[1], (int(cx1), int(cy1), int(math.ceil(cx2)),
-                                                                   int(math.ceil(cy2)))) < LOCAL_ZNCC:
+            continue  # (almost) entirely outside B's view: nothing of it to ignore
+        box = (int(cx1), int(cy1), int(math.ceil(cx2)), int(math.ceil(cy2)))
+        inside = mask[box[1]:box[3], box[0]:box[2]].mean()
+        if ((cx2 - cx1) * (cy2 - cy1) / max((x2 - x1) * (y2 - y1), 1e-9) * inside < MIN_KEEP or
+                (grads is not None and local_zncc(grads[0], grads[1], box) < LOCAL_ZNCC)):
+            dropped.append(box)
             continue
         out.append([c, (cx1 + cx2) / 2 / size, (cy1 + cy2) / 2 / size, (cx2 - cx1) / size, (cy2 - cy1) / size])
-    return np.array(out, np.float32).reshape(-1, 5)
+    return np.array(out, np.float32).reshape(-1, 5), np.array(dropped, np.float32).reshape(-1, 4)
 
 
 def config():

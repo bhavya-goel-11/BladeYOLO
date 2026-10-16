@@ -177,25 +177,34 @@ class BladeTrainer(DetectionTrainer):
         dets = non_max_suppression(out[0] if isinstance(out, (list, tuple)) else out, conf_thres=ssl["tau"],
                                    iou_thres=0.7, max_det=100)
         n = batch["img"].shape[0]
-        idx, cls, boxes = [batch["batch_idx"]], [batch["cls"]], [batch["bboxes"]]
-        st = self._ssl_stats.setdefault(self.epoch, dict(pairs=0, teacher=0, boxes=0, per_class=[0] * self.data["nc"]))
+        idx, cls, boxes, imgs = [batch["batch_idx"]], [batch["cls"]], [batch["bboxes"]], [batch["img"]]
+        st = self._ssl_stats.setdefault(self.epoch, dict(pairs=0, teacher=0, boxes=0, used=0, dropped=0,
+                                                         per_class=[0] * self.data["nc"]))
         for i, d in enumerate(dets):
-            lab = view_consistency.transfer(d.float().cpu().numpy(), T[i].numpy().astype("float64"), mask[i].numpy(),
-                                            self.args.imgsz, ssl["tau"], grads[i].float().numpy())
+            lab, drop = view_consistency.transfer(d.float().cpu().numpy(), T[i].numpy().astype("float64"),
+                                                  mask[i].numpy(), self.args.imgsz, ssl["tau"], grads[i].float().numpy())
             st["pairs"] += 1
             st["teacher"] += int((d[:, 4] >= ssl["tau"]).sum())
+            st["dropped"] += len(drop)
+            if not len(lab):
+                continue  # no pseudo-label: the image would only teach "no defect here"
+            img = B[i].to(self.device, non_blocking=True).float() / 255
+            for x1, y1, x2, y2 in drop.astype(int):
+                img[:, y1:y2, x1:x2] = view_consistency.LETTERBOX / 255  # a defect the teacher saw: ignore, not background
+            st["used"] += 1
             st["boxes"] += len(lab)
             for c in lab[:, 0].astype(int):
                 st["per_class"][c] += 1
-            if len(lab):
-                lab = torch.from_numpy(lab).to(self.device)
-                idx.append(torch.full((len(lab),), n + i, device=self.device, dtype=batch["batch_idx"].dtype))
-                cls.append(lab[:, :1].to(batch["cls"].dtype))
-                boxes.append(lab[:, 1:].to(batch["bboxes"].dtype))
-        batch["img"] = torch.cat([batch["img"], B.to(self.device, non_blocking=True).float() / 255])
-        batch["batch_idx"], batch["cls"], batch["bboxes"] = torch.cat(idx), torch.cat(cls), torch.cat(boxes)
-        if "im_file" in batch:
-            batch["im_file"] = list(batch["im_file"]) + [f"view_pair_{i}" for i in range(len(dets))]
+            lab = torch.from_numpy(lab).to(self.device)
+            idx.append(torch.full((len(lab),), n + len(imgs) - 1, device=self.device, dtype=batch["batch_idx"].dtype))
+            cls.append(lab[:, :1].to(batch["cls"].dtype))
+            boxes.append(lab[:, 1:].to(batch["bboxes"].dtype))
+            imgs.append(img[None])
+        if len(imgs) > 1:
+            batch["img"] = torch.cat(imgs)
+            batch["batch_idx"], batch["cls"], batch["bboxes"] = torch.cat(idx), torch.cat(cls), torch.cat(boxes)
+            if "im_file" in batch:
+                batch["im_file"] = list(batch["im_file"]) + [f"view_pair_{k}" for k in range(len(imgs) - 1)]
         return batch
 
     def _write_ssl_stats(self):
@@ -204,9 +213,10 @@ class BladeTrainer(DetectionTrainer):
             return
         names = list(self.data["names"].values()) if isinstance(self.data["names"], dict) else list(self.data["names"])
         with open(os.path.join(self.save_dir, "ssl_stats.csv"), "w") as f:
-            f.write("epoch,pairs,teacher_boxes,pseudo_boxes," + ",".join(names) + "\n")
+            f.write("epoch,pairs,images_used,teacher_boxes,pseudo_boxes,ignored_boxes," + ",".join(names) + "\n")
             for e, v in sorted(stats.items()):
-                f.write(f"{e + 1},{v['pairs']},{v['teacher']},{v['boxes']}," + ",".join(map(str, v["per_class"])) + "\n")
+                f.write(f"{e + 1},{v['pairs']},{v['used']},{v['teacher']},{v['boxes']},{v['dropped']}," +
+                        ",".join(map(str, v["per_class"])) + "\n")
 
     def optimizer_step(self):
         self._repair_bn()  # before the EMA copies the BatchNorm statistics
