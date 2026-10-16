@@ -973,6 +973,12 @@ Tests updated (`tests/test_view_consistency.py`: dropped boxes are returned for 
 - **Throughput:** more unlabelled pairs per step does not fit in T4 memory (8 + 2 images ≈ 11 GB of 15).
 - **Domain:** the standard protocol draws unlabelled data from the same dataset (the 75% of WTBD training scenes outside the labelled subset). But WTBD's numbered file names carry no source-photo provenance, so its real second views cannot be separated from its augmented copies the way WTBlade's can (§18).
 
+**Next round (decided 17 Oct, one Kaggle session, 3 runs at 25%):**
+- **A:** rerun `--ssl synthetic` and `--ssl real` on the view pool with the fix.
+- **B:** the in-domain protocol. `--ssl synthetic --ssl-unlabelled tools/splits/wtbd_group_train_f25_rest.txt`, i.e. the 556 WTBD training images outside the 25% subset, used without labels; val and test untouched. This tests whether teacher–student training helps on WTBD at all. Real views cannot be identified inside WTBD, so B has no real-view counterpart.
+- **Implementation:** `train.py --ssl-unlabelled` resolves the names against `--data` and refuses overlap with `--train-subset` and use with `--ssl real`; `PairDataset` accepts an image list in synthetic mode.
+- **Tests:** list mode and refusals; a 1-epoch CPU run through the full command line; trained-teacher smoke runs in both modes after the fix (synthetic 11 teacher boxes → 7 pseudo-labels, 4 ignored; real 8 → 8; 7 of 10 images used each).
+
 ---
 
 ## 20. Engineering problems solved
@@ -1099,6 +1105,12 @@ Everything retired is restorable from commit `b374f4c`.
    - **Real views vs augmented copies:** most WTBlade "same-surface" pairs are Roboflow augmented copies (synthetic). Real second views are video frames and overlapping photos, and must be told apart (e.g. by the photometric residual after alignment), or the method silently becomes synthetic consistency.
 
 **B. Carried over**
+4b. **Next round (§19):** A + B at 25%:
+   ```
+   python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --ssl synthetic --ssl-pairs .../view-pool/pairs.csv --name bladeyolo2_wtbd_group_f25_sslsyn2 --epochs 150
+   python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --ssl real --ssl-pairs .../view-pool/pairs.csv --name bladeyolo2_wtbd_group_f25_sslreal2 --epochs 150
+   python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --ssl synthetic --ssl-unlabelled tools/splits/wtbd_group_train_f25_rest.txt --name bladeyolo2_wtbd_group_f25_sslin --epochs 150
+   ```
 5. **Class-selective split tolerance:** apply `--tolerant` only to classes with low label self-consistency (corrosion; possibly craze and hide_craze), chosen from the label audit (§14–§15). It can be combined with A as the box loss.
 6. **Seeds** for the existing WTBD-group pair, the **loss vs architecture separation** (`bladeyolo2-l.yaml --box-loss ciou`), and a **component ablation** (without DINOv3 fusion) to test whether the low-data advantage comes from the DINOv3 features.
 7. **WTBlade group split** with its official classes, for a second benchmark. Licence: it contains DTU NordTank (CC BY-NC) and synthetic copy-paste images (§14).

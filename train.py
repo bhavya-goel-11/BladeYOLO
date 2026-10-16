@@ -6,6 +6,8 @@ Examples (WTBD = the folder holding WTBD-group/ and WTBD-official/):
     python train.py --data WTBD/WTBD-group/data.yaml --model bladeyolo2-l.yaml --tolerant --name bladeyolo2_wtbd_group_tolerant
     python train.py --data WTBD/WTBD-group/data.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --name bladeyolo2_wtbd_group_f25
     python train.py --data WTBD/WTBD-group/data.yaml --test runs/detect/BladeYOLO_WindSurface/bladeyolo2_wtbd_group/weights/best.pt
+    python train.py --data WTBD/WTBD-group/data.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --ssl synthetic \
+        --ssl-unlabelled tools/splits/wtbd_group_train_f25_rest.txt --name bladeyolo2_wtbd_group_f25_sslin
     python train.py --resume runs/detect/BladeYOLO_WindSurface/bladeyolo2_wtbd_group/weights/last.pt
 """
 
@@ -62,6 +64,9 @@ def parse_args():
                         "image (baseline)")
     p.add_argument("--ssl-pairs", default=os.path.join(ROOT_DIR, "runs", "analysis", "novel", "view_pool", "pairs.csv"),
                    help="pairs.csv from tools/view_pool.py")
+    p.add_argument("--ssl-unlabelled", default=None, metavar="LIST",
+                   help="--ssl synthetic only: unlabelled images from the training split instead of the view pool, "
+                        "e.g. tools/splits/wtbd_group_train_f25_rest.txt (the training images outside --train-subset)")
     p.add_argument("--ssl-ratio", type=float, default=0.25, help="unlabelled pairs per labelled image in a batch")
     p.add_argument("--ssl-tau", type=float, default=0.5, help="teacher confidence for a pseudo-label")
     p.add_argument("--ssl-start", type=int, default=30, help="epochs of supervised burn-in before pseudo-labels")
@@ -125,8 +130,10 @@ def main():
     os.environ["BLADEYOLO_ROT90"] = str(args.rot90)  # read by BladeTrainer.build_dataset, inherited by DDP workers
     os.environ["BLADEYOLO_TOLERANT"] = "1" if args.tolerant else "0"  # read by `import models`, inherited by DDP workers
     os.environ["BLADEYOLO_SSL"] = args.ssl or ""  # read by BladeTrainer (models/view_consistency.config), inherited by DDP workers
+    if args.ssl_unlabelled and args.ssl != "synthetic":
+        raise SystemExit("--ssl-unlabelled needs --ssl synthetic (a plain image list has no second views)")
     if args.ssl:
-        if not os.path.exists(args.ssl_pairs):
+        if not args.ssl_unlabelled and not os.path.exists(args.ssl_pairs):
             raise FileNotFoundError(f"--ssl needs the view-pair list from tools/view_pool.py: {args.ssl_pairs}")
         os.environ.update(BLADEYOLO_SSL_PAIRS=os.path.abspath(args.ssl_pairs), BLADEYOLO_SSL_RATIO=str(args.ssl_ratio),
                           BLADEYOLO_SSL_TAU=str(args.ssl_tau), BLADEYOLO_SSL_START=str(args.ssl_start))
@@ -149,6 +156,24 @@ def main():
 
     device = args.device or ",".join(str(i) for i in range(max(torch.cuda.device_count(), 1)))
     data = resolve_data(args.data, args.train_subset)
+    if args.ssl_unlabelled:  # image names of the training split -> absolute paths (before DDP workers start)
+        with open(data) as f:
+            cfg = yaml.safe_load(f)
+        img_dir = os.path.join(cfg["path"], "train", "images")
+        names = [n.strip() for n in open(args.ssl_unlabelled) if n.strip()]
+        paths = [os.path.join(img_dir, n) for n in names]
+        missing = [q for q in paths if not os.path.exists(q)]
+        if missing:
+            raise FileNotFoundError(f"{len(missing)} images of {args.ssl_unlabelled} not in {img_dir}, e.g. {missing[0]}")
+        if args.train_subset:
+            overlap = set(names) & {n.strip() for n in open(args.train_subset) if n.strip()}
+            if overlap:
+                raise ValueError(f"{len(overlap)} unlabelled images are also in --train-subset, e.g. {sorted(overlap)[0]}")
+        out = os.path.join(ROOT_DIR, "runs", "ssl_unlabelled.txt")
+        with open(out, "w") as f:
+            f.write("\n".join(paths) + "\n")
+        os.environ["BLADEYOLO_SSL_PAIRS"] = out
+        print(f"Unlabelled images for teacher-student training: {len(paths)} from {args.ssl_unlabelled}")
     model = YOLO(args.model)
     model.train(
         trainer=BladeTrainer,

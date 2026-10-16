@@ -9,7 +9,8 @@ between video frames, so labels on moving blades must not be moved. Regions of c
 greyed out in B (ignored), and a B image without any pseudo-label is not used at all: an unlabelled defect image
 trained as "background" teaches the student to miss defects, which in turn starves the teacher (Phase 22). Mode "real": B is another photograph of the
 surface (pairs.csv rows with same_photo = 0). Mode "synthetic" (the standard teacher-student baseline): B is a random
-augmentation of A with a known T, so the two modes differ only in where the second view comes from.
+augmentation of A with a known T, so the two modes differ only in where the second view comes from. In synthetic mode
+the unlabelled images can instead be a plain list (train.py --ssl-unlabelled: training images used without labels).
 
 Enabled from train.py (--ssl real|synthetic, --ssl-pairs, --ssl-ratio, --ssl-tau, --ssl-start) through environment
 variables, so DDP workers agree.
@@ -99,6 +100,12 @@ class PairDataset(torch.utils.data.Dataset):
 
     def __init__(self, mode, pairs_csv, size=640, seed=0):
         self.mode, self.size, self.seed = mode, size, seed
+        if pairs_csv.endswith(".txt"):  # an image list (unlabelled images of the training set): synthetic mode only
+            if mode != "synthetic":
+                raise ValueError("an image list has no second views: use --ssl synthetic with --ssl-unlabelled")
+            self.items = [line.strip() for line in open(pairs_csv) if line.strip()]
+            self.epoch = 0
+            return
         base = os.path.dirname(os.path.abspath(pairs_csv))
         path = lambda p: p if os.path.isabs(p) or os.path.exists(p) else os.path.join(base, p)  # noqa: E731  exported pools
         rows = [r for r in csv.DictReader(open(pairs_csv))

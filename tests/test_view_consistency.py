@@ -126,9 +126,29 @@ def test_local_check_drops_moved_content():
     print("ok test_local_check_drops_moved_content")
 
 
+def test_unlabelled_image_list():
+    """An image list (training images without labels) gives synthetic pairs; it has no second views for real mode."""
+    os.makedirs(OUT, exist_ok=True)
+    img, _ = marker_image()
+    p = os.path.join(OUT, "u.png")
+    cv2.imwrite(p, img)
+    lst = os.path.join(OUT, "unlabelled.txt")
+    open(lst, "w").write(p + "\n")
+    ds = vc.PairDataset("synthetic", lst, size=320)
+    A, B, T, mask, _ = ds[0]
+    assert len(ds) == 1 and tuple(A.shape) == (3, 320, 320)
+    try:
+        vc.PairDataset("real", lst)
+        raise AssertionError("real mode accepted an image list")
+    except ValueError:
+        pass
+    print("ok test_unlabelled_image_list")
+
+
 if __name__ == "__main__":
     test_audit_matrix_matches_projection()
     test_synthetic_view_map()
     test_dataset_letterbox_chain()
     test_transfer_filters()
     test_local_check_drops_moved_content()
+    test_unlabelled_image_list()
