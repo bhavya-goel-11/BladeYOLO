@@ -1113,8 +1113,46 @@ At 25%, ~36% of defects are located but fail IoU 0.5, more than are missed outri
 
 ### Next round (decided 18 Oct)
 
-1. **Training-free SAM 2.1 box refinement** (`tools/sam_refine.py`, test `tests/test_sam_refine.py`): each detection (conf ≥ 0.05, at most 30 per image) prompts SAM 2.1-tiny; the mask's bounding box replaces or blends with the detection. Prompt expansion (1.0 / 1.15 / 1.3), an agreement gate (IoU(original, SAM box) ≥ 0 / 0.3 / 0.5 / 0.7) and the blend (0.5 / 1.0) are chosen on val (one setting for all runs, by mean val mAP50-95), then applied once to test with a paired scene bootstrap. Runs: the three supervised 25% seeds and the 100% model. Being post-hoc, it is evaluated on existing seeds at no training cost. Smoke test: a loose detection [425, 143, 533, 249] was snapped to [459, 147, 522, 243] against ground truth [454, 140, 528, 248].
+1. **Training-free SAM 2.1 box refinement** (`tools/sam_refine.py`, test `tests/test_sam_refine.py`): each detection (conf ≥ 0.05, at most 30 per image) prompts SAM 2.1-tiny; the mask's bounding box replaces or blends with the detection. Prompt expansion (1.0 / 1.15 / 1.3), an agreement gate (IoU(original, SAM box) ≥ 0 / 0.3 / 0.5 / 0.7) and the blend (0.5 / 1.0) are chosen on val (one setting for all runs, by mean val mAP50-95), then applied once to test with a paired scene bootstrap. Runs: the three supervised 25% seeds and the 100% model. Being post-hoc, it is evaluated on existing seeds at no training cost. Smoke test: a loose detection [425, 143, 533, 249] was snapped to [459, 147, 522, 243] against ground truth [454, 140, 528, 248]. **Result: negative (below).**
 2. **DINOv3 ablation** (`bladeyolo2-l-nodino.yaml`, test in `tests/test_model.py`): BladeYOLO-v2 without DINOv3 (layer 0 a plain Conv, no DinoFuse), otherwise identical; it starts exactly as YOLOv12-L (1,239 pretrained tensors). Tests whether the 2.2× low-data advantage over YOLO12-L at 25% (0.232 vs 0.106) comes from the frozen foundation features. Two seeds at 25%, against the three supervised seeds.
+
+### Result: SAM 2.1 box refinement does not help (18 Oct)
+
+`runs/analysis/sam_refine/report.md`, `val_grid.csv`. Best val setting (all four runs): prompt as is (expand 1.0), no agreement gate, blend 0.5: val mean mAP50 0.463 → 0.469, mAP50-95 0.225 → 0.244. On test (paired scene bootstrap):
+
+| run | original mAP50 / 50-95 | refined | mAP50 difference [95% CI] | mAP50-95 difference [95% CI] |
+|---|---|---|---|---|
+| 25%, seed 0 | 0.207 / 0.078 | 0.202 / 0.084 | −0.005 [−0.015, +0.030] | +0.005 [−0.001, +0.015] |
+| 25%, seed 1 | 0.196 / 0.078 | 0.201 / 0.082 | +0.006 [−0.007, +0.019] | +0.004 [−0.018, +0.010] |
+| 25%, seed 2 | 0.203 / 0.071 | 0.178 / 0.075 | −0.025 [−0.157, +0.011] | +0.003 [−0.010, +0.014] |
+| 100% | 0.561 / 0.244 | 0.539 / 0.242 | −0.022 [−0.108, −0.004] | −0.002 [−0.026, +0.012] |
+
+The val gain does not transfer; at most a +0.004 mAP50-95 tightening at 25%, within noise, and a small mAP50 loss at 100%. **Training-free SAM refinement is negative.**
+
+**Why: what the near-misses are** (`runs/analysis/bootstrap/near_miss.py`, log `near_miss.log`; stricter than the first diagnostic; class ignored, conf ≥ 0.1; for each ground-truth box without an IoU ≥ 0.5 prediction, the best-overlapping prediction decides: *part* = prediction ≥ 80% inside the ground truth and < half its area; *merged* = ground truth ≥ 80% inside a prediction > 2× its area; *shifted* = other overlap with IoU ≥ 0.1; *missed* = none):
+
+| model | hit | part | merged | shifted | missed | ground truths covered by ≥ 2 parts |
+|---|---|---|---|---|---|---|
+| 25%, seeds 0 / 1 / 2 | 39 / 41 / 45% | 9 / 11 / 10% | 8 / 7 / 9% | 17 / 17 / 17% | 27 / 24 / 19% | 10 / 12 / 17 |
+| 100% | 66% | 2% | 12% | 12% | 8% | 0 |
+
+Per class (25% seed 0 → 100%):
+
+| class | hit | missed | main near-miss |
+|---|---|---|---|
+| surface_injure | 36% → 87% | **49% → 5%** | – |
+| corrosion | 53% → 82% | **32% → 0%** | – |
+| thunderstrike | 62% → 100% | 0% → 0% | merged 23% → 0% |
+| hide_craze | 63% → 65% | 20% → 18% | part 12% → 0%, merged 4% → 12% |
+| crack | 21% → 55% | 6% → 3% | **shifted 45% → 33%**, part 21% → 3% |
+| craze | **5% → 21%** | 23% → 13% | **merged 23% → 46%**, shifted 41% → 18% |
+
+**Findings (revising the first diagnostic):**
+1. With the stricter criterion, at 25% near-misses (34–36%) and outright misses (19–27%) are of similar size; "mostly extent" was overstated.
+2. **The near-misses are granularity and geometry, not loose boxes**: about half are part/merged (how many boxes a defect is), the rest misaligned, concentrated in the thin, elongated classes (crack, craze). SAM tightens a box around one object; it cannot decide whether a craze field is one box or five, which is why it does not help.
+3. **Two kinds of class:** *recognition-limited* (surface_injure, corrosion: misses vanish with data, so more labels or better features pay) and *structure-limited* (craze, crack: still 21% / 55% hits at full data, dominated by merged and shifted boxes; more data of the same annotation style does not fix them).
+
+**Conclusions:** the recognition-limited classes are where data efficiency (foundation features, the DINOv3 ablation) can pay. For craze and crack the limit is the axis-aligned box itself: the annotators' grouping is inconsistent (the label audit) and IoU on thin diagonal boxes is unstable, so their scores reflect the annotation format as much as the detector.
 
 ### Tooling
 
@@ -1159,6 +1197,7 @@ At 25%, ~36% of defects are located but fail IoU 0.5, more than are missed outri
 | WTBD copies agree on 86.0% of labels (Phase 16) | **Refined** | Rotated copies inflate "loose"; axis-aligned copies agree on 87.3% (§14) |
 | WTBlade is CC BY 4.0 (Roboflow page) | **Questioned** | It contains DTU NordTank images (CC BY-NC) and synthetic copy-paste images (§14) |
 | Part of the leakage inflation is memorised box splitting (Phase 16 hypothesis) | **Not supported** | The tolerant gain is not smaller on test images with a train twin (§14, step 14) |
+| At 25%, most lost defects are found but boxed differently (first diagnostic, Phase 24) | **Refined** | With a stricter criterion, near-misses (34–36%) and misses (19–27%) are of similar size; near-misses are granularity and misalignment, not loose boxes (§21) |
 | Teacher–student training gives a small, consistent gain on well-represented classes (Phase 23) | **Qualified** | Single seeds; seed noise at 25% is ±0.026 mAP50, as large as the effects. The class-balanced variant is significantly worse with 3 seeds (§21) |
 
 ---
@@ -1260,18 +1299,18 @@ Everything retired is restorable from commit `b374f4c`.
    - **Real views vs augmented copies:** most WTBlade "same-surface" pairs are Roboflow augmented copies (synthetic). Real second views are video frames and overlapping photos, and must be told apart (e.g. by the photometric residual after alignment), or the method silently becomes synthetic consistency.
 
 **A2. Current round (§21): box extent and foundation features**
-1. SAM 2.1 box refinement on the three supervised 25% seeds and the 100% model (local, no training):
+1. **Done, negative (§21):** SAM 2.1 box refinement on the three supervised 25% seeds and the 100% model (local, no training):
    ```
    .venv/bin/python tools/sam_refine.py --runs runs/detect/BladeYOLO_WindSurface/bladeyolo2_wtbd_group_f25 runs/detect/BladeYOLO_WindSurface/bladeyolo2_wtbd_group_f25_s1 runs/detect/BladeYOLO_WindSurface/bladeyolo2_wtbd_group_f25_s2 runs/detect/BladeYOLO_WindSurface/bladeyolo2_wtbd_group
    ```
-   If it helps: a training-time version (SAM-derived extents as auxiliary or replacement targets). If it does not: the annotation convention is not the visual extent (e.g. grouped cracks), which is itself a finding for the extent hypothesis.
+   Near-misses are granularity (part/merged) and misalignment on thin classes, not loose boxes; the training-time SAM variant is not pursued.
 2. DINOv3 ablation at 25%, two seeds (Kaggle):
    ```
    python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l-nodino.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --seed 0 --name bladeyolo2nodino_wtbd_group_f25_s0 --epochs 150
    python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l-nodino.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --seed 1 --name bladeyolo2nodino_wtbd_group_f25_s1 --epochs 150
    ```
    If DINOv3 carries the low-data advantage: larger DINOv3 backbones or light adapters as the data-efficiency lever.
-3. Tighten the extent diagnostic (per class, and at 50% of the scenes).
+3. **Done (§21):** stricter near-miss diagnostic, per class. Open: the same at 50% of the scenes, and whether craze/crack scores are limited by the axis-aligned box format (e.g. region-level or granularity-tolerant evaluation for those classes only, §14).
 
 **B. Carried over**
 4c. **Semi-supervised round (§20–§21, done; semi-supervision dropped):** in-domain + class-balanced, three seeds per arm:
