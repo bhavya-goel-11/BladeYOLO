@@ -1,0 +1,47 @@
+# BladeYOLO-v2-L without DINOv3 (ablation): identical to bladeyolo2-l.yaml except that layer 0 is a plain Conv and the
+# three DinoFuse layers are removed, so the backbone feeds the head directly. Same pretrained YOLOv12-L initialisation,
+# deformable (P3/P4) and selective-scan (P5) refinements, loss and recipe. Tests whether BladeYOLO-v2's low-data
+# advantage over YOLO12-L comes from the frozen DINOv3 features.
+
+nc: 6 # overridden by the dataset YAML
+pretrained:
+  weights: yolo12l.pt
+  map: [[0, 8, 0], [9, 20, 0], [21, 21, 3]]
+scales:
+  # [depth, width, max_channels] (YOLOv12-L, so every pretrained layer matches its checkpoint)
+  l: [1.00, 1.00, 512]
+
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, Conv, [64, 3, 2]] # 0-P1/2
+  - [-1, 1, Conv, [128, 3, 2]] # 1-P2/4
+  - [-1, 2, C3k2, [256, False, 0.25]]
+  - [-1, 1, Conv, [256, 3, 2]] # 3-P3/8
+  - [-1, 2, C3k2, [512, False, 0.25]] # 4
+  - [-1, 1, Conv, [512, 3, 2]] # 5-P4/16
+  - [-1, 4, A2C2f, [512, True, 4]] # 6
+  - [-1, 1, Conv, [1024, 3, 2]] # 7-P5/32
+  - [-1, 4, A2C2f, [1024, True, 1]] # 8
+
+head: # YOLOv12-L head (checkpoint layers 9-21)
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 9
+  - [[-1, 6], 1, Concat, [1]] # 10: cat P4
+  - [-1, 2, A2C2f, [512, False, -1]] # 11
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 12
+  - [[-1, 4], 1, Concat, [1]] # 13: cat P3
+  - [-1, 2, A2C2f, [256, False, -1]] # 14
+
+  - [-1, 1, Conv, [256, 3, 2]] # 15
+  - [[-1, 11], 1, Concat, [1]] # 16: cat head P4
+  - [-1, 2, A2C2f, [512, False, -1]] # 17
+
+  - [-1, 1, Conv, [512, 3, 2]] # 18
+  - [[-1, 8], 1, Concat, [1]] # 19: cat P5
+  - [-1, 2, C3k2, [1024, True]] # 20
+
+  - [14, 1, C2fMorphRes, [256]] # 21: P3 out + deformable refinement
+  - [17, 1, C2fMorphRes, [512]] # 22: P4 out + deformable refinement
+  - [20, 1, C2fSS2DRes, [1024]] # 23: P5 out + selective-scan refinement
+
+  - [[21, 22, 23], 1, Detect, [nc]] # 24

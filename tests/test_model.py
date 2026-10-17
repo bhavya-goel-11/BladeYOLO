@@ -108,8 +108,43 @@ def test_v2_starts_as_pretrained_yolo12l():
         assert m(torch.rand(1, 3, 192, 320))[0].shape == raw.shape
 
 
+def test_nodino_ablation_starts_as_pretrained_yolo12l():
+    """The ablation config (bladeyolo2-l-nodino.yaml) has no DINOv3 at all and, like BladeYOLO-v2, starts as the stock
+    YOLOv12-L: every backbone and neck output matches the checkpoint, and the refinements are zero-initialised."""
+    import models  # noqa: F401
+    from ultralytics.cfg import get_cfg
+    from ultralytics.nn.tasks import load_checkpoint
+
+    from models.trainer import BladeTrainer
+
+    trainer = BladeTrainer.__new__(BladeTrainer)
+    trainer.args, trainer.data = get_cfg(), {"nc": 6, "channels": 3, "names": {i: str(i) for i in range(6)}}
+    m = trainer.get_model(cfg=os.path.join(ROOT, "bladeyolo2-l-nodino.yaml"), verbose=False)
+    assert not any("dino" in n.lower() for n, _ in m.named_modules()) and len(m.model) == 25
+    ref, _ = load_checkpoint(os.path.join(ROOT, "yolo12l.pt"))
+    ref, m = ref.float().eval(), m.eval()
+    x = torch.rand(1, 3, 256, 320)
+
+    def outputs(model):
+        y = []
+        for layer in model.model[:-1]:
+            xx = (y[layer.f] if isinstance(layer.f, int) else [y[j] for j in layer.f]) if layer.f != -1 else (y[-1] if y else x)
+            y.append(layer(xx))
+        return y
+
+    with torch.no_grad():
+        a, b = outputs(ref), outputs(m)
+        for i in range(21):  # backbone and neck: same indices as the checkpoint
+            assert torch.allclose(a[i], b[i], atol=1e-4), f"layer {i} differs from YOLOv12-L"
+        for k in range(3):  # refinements are identity at init; box branch of the head matches
+            assert torch.allclose(a[(14, 17, 20)[k]], b[21 + k], atol=1e-4)
+            assert torch.allclose(ref.model[-1].cv2[k](a[(14, 17, 20)[k]]), m.model[-1].cv2[k](b[21 + k]), atol=1e-4)
+
+
 if __name__ == "__main__":
     test_forward_loss_backward()
     print("ok test_forward_loss_backward")
     test_v2_starts_as_pretrained_yolo12l()
     print("ok test_v2_starts_as_pretrained_yolo12l")
+    test_nodino_ablation_starts_as_pretrained_yolo12l()
+    print("ok test_nodino_ablation_starts_as_pretrained_yolo12l")
