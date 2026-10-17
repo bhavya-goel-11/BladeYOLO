@@ -50,8 +50,9 @@ def sam_boxes(preds, imgs, out, weights, min_conf, max_det):
         cache = {r: {k: np.array(v).reshape(-1, len(EXPAND), 6) for k, v in d.items()} for r, d in json.load(open(out)).items()}
     todo = [f for f in sorted(imgs) if any(f not in cache.get(r, {}) for r in preds)]
     if todo:
-        sam = SAM2Predictor(overrides=dict(task="segment", mode="predict", imgsz=1024, model=weights, conf=-1.0,
+        sam = SAM2Predictor(overrides=dict(task="segment", mode="predict", imgsz=1024, model=weights, conf=0.0,
                                            save=False, verbose=False, device=dm.device()))
+        sam.args.conf = -1.0  # keep every mask (it filters scores > conf), so masks stay aligned with prompts
     for n, f in enumerate(todo):
         s = imgs[f]["scale"]
         H, W = cv2.imread(f).shape[:2]
