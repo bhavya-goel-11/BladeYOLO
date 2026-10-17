@@ -12,6 +12,7 @@ datasets/
 data/
 *.zip
 *.partial/
+.kaggle_pull/
 
 # Caches, weights, training outputs and logs
 .dataset_cache/
