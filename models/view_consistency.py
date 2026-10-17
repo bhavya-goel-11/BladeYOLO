@@ -171,7 +171,8 @@ def local_zncc(ga, gb, box):
 
 
 def transfer(det, T, mask, size, tau, grads=None):
-    """Teacher detections on A (n, 6: xyxy, conf, cls; letterboxed px) -> (B labels (m, 5: cls, xc, yc, w, h
+    """Teacher detections on A (n, 6: xyxy, conf, cls; letterboxed px) with confidence >= tau (a scalar, or one
+    threshold per class) -> (B labels (m, 5: cls, xc, yc, w, h
     normalised), dropped boxes (k, 4: xyxy in B's letterboxed px)).
     A moved box is kept if >= MIN_KEEP of it lies in B's valid area, its sides are >= 4 px and, given grads (gradient
     magnitudes of A warped into B and of B), the two agree inside it (ZNCC >= LOCAL_ZNCC). A confident box that fails a
@@ -179,7 +180,8 @@ def transfer(det, T, mask, size, tau, grads=None):
     background."""
     out, dropped = [], []
     empty = np.zeros((0, 5), np.float32), np.zeros((0, 4), np.float32)
-    det = det[det[:, 4] >= tau]
+    thr = np.asarray(tau, np.float64)
+    det = det[det[:, 4] >= (thr[det[:, 5].astype(int)] if thr.ndim else thr)]  # tau: scalar or per class
     ys, xs = np.nonzero(mask)
     if not len(det) or not len(xs):
         return empty
@@ -205,4 +207,20 @@ def config():
     if mode not in ("real", "synthetic"):
         return None
     return dict(mode=mode, pairs=os.environ["BLADEYOLO_SSL_PAIRS"], ratio=float(os.environ.get("BLADEYOLO_SSL_RATIO", 0.25)),
-                tau=float(os.environ.get("BLADEYOLO_SSL_TAU", 0.5)), start=int(os.environ.get("BLADEYOLO_SSL_START", 30)))
+                tau=float(os.environ.get("BLADEYOLO_SSL_TAU", 0.5)), start=int(os.environ.get("BLADEYOLO_SSL_START", 30)),
+                balance=os.environ.get("BLADEYOLO_SSL_BALANCE", "0") == "1",
+                tau_min=float(os.environ.get("BLADEYOLO_SSL_TAU_MIN", 0.25)))
+
+
+def class_thresholds(counts, tau, tau_min):
+    """Class-balanced pseudo-label thresholds (FlexMatch's mapping, Zhang et al. 2021, applied to detection).
+
+    counts: confident teacher detections (>= tau) per class in the previous epoch. beta_c = counts_c / max(counts);
+    tau_c = tau * beta_c / (2 - beta_c), floored at tau_min. The class the teacher already labels most keeps tau; classes
+    it rarely labels get lower thresholds instead of being drowned out (Phase 23: on other farms 91% of pseudo-labels
+    were one class, and thunderstrike was almost never pseudo-labelled). No counts yet: tau for every class."""
+    counts = np.asarray(counts, np.float64)
+    if counts.max() <= 0:
+        return np.full(len(counts), tau)
+    beta = counts / counts.max()
+    return np.maximum(tau * beta / (2 - beta), tau_min)

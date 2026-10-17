@@ -1035,6 +1035,24 @@ On the four classes with ≥ 8 test scenes (corrosion, surface_injure, crack, hi
 - **The real-view direction is not supported** by two rounds of experiments. It should not be pursued further without a new reason, e.g. genuinely multi-view data from the target farm.
 - **The in-domain teacher–student result is the most promising:** small positive effect, balanced pseudo-labels. Two obvious improvements: class-balanced pseudo-labelling (per-class thresholds or quotas, so rare classes are not drowned) and seeds to resolve a +0.04 effect from noise.
 
+**Next round (decided 17 Oct): in-domain teacher–student with class-balanced pseudo-labels, with seeds.**
+
+*Class-balanced thresholds* (`--ssl-balance`, `view_consistency.class_thresholds`):
+- FlexMatch's mapping (Zhang et al., 2021), applied to detection.
+- Per class, the confident teacher detections (≥ τ) of the previous epoch are counted; β_c = count_c / max count; τ_c = τ · β_c / (2 − β_c), floored at `--ssl-tau-min` (0.25).
+- The class the teacher labels most keeps τ; classes it rarely labels (thunderstrike) get lower thresholds.
+- The thresholds are logged per epoch in `ssl_stats.csv`.
+
+*Seeds:* `--seed` now also changes the unlabelled sampling sequence. Before, it was fixed per GPU, so different seeds would have replayed the same unlabelled data.
+
+*Tests:*
+- the threshold mapping by hand, and per-class filtering in `transfer`
+- a 2-epoch trained-teacher smoke run: all thresholds 0.25 in epoch 1; in epoch 2 the most-labelled class keeps 0.25 and the others drop to the floor; pseudo-labels 7 → 15, and craze appears
+
+*Plan:* 5 runs at 25%, about 6 h: supervised seeds 1 and 2 (seed 0 exists), and balanced in-domain seeds 0, 1 and 2.
+
+*Stopping rule:* if the gain on the well-represented classes is still within noise with three seeds per arm, semi-supervision is dropped too.
+
 ---
 
 ## 21. Engineering problems solved
@@ -1164,7 +1182,14 @@ Everything retired is restorable from commit `b374f4c`.
    - **Real views vs augmented copies:** most WTBlade "same-surface" pairs are Roboflow augmented copies (synthetic). Real second views are video frames and overlapping photos, and must be told apart (e.g. by the photometric residual after alignment), or the method silently becomes synthetic consistency.
 
 **B. Carried over**
-4b. **Next round (§19):** A + B at 25%:
+4c. **Current round (§20):** in-domain + class-balanced, three seeds per arm:
+   ```
+   python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --seed 1 --name bladeyolo2_wtbd_group_f25_s1 --epochs 150
+   python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --seed 2 --name bladeyolo2_wtbd_group_f25_s2 --epochs 150
+   python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --ssl synthetic --ssl-unlabelled tools/splits/wtbd_group_train_f25_rest.txt --ssl-balance --seed 0 --name bladeyolo2_wtbd_group_f25_sslinb_s0 --epochs 150
+   (same with --seed 1 / --seed 2 and names …_sslinb_s1 / …_sslinb_s2)
+   ```
+4b. **Previous round (§19–§20, done):** A + B at 25%:
    ```
    python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --ssl synthetic --ssl-pairs .../view-pool/pairs.csv --name bladeyolo2_wtbd_group_f25_sslsyn2 --epochs 150
    python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --ssl real --ssl-pairs .../view-pool/pairs.csv --name bladeyolo2_wtbd_group_f25_sslreal2 --epochs 150

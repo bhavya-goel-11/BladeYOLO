@@ -1,5 +1,6 @@
 import os
 
+import numpy as np
 import torch
 from ultralytics.models.yolo.detect import DetectionTrainer
 from ultralytics.utils import DEFAULT_CFG, LOGGER, RANK
@@ -143,10 +144,10 @@ class BladeTrainer(DetectionTrainer):
         if getattr(self, "_pairs", None) is None:
             per_gpu = max(self.batch_size // max(self.world_size, 1), 1)
             self._pair_ds = view_consistency.PairDataset(ssl["mode"], ssl["pairs"], size=self.args.imgsz,
-                                                         seed=max(RANK, 0))
+                                                         seed=self.args.seed * 100 + max(RANK, 0))
             self._pair_bs = max(1, round(per_gpu * ssl["ratio"]))
             g = torch.Generator()
-            g.manual_seed(1000 + max(RANK, 0))
+            g.manual_seed(1000 + self.args.seed * 100 + max(RANK, 0))  # --seed changes the unlabelled sequence too
             sampler = torch.utils.data.WeightedRandomSampler(self._pair_ds.sample_weights(), len(self._pair_ds),
                                                              replacement=True, generator=g)
             loader = torch.utils.data.DataLoader(self._pair_ds, batch_size=self._pair_bs, sampler=sampler,
@@ -154,7 +155,9 @@ class BladeTrainer(DetectionTrainer):
             self._pairs = (loader, iter(loader))
             self._ssl_stats = {}
             LOGGER.info(f"[BladeYOLO] view consistency ({ssl['mode']}): {len(self._pair_ds)} unlabelled pairs, "
-                        f"{self._pair_bs} per GPU batch, tau {ssl['tau']}, from epoch {ssl['start'] + 1}")
+                        f"{self._pair_bs} per GPU batch, tau {ssl['tau']}"
+                        f"{' class-balanced (min ' + str(ssl['tau_min']) + ')' if ssl['balance'] else ''}, "
+                        f"from epoch {ssl['start'] + 1}")
         loader, it = self._pairs
         try:
             return next(it)
@@ -174,17 +177,28 @@ class BladeTrainer(DetectionTrainer):
         teacher.eval()
         with torch.autocast(self.device.type, enabled=bool(self.amp)):
             out = teacher(A)
-        dets = non_max_suppression(out[0] if isinstance(out, (list, tuple)) else out, conf_thres=ssl["tau"],
-                                   iou_thres=0.7, max_det=100)
+        nc = self.data["nc"]
+        if ssl["balance"]:  # thresholds from the previous epoch's confident teacher detections per class
+            prev = self._ssl_stats.get(self.epoch - 1)
+            thr = view_consistency.class_thresholds(prev["confident"] if prev else [0] * nc, ssl["tau"], ssl["tau_min"])
+        else:
+            thr = ssl["tau"]
+        dets = non_max_suppression(out[0] if isinstance(out, (list, tuple)) else out, conf_thres=float(min(
+            ssl["tau_min"] if ssl["balance"] else ssl["tau"], ssl["tau"])), iou_thres=0.7, max_det=100)
         n = batch["img"].shape[0]
         idx, cls, boxes, imgs = [batch["batch_idx"]], [batch["cls"]], [batch["bboxes"]], [batch["img"]]
         st = self._ssl_stats.setdefault(self.epoch, dict(pairs=0, teacher=0, boxes=0, used=0, dropped=0,
-                                                         per_class=[0] * self.data["nc"]))
+                                                         per_class=[0] * nc, confident=[0] * nc,
+                                                         thresholds=[float(t) for t in (thr if ssl["balance"]
+                                                                                        else [thr] * nc)]))
         for i, d in enumerate(dets):
-            lab, drop = view_consistency.transfer(d.float().cpu().numpy(), T[i].numpy().astype("float64"),
-                                                  mask[i].numpy(), self.args.imgsz, ssl["tau"], grads[i].float().numpy())
+            dn = d.float().cpu().numpy()
+            for c in dn[dn[:, 4] >= ssl["tau"], 5].astype(int):  # confident at the base tau: drives the balancing
+                st["confident"][c] += 1
+            lab, drop = view_consistency.transfer(dn, T[i].numpy().astype("float64"), mask[i].numpy(), self.args.imgsz,
+                                                  thr, grads[i].float().numpy())
             st["pairs"] += 1
-            st["teacher"] += int((d[:, 4] >= ssl["tau"]).sum())
+            st["teacher"] += int((dn[:, 4] >= (np.asarray(thr)[dn[:, 5].astype(int)] if ssl["balance"] else thr)).sum())
             st["dropped"] += len(drop)
             if not len(lab):
                 continue  # no pseudo-label: the image would only teach "no defect here"
@@ -213,10 +227,11 @@ class BladeTrainer(DetectionTrainer):
             return
         names = list(self.data["names"].values()) if isinstance(self.data["names"], dict) else list(self.data["names"])
         with open(os.path.join(self.save_dir, "ssl_stats.csv"), "w") as f:
-            f.write("epoch,pairs,images_used,teacher_boxes,pseudo_boxes,ignored_boxes," + ",".join(names) + "\n")
+            f.write("epoch,pairs,images_used,teacher_boxes,pseudo_boxes,ignored_boxes," + ",".join(names) + "," +
+                    ",".join(f"thr_{n}" for n in names) + "\n")
             for e, v in sorted(stats.items()):
                 f.write(f"{e + 1},{v['pairs']},{v['used']},{v['teacher']},{v['boxes']},{v['dropped']}," +
-                        ",".join(map(str, v["per_class"])) + "\n")
+                        ",".join(map(str, v["per_class"])) + "," + ",".join(f"{t:.3f}" for t in v["thresholds"]) + "\n")
 
     def optimizer_step(self):
         self._repair_bn()  # before the EMA copies the BatchNorm statistics

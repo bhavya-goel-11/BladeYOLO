@@ -145,6 +145,18 @@ def test_unlabelled_image_list():
     print("ok test_unlabelled_image_list")
 
 
+def test_class_balanced_thresholds():
+    thr = vc.class_thresholds([100, 50, 10, 0], tau=0.5, tau_min=0.25)
+    assert abs(thr[0] - 0.5) < 1e-9  # the class the teacher labels most keeps tau
+    assert abs(thr[1] - 0.5 * 0.5 / 1.5) < 1e-9 or thr[1] == 0.25  # convex mapping, floored
+    assert thr[2] == thr[3] == 0.25 and (np.diff(thr) <= 0).all()  # rarely / never labelled classes: the floor
+    assert (vc.class_thresholds([0, 0], 0.5, 0.25) == 0.5).all()  # no counts yet: tau everywhere
+    det = np.array([[100, 100, 200, 200, 0.4, 0], [300, 300, 400, 400, 0.4, 3]])
+    lab, _ = vc.transfer(det, np.eye(3), np.ones((640, 640), bool), 640, thr)
+    assert lab[:, 0].tolist() == [3]  # 0.4 passes the rare class's threshold (0.25), not the common one's (0.5)
+    print("ok test_class_balanced_thresholds")
+
+
 if __name__ == "__main__":
     test_audit_matrix_matches_projection()
     test_synthetic_view_map()
@@ -152,3 +164,4 @@ if __name__ == "__main__":
     test_transfer_filters()
     test_local_check_drops_moved_content()
     test_unlabelled_image_list()
+    test_class_balanced_thresholds()

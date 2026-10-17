@@ -69,6 +69,9 @@ def parse_args():
                         "e.g. tools/splits/wtbd_group_train_f25_rest.txt (the training images outside --train-subset)")
     p.add_argument("--ssl-ratio", type=float, default=0.25, help="unlabelled pairs per labelled image in a batch")
     p.add_argument("--ssl-tau", type=float, default=0.5, help="teacher confidence for a pseudo-label")
+    p.add_argument("--ssl-balance", action="store_true",
+                   help="class-balanced thresholds: classes the teacher rarely labels get lower ones, down to --ssl-tau-min")
+    p.add_argument("--ssl-tau-min", type=float, default=0.25, help="lowest class threshold with --ssl-balance")
     p.add_argument("--ssl-start", type=int, default=30, help="epochs of supervised burn-in before pseudo-labels")
     p.add_argument("--tolerant", action="store_true",
                    help="split-tolerant box targets: a label or the region of touching same-class labels (models/tolerant.py)")
@@ -136,7 +139,8 @@ def main():
         if not args.ssl_unlabelled and not os.path.exists(args.ssl_pairs):
             raise FileNotFoundError(f"--ssl needs the view-pair list from tools/view_pool.py: {args.ssl_pairs}")
         os.environ.update(BLADEYOLO_SSL_PAIRS=os.path.abspath(args.ssl_pairs), BLADEYOLO_SSL_RATIO=str(args.ssl_ratio),
-                          BLADEYOLO_SSL_TAU=str(args.ssl_tau), BLADEYOLO_SSL_START=str(args.ssl_start))
+                          BLADEYOLO_SSL_TAU=str(args.ssl_tau), BLADEYOLO_SSL_START=str(args.ssl_start),
+                          BLADEYOLO_SSL_BALANCE="1" if args.ssl_balance else "0", BLADEYOLO_SSL_TAU_MIN=str(args.ssl_tau_min))
     sys.path.insert(0, ROOT_DIR)  # DDP workers copy sys.path, so they can import `models` too
 
     import torch
