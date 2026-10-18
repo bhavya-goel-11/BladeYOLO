@@ -46,7 +46,9 @@ def parse_args():
     p.add_argument("--model", default=os.path.join(ROOT_DIR, "bladeyolo2-l.yaml"), help="model YAML or .pt")
     p.add_argument("--data", default=None, help="dataset YAML with the dataset's official classes (required unless --resume)")
     p.add_argument("--name", default="bladeyolo2", help="run name under runs/detect/BladeYOLO_WindSurface")
-    p.add_argument("--resume", default=None, help="last.pt of an interrupted run to resume")
+    p.add_argument("--resume", default=None,
+                   help="last.pt of an interrupted run to resume (may be read-only, e.g. a previous Kaggle version's "
+                        "output); in a new session also pass --data (and the run's other BladeYOLO options)")
     p.add_argument("--epochs", type=int, default=150, help="v2 runs peaked at epochs ~90-170")
     p.add_argument("--seed", type=int, default=0, help="change for repeat runs to measure run-to-run variance")
     p.add_argument("--imgsz", type=int, default=640)
@@ -85,7 +87,7 @@ def parse_args():
                    help="only evaluate WEIGHTS (e.g. a run's best.pt) on the test split of --data, then exit")
     args = p.parse_args()
     if not args.data and not args.resume:
-        p.error("--data is required (a resumed run keeps its own dataset)")
+        p.error("--data is required (unless --resume in the same session, where the run keeps its own dataset)")
     return args
 
 
@@ -133,6 +135,32 @@ def resolve_data(path, train_subset=None):
     return out
 
 
+def resume_setup(args):
+    """Make an interrupted run resumable in a fresh session (e.g. a new Kaggle version): a run folder on a read-only
+    mount (the previous version's output attached as input) is copied into this project's runs/ so training continues
+    in place (results.csv, weights), and with --data (and --train-subset, if the run used one) the dataset copy and
+    runs/data.yaml are recreated, since the checkpoint's own data path is gone. The other BladeYOLO options of the
+    original run (--tolerant-classes, --dino, --box-loss, --ssl ...) are not in the checkpoint: pass them again."""
+    last = os.path.abspath(args.resume)
+    if not os.path.exists(last):
+        raise FileNotFoundError(f"--resume: {last} not found")
+    run = os.path.dirname(os.path.dirname(last))  # <run>/weights/last.pt
+    overrides = {}
+    if not os.access(run, os.W_OK):
+        dst = os.path.join(ROOT_DIR, "runs", "detect", os.path.basename(os.path.dirname(run)), os.path.basename(run))
+        if not os.path.exists(dst):
+            print(f"Copying read-only run {run} -> {dst}")
+            shutil.copytree(run, dst, copy_function=shutil.copyfile)
+            for d, _, _ in os.walk(dst):
+                os.chmod(d, 0o755)
+        last = os.path.join(dst, "weights", os.path.basename(last))
+        overrides["save_dir"] = dst
+    if args.data:
+        overrides["data"] = resolve_data(args.data, args.train_subset)
+    print(f"Resuming {last}" + (f" with {overrides}" if overrides else ""))
+    return last, overrides
+
+
 def tolerant_class_ids(args):
     """--tolerant-classes names -> "i,j" indices in the dataset YAML's class order."""
     with open(args.data) as f:
@@ -175,8 +203,9 @@ def main():
         evaluate_test(args.test, resolve_data(args.data), args.batch, test_device, imgsz=args.imgsz)
         return
     if args.resume:
-        model = YOLO(args.resume)
-        model.train(resume=True, trainer=BladeTrainer)
+        last, overrides = resume_setup(args)
+        model = YOLO(last)
+        model.train(resume=True, trainer=BladeTrainer, **overrides)
         test_in_new_process(model.trainer.best, model.trainer.args.data, args.batch, model.trainer.args.imgsz)
         return
 
