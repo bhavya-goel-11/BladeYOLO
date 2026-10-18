@@ -10,7 +10,7 @@
 | Repository | github.com/bhavya-goel-11/BladeYOLO (`master`) |
 | Reference papers | BladeYOLO (IEEE TGRS 2026, `BladeYOLO.pdf`); GFD-YOLOX / Wind Surface Defect dataset (Appl. Soft Comput. 2025, `1-s2.0-S156849462501227X-main.pdf`); WTBD (Ji et al., *Scientific Data* 13:396, 2026, `s41597-026-06762-x.pdf`); WTBs2025 (*Scientific Data* 13:1310, 2026) |
 
-This log covers the whole project. Phases 1–5 (Sep 3 – Oct 6) summarise the original tentative research log (commit `6f6638a`, 6 Oct). That commit was removed from `master` by the 9 Oct reset but is still in the local git object store: `git show 6f6638a:research_log.md`. Later phases come from the working sessions, the git history and the run folders under `runs/detect/BladeYOLO_WindSurface/`. Where a later audit corrected an earlier conclusion, the correction appears in that phase and in the corrections section (§24).
+This log covers the whole project. Phases 1–5 (Sep 3 – Oct 6) summarise the original tentative research log (commit `6f6638a`, 6 Oct). That commit was removed from `master` by the 9 Oct reset but is still in the local git object store: `git show 6f6638a:research_log.md`. Later phases come from the working sessions, the git history and the run folders under `runs/detect/BladeYOLO_WindSurface/`. Where a later audit corrected an earlier conclusion, the correction appears in that phase and in the corrections section (§25).
 
 ---
 
@@ -474,7 +474,7 @@ The class-subset check is `runs/analysis/bootstrap/robust_check.py`. The upper C
 ### Conclusions
 - **The leakage result is robust:** both models, both metrics, about +0.27–0.29 mAP50 from the random split.
 - **The honest claim for the architecture:** "BladeYOLO-v2 scores 0.55 vs 0.44 mAP50 on a leak-free WTBD split (paired bootstrap +0.16, 95% CI 0.03–0.28). The gain is concentrated in lightning damage; on the other classes the evidence is inconclusive."
-- **More independent test scenes are needed** before per-class or architectural claims can be made with confidence. Options are group k-fold cross-validation or a second dataset (§27).
+- **More independent test scenes are needed** before per-class or architectural claims can be made with confidence. Options are group k-fold cross-validation or a second dataset (§28).
 
 ### Cleanup in this phase
 - Removed `tools/diagnose_nan.py`: a one-off investigation of the fixed SS2D fp16 bug, superseded by `tools/probe_nan.py` and the trainer's per-layer NaN report.
@@ -1207,7 +1207,7 @@ Point values: BladeYOLO-v2 0.202, without DINOv3 0.094, YOLO12-L 0.099. Per clas
 **Next (decided 18 Oct):**
 1. **Complete the curve:** BladeYOLO-v2 without DINOv3 at 50% and 100%, to measure how the DINOv3 benefit changes with labelled data (25%: +0.11 mAP50, 2.2×; with YOLO12-L as the stand-in, 100%: +0.11, 1.25×).
 2. **Scale the prior:** a larger frozen DINOv3 (ViT-B/16, ViT-L/16) in place of ViT-S/16 at 25%. Hypothesis: the low-data gain grows with the foundation model. Needs the model size to be configurable in `models/dino_weights.py` / `DinoConv` (`dino_dim`, block indices) and the gated weights on Kaggle.
-3. Class-selective split tolerance at 100% (§21) is running.
+3. Class-selective split tolerance at 100%: done (§23).
 
 **Implementation of item 2 (18 Oct):** `train.py --dino s|b|l` (`BLADEYOLO_DINO`; ViT-S/16 default, so earlier runs and checkpoints are unchanged).
 - Weights: the official Hugging Face releases (`facebook/dinov3-vit{s,b,l}16-pretrain-lvd1689m`, gated; downloaded to `external/dinov3/vit?16/`). They are in the transformers layout; `models/dino_weights.hf_to_dinov3` converts them on load (q/k/v fused into qkv with a zero k bias; layer scales, MLP and norms renamed), and a `config.json` next to the file is checked so a wrong size is refused.
@@ -1217,7 +1217,44 @@ Point values: BladeYOLO-v2 0.202, without DINOv3 0.094, YOLO12-L 0.099. Per clas
 
 ---
 
-## 23. Engineering problems solved
+## 23. Phase 26: class-selective split tolerance at 100%: the targeted corrosion gain replicates, the aggregate does not move (18–19 Oct)
+
+**Runs** (Kaggle, commit `ac09b2c`; no non-finite batches): `bladeyolo2_wtbd_group_tolsel_s0/s1` (`--tolerant-classes corrosion,hide_craze`, classes pre-registered in §21) and a second supervised seed at 100%, `bladeyolo2_wtbd_group_s1` (interrupted by the user at epoch 77 and resumed in the same session with `--resume`; 150 epochs).
+
+| run (100%) | test mAP50 / 50-95 | TTA | val best | corrosion 50-95 | hide_craze 50-95 | thunderstrike 50-95 |
+|---|---|---|---|---|---|---|
+| supervised s0 | 0.548 / 0.245 | 0.574 / 0.279 | 0.650 / 0.368 | 0.134 | 0.275 | 0.336 |
+| supervised s1 | 0.554 / 0.245 | 0.559 / 0.269 | 0.630 / 0.370 | 0.111 | 0.281 | 0.345 |
+| class-selective s0 | 0.567 / 0.245 | 0.568 / 0.258 | 0.656 / 0.381 | **0.268** | 0.316 | 0.232 |
+| class-selective s1 | 0.561 / 0.245 | 0.555 / 0.264 | 0.704 / 0.380 | **0.232** | 0.321 | 0.233 |
+| blanket tolerance (Phase 18) | 0.523 / 0.249 | 0.552 / 0.282 | 0.609 / 0.352 | 0.256 | 0.270 | 0.322 |
+
+(COCO evaluator.) Seed noise at 100% is small on the aggregate: the two supervised seeds agree to 0.006 mAP50 and exactly on mAP50-95.
+
+**Paired scene bootstrap** (`runs/analysis/bootstrap/robust_check_tolsel.py`, log `tolsel.log`; mean of 2 seeds per arm, bootstrap evaluator, 1,000 replicates), class-selective − supervised:
+
+| class | AP50-95 | difference [95% CI] | P(>0) | AP50 difference [95% CI] |
+|---|---|---|---|---|
+| **corrosion (primary)** | 0.139 → 0.232 | **+0.093 [−0.003, +0.246]** | 0.97 | −0.009 [−0.204, +0.222] |
+| hide_craze | 0.270 → 0.306 | +0.035 [−0.041, +0.073] | 0.82 | +0.004 [−0.107, +0.061] |
+| surface_injure | 0.446 → 0.404 | −0.042 [−0.084, +0.079] | 0.34 | −0.041 [−0.088, +0.085] |
+| thunderstrike | 0.349 → 0.227 | −0.122 [−0.157, −0.104] | 0.00 | −0.098 [−0.119, 0.000] |
+| craze / crack | 0.037 → 0.040 / 0.208 → 0.214 | +0.003 / +0.007 | – | +0.008 / +0.001 |
+| mean (6 classes) | 0.242 → 0.237 | −0.004 [−0.026, +0.046] | 0.54 | −0.022 [−0.057, +0.042] |
+
+**Findings:**
+1. **The pre-registered effect replicates in direction and size:** corrosion mAP50-95 roughly doubles in both seeds (0.13 / 0.11 → 0.27 / 0.23), as in Phase 18 (0.26). Both tolerant seeds exceed both supervised seeds, but with 2 seeds and 58 test scenes the interval just touches zero (+0.093 [−0.003, +0.246], P(>0) = 0.97): **suggestive, not significant at 95%.**
+2. **The gain is at strict IoU only:** corrosion AP50 is unchanged (0.54 → 0.53). Region targets do not make the detector find more corrosion; they make its boxes agree with the annotators' extent, which is what mAP50-95 rewards. This fits §21: corrosion's errors were "merged" boxes, a granularity disagreement.
+3. **Thunderstrike drops** (0.35 → 0.23 in both seeds; AP50 1.00 → 0.90) although its targets are unchanged. Its interval excludes zero, but it rests on 13 boxes in 3 test scenes, where a scene bootstrap cannot represent the uncertainty (three clusters give almost no resampling variety). The blanket run (Phase 18), which *did* apply tolerance to thunderstrike, kept 0.32. Treated as unexplained and under-sampled, not as an effect of tolerance.
+4. **The aggregate does not move** (mean AP50-95 −0.004 [−0.026, +0.046]): the corrosion and hide_craze gains are offset by thunderstrike and surface_injure.
+
+**Conclusions:**
+- Class-selective tolerance is a **targeted, annotation-aware fix**: it raises strict-IoU scores on the class whose labels are inconsistently split, in the direction and size the label audit predicted, chosen without test data. It is not a general improvement, and with two seeds it stops just short of significance.
+- Together with §21–§22 the picture is consistent: **recognition** of defects is what limited data costs and what foundation features (DINOv3) buy; **extent and granularity** on the amorphous classes is an annotation-convention problem, addressed (partly) by tolerant targets and not by more data or SAM.
+
+---
+
+## 24. Engineering problems solved
 
 | Problem | Root cause | Fix | Commit |
 |---|---|---|---|
@@ -1235,7 +1272,7 @@ Point values: BladeYOLO-v2 0.202, without DINOv3 0.094, YOLO12-L 0.099. Per clas
 
 ---
 
-## 24. Corrections to earlier conclusions
+## 25. Corrections to earlier conclusions
 
 | Earlier conclusion | Status | Why |
 |---|---|---|
@@ -1255,11 +1292,12 @@ Point values: BladeYOLO-v2 0.202, without DINOv3 0.094, YOLO12-L 0.099. Per clas
 | WTBlade is CC BY 4.0 (Roboflow page) | **Questioned** | It contains DTU NordTank images (CC BY-NC) and synthetic copy-paste images (§14) |
 | Part of the leakage inflation is memorised box splitting (Phase 16 hypothesis) | **Not supported** | The tolerant gain is not smaller on test images with a train twin (§14, step 14) |
 | At 25%, most lost defects are found but boxed differently (first diagnostic, Phase 24) | **Refined** | With a stricter criterion, near-misses (34–36%) and misses (19–27%) are of similar size; near-misses are granularity and misalignment, not loose boxes (§21) |
+| Split tolerance helps corrosion (Phase 18, one run) | **Replicated, not significant** | Two class-selective seeds: corrosion mAP50-95 0.13 → 0.25, +0.093 [−0.003, +0.246]; aggregate unchanged (§23) |
 | Teacher–student training gives a small, consistent gain on well-represented classes (Phase 23) | **Qualified** | Single seeds; seed noise at 25% is ±0.026 mAP50, as large as the effects. The class-balanced variant is significantly worse with 3 seeds (§21) |
 
 ---
 
-## 25. Run registry
+## 26. Run registry
 
 | Run folder | Data | Model | Epochs | Val best (mAP50 / 50-95) | Test (mAP50 / 50-95) | Notes |
 |---|---|---|---|---|---|---|
@@ -1292,6 +1330,9 @@ Point values: BladeYOLO-v2 0.202, without DINOv3 0.094, YOLO12-L 0.099. Per clas
 | `bladeyolo2_wtbd_group_f25_sslinb_s2` | WTBD-group 25% + other 75% unlabelled | same, seed 2 | 150 | 0.445 / 0.205 (epoch 148) | **0.183 / 0.073**; TTA 0.213 / 0.095 | Phase 24 |
 | `bladeyolo2nodino_wtbd_group_f25_s0` | WTBD-group, 25% of train scenes | BladeYOLO-v2 without DINOv3, seed 0 | 150 | 0.229 / 0.126 (epoch 106) | **0.114 / 0.044**; TTA 0.153 / 0.063 | Phase 25 |
 | `bladeyolo2nodino_wtbd_group_f25_s1` | WTBD-group, 25% of train scenes | BladeYOLO-v2 without DINOv3, seed 1 | 150 | 0.186 / 0.105 (epoch 89) | **0.081 / 0.031**; TTA 0.126 / 0.053 | Phase 25 |
+| `bladeyolo2_wtbd_group_s1` | WTBD-group (leak-free) | BladeYOLO-v2, seed 1 | 150 | 0.630 / 0.370 (epoch 128) | **0.554 / 0.245**; TTA 0.559 / 0.269 | Phase 26; resumed at epoch 78 |
+| `bladeyolo2_wtbd_group_tolsel_s0` | WTBD-group (leak-free) | BladeYOLO-v2, tolerance for corrosion + hide_craze, seed 0 | 150 | 0.656 / 0.381 (epoch 140) | **0.567 / 0.245**; TTA 0.568 / 0.258 | Phase 26 |
+| `bladeyolo2_wtbd_group_tolsel_s1` | WTBD-group (leak-free) | same, seed 1 | 150 | 0.704 / 0.380 (epoch 119) | **0.561 / 0.245**; TTA 0.555 / 0.264 | Phase 26 |
 | **`yolo12l_wtbd_group`** | WTBD-group (leak-free) | YOLO12-L | 150 | 0.419 / 0.269 (epoch 130) | **0.438 / 0.206**; TTA 0.440 / 0.230 | Same recipe |
 | **`yolo12l_wtbd_official`** | WTBD official (**leaky**) | YOLO12-L | 120 | 0.665 / 0.394 (epoch 104) | **0.704 / 0.388**; TTA 0.734 / 0.438 | Same recipe |
 
@@ -1299,7 +1340,7 @@ Val best is the best epoch in `results.csv` by fitness (0.1 × mAP50 + 0.9 × mA
 
 ---
 
-## 26. Datasets and artefacts
+## 27. Datasets and artefacts
 
 | Item | Location | Notes |
 |---|---|---|
@@ -1332,7 +1373,7 @@ Everything retired is restorable from commit `b374f4c`.
 
 ---
 
-## 27. Open work and next steps
+## 28. Open work and next steps
 
 **A. Real-view consistency for data-limited detection (Phase 19)**
 1. **Learning curves: done (§17).** Steep and significant for both detectors; BladeYOLO-v2 is the more data-efficient base model. Commands used:
@@ -1371,6 +1412,7 @@ Everything retired is restorable from commit `b374f4c`.
    python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --dino l --train-subset tools/splits/wtbd_group_train_f25.txt --seed 0 --name bladeyolo2l_wtbd_group_f25_s0 --epochs 150
    python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --dino l --train-subset tools/splits/wtbd_group_train_f25.txt --seed 1 --name bladeyolo2l_wtbd_group_f25_s1 --epochs 150
    ```
+   Planned in two Kaggle sessions (seed 0 of B and L first, then seed 1 and the no-DINOv3 50% run), to stay within the 12 h limit.
 
 **A2. Current round (§21): box extent and foundation features**
 1. **Done, negative (§21):** SAM 2.1 box refinement on the three supervised 25% seeds and the 100% model (local, no training):
@@ -1384,7 +1426,7 @@ Everything retired is restorable from commit `b374f4c`.
    python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l-nodino.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --seed 1 --name bladeyolo2nodino_wtbd_group_f25_s1 --epochs 150
    ```
    If DINOv3 carries the low-data advantage: larger DINOv3 backbones or light adapters as the data-efficiency lever.
-4. Class-selective split tolerance at 100%, after the DINOv3 runs (§21):
+4. **Done (§23):** class-selective split tolerance at 100%: corrosion mAP50-95 +0.093 [−0.003, +0.246], aggregate unchanged. Commands used:
    ```
    python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --tolerant-classes corrosion,hide_craze --seed 0 --name bladeyolo2_wtbd_group_tolsel_s0 --epochs 150
    python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --tolerant-classes corrosion,hide_craze --seed 1 --name bladeyolo2_wtbd_group_tolsel_s1 --epochs 150
@@ -1410,7 +1452,7 @@ Everything retired is restorable from commit `b374f4c`.
 6. **Seeds** for the existing WTBD-group pair, the **loss vs architecture separation** (`bladeyolo2-l.yaml --box-loss ciou`), and a **component ablation** (without DINOv3 fusion) to test whether the low-data advantage comes from the DINOv3 features.
 7. **WTBlade group split** with its official classes, for a second benchmark. Licence: it contains DTU NordTank (CC BY-NC) and synthetic copy-paste images (§14).
 
-## 28. Working conventions
+## 29. Working conventions
 
 - **Classes:** datasets are used with their official classes only; the custom v3 taxonomy (Phase 9) is retired.
 - **Testing:** tests and analyses run in the project's own `.venv`, with outputs under `runs/` and never `/tmp` ("research projects can have their own testing environments").
