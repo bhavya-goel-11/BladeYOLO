@@ -1,3 +1,4 @@
+import json
 import os
 
 import numpy as np
@@ -8,6 +9,8 @@ from ultralytics.utils.torch_utils import unwrap_model
 
 import models  # noqa: F401  (registers BladeYOLO layers and WIoU in this process, incl. DDP workers)
 from models import view_consistency
+
+OPTIONS_FILE = "bladeyolo_options.json"  # train.py --resume restores these
 
 
 def load_pretrained(model, weights, layer_map):
@@ -63,6 +66,10 @@ class BladeTrainer(DetectionTrainer):
     def __init__(self, cfg=DEFAULT_CFG, overrides=None, _callbacks=None):
         overrides = {**(overrides or {}), "freeze": ["0.dino"]}
         super().__init__(cfg=cfg, overrides=overrides, _callbacks=_callbacks)
+        if RANK in {-1, 0}:  # BladeYOLO's own options (env vars, not in the checkpoint), for train.py --resume
+            os.makedirs(self.save_dir, exist_ok=True)
+            with open(os.path.join(self.save_dir, OPTIONS_FILE), "w") as f:
+                json.dump({k: v for k, v in sorted(os.environ.items()) if k.startswith("BLADEYOLO_")}, f, indent=1)
 
     def build_dataset(self, img_path, mode="train", batch=None):
         dataset = super().build_dataset(img_path, mode=mode, batch=batch)

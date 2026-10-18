@@ -14,6 +14,7 @@ Examples (WTBD = the folder holding WTBD-group/ and WTBD-official/):
 """
 
 import argparse
+import json
 import os
 import shutil
 import sys
@@ -139,8 +140,8 @@ def resume_setup(args):
     """Make an interrupted run resumable in a fresh session (e.g. a new Kaggle version): a run folder on a read-only
     mount (the previous version's output attached as input) is copied into this project's runs/ so training continues
     in place (results.csv, weights), and with --data (and --train-subset, if the run used one) the dataset copy and
-    runs/data.yaml are recreated, since the checkpoint's own data path is gone. The other BladeYOLO options of the
-    original run (--tolerant-classes, --dino, --box-loss, --ssl ...) are not in the checkpoint: pass them again."""
+    runs/data.yaml are recreated, since the checkpoint's own data path is gone. BladeYOLO's own options (env vars,
+    not in the checkpoint) are restored from the run's bladeyolo_options.json, and override the command line."""
     last = os.path.abspath(args.resume)
     if not os.path.exists(last):
         raise FileNotFoundError(f"--resume: {last} not found")
@@ -155,6 +156,17 @@ def resume_setup(args):
                 os.chmod(d, 0o755)
         last = os.path.join(dst, "weights", os.path.basename(last))
         overrides["save_dir"] = dst
+    saved = os.path.join(run, "bladeyolo_options.json")  # written by BladeTrainer (models/trainer.py OPTIONS_FILE)
+    if os.path.exists(saved):
+        with open(saved) as f:
+            options = json.load(f)
+        changed = {k: (os.environ.get(k, ""), v) for k, v in options.items() if os.environ.get(k, "") != v}
+        os.environ.update(options)
+        print(f"Restored the run's BladeYOLO options from {saved}"
+              + (f"; replacing the command line's {changed}" if changed else ""))
+    else:
+        print(f"No {os.path.basename(saved)} in {run} (a run started before it existed): pass the run's BladeYOLO "
+              "options (--tolerant-classes, --dino, --box-loss, --ssl ...) again")
     if args.data:
         overrides["data"] = resolve_data(args.data, args.train_subset)
     print(f"Resuming {last}" + (f" with {overrides}" if overrides else ""))
@@ -192,6 +204,8 @@ def main():
                           BLADEYOLO_SSL_TAU=str(args.ssl_tau), BLADEYOLO_SSL_START=str(args.ssl_start),
                           BLADEYOLO_SSL_BALANCE="1" if args.ssl_balance else "0", BLADEYOLO_SSL_TAU_MIN=str(args.ssl_tau_min))
     sys.path.insert(0, ROOT_DIR)  # DDP workers copy sys.path, so they can import `models` too
+    if args.resume:  # before `import models`, which reads the restored options
+        last, overrides = resume_setup(args)
 
     import torch
     from ultralytics import YOLO
@@ -203,7 +217,6 @@ def main():
         evaluate_test(args.test, resolve_data(args.data), args.batch, test_device, imgsz=args.imgsz)
         return
     if args.resume:
-        last, overrides = resume_setup(args)
         model = YOLO(last)
         model.train(resume=True, trainer=BladeTrainer, **overrides)
         test_in_new_process(model.trainer.best, model.trainer.args.data, args.batch, model.trainer.args.imgsz)
