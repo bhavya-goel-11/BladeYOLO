@@ -10,7 +10,7 @@
 | Repository | github.com/bhavya-goel-11/BladeYOLO (`master`) |
 | Reference papers | BladeYOLO (IEEE TGRS 2026, `BladeYOLO.pdf`); GFD-YOLOX / Wind Surface Defect dataset (Appl. Soft Comput. 2025, `1-s2.0-S156849462501227X-main.pdf`); WTBD (Ji et al., *Scientific Data* 13:396, 2026, `s41597-026-06762-x.pdf`); WTBs2025 (*Scientific Data* 13:1310, 2026) |
 
-This log covers the whole project. Phases 1–5 (Sep 3 – Oct 6) summarise the original tentative research log (commit `6f6638a`, 6 Oct). That commit was removed from `master` by the 9 Oct reset but is still in the local git object store: `git show 6f6638a:research_log.md`. Later phases come from the working sessions, the git history and the run folders under `runs/detect/BladeYOLO_WindSurface/`. Where a later audit corrected an earlier conclusion, the correction appears in that phase and in the corrections section (§23).
+This log covers the whole project. Phases 1–5 (Sep 3 – Oct 6) summarise the original tentative research log (commit `6f6638a`, 6 Oct). That commit was removed from `master` by the 9 Oct reset but is still in the local git object store: `git show 6f6638a:research_log.md`. Later phases come from the working sessions, the git history and the run folders under `runs/detect/BladeYOLO_WindSurface/`. Where a later audit corrected an earlier conclusion, the correction appears in that phase and in the corrections section (§24).
 
 ---
 
@@ -474,7 +474,7 @@ The class-subset check is `runs/analysis/bootstrap/robust_check.py`. The upper C
 ### Conclusions
 - **The leakage result is robust:** both models, both metrics, about +0.27–0.29 mAP50 from the random split.
 - **The honest claim for the architecture:** "BladeYOLO-v2 scores 0.55 vs 0.44 mAP50 on a leak-free WTBD split (paired bootstrap +0.16, 95% CI 0.03–0.28). The gain is concentrated in lightning damage; on the other classes the evidence is inconclusive."
-- **More independent test scenes are needed** before per-class or architectural claims can be made with confidence. Options are group k-fold cross-validation or a second dataset (§26).
+- **More independent test scenes are needed** before per-class or architectural claims can be made with confidence. Options are group k-fold cross-validation or a second dataset (§27).
 
 ### Cleanup in this phase
 - Removed `tools/diagnose_nan.py`: a one-off investigation of the fixed SS2D fp16 bug, superseded by `tools/probe_nan.py` and the trainer's per-layer NaN report.
@@ -1114,7 +1114,7 @@ At 25%, ~36% of defects are located but fail IoU 0.5, more than are missed outri
 ### Next round (decided 18 Oct)
 
 1. **Training-free SAM 2.1 box refinement** (`tools/sam_refine.py`, test `tests/test_sam_refine.py`): each detection (conf ≥ 0.05, at most 30 per image) prompts SAM 2.1-tiny; the mask's bounding box replaces or blends with the detection. Prompt expansion (1.0 / 1.15 / 1.3), an agreement gate (IoU(original, SAM box) ≥ 0 / 0.3 / 0.5 / 0.7) and the blend (0.5 / 1.0) are chosen on val (one setting for all runs, by mean val mAP50-95), then applied once to test with a paired scene bootstrap. Runs: the three supervised 25% seeds and the 100% model. Being post-hoc, it is evaluated on existing seeds at no training cost. Smoke test: a loose detection [425, 143, 533, 249] was snapped to [459, 147, 522, 243] against ground truth [454, 140, 528, 248]. **Result: negative (below).**
-2. **DINOv3 ablation** (`bladeyolo2-l-nodino.yaml`, test in `tests/test_model.py`): BladeYOLO-v2 without DINOv3 (layer 0 a plain Conv, no DinoFuse), otherwise identical; it starts exactly as YOLOv12-L (1,239 pretrained tensors). Tests whether the 2.2× low-data advantage over YOLO12-L at 25% (0.232 vs 0.106) comes from the frozen foundation features. Two seeds at 25%, against the three supervised seeds.
+2. **DINOv3 ablation** (done, §22: DINOv3 carries the whole low-data advantage) (`bladeyolo2-l-nodino.yaml`, test in `tests/test_model.py`): BladeYOLO-v2 without DINOv3 (layer 0 a plain Conv, no DinoFuse), otherwise identical; it starts exactly as YOLOv12-L (1,239 pretrained tensors). Tests whether the 2.2× low-data advantage over YOLO12-L at 25% (0.232 vs 0.106) comes from the frozen foundation features. Two seeds at 25%, against the three supervised seeds.
 
 ### Result: SAM 2.1 box refinement does not help (18 Oct)
 
@@ -1178,7 +1178,40 @@ Phase 18's blanket tolerance helped corrosion (mAP50-95 0.13 → 0.26) and hurt 
 
 ---
 
-## 22. Engineering problems solved
+## 22. Phase 25: the DINOv3 ablation: frozen foundation features carry the entire low-data advantage (18 Oct)
+
+**Runs** (Kaggle, commit `389155e`; no non-finite batches): `bladeyolo2nodino_wtbd_group_f25_s0/s1`, BladeYOLO-v2 without DINOv3 (`bladeyolo2-l-nodino.yaml`: layer 0 a plain Conv, no DinoFuse; same YOLOv12-L initialisation, deformable and selective-scan refinements, WIoU loss and recipe), 25% of WTBD-group's labelled scenes, seeds 0 and 1.
+
+| at 25% | test mAP50 (COCO evaluator) | mAP50-95 | val best (mAP50 / 50-95) |
+|---|---|---|---|
+| BladeYOLO-v2, 3 seeds | 0.213 (0.232, 0.224, 0.184) | 0.079 | 0.411–0.444 / 0.199–0.226 |
+| **without DINOv3, 2 seeds** | **0.097** (0.114, 0.081) | **0.038** | 0.229, 0.186 / 0.126, 0.105 |
+| YOLO12-L, 1 run | 0.106 | 0.037 | 0.233 / 0.139 |
+
+**Paired scene bootstrap** (`runs/analysis/bootstrap/robust_check_nodino.py`, log `nodino_f25.log`; bootstrap evaluator, an arm is the mean of its seeds):
+
+| comparison | all 6 classes: mAP50 [95% CI] | mAP50-95 [95% CI] | 4 robust classes: mAP50 [95% CI] |
+|---|---|---|---|
+| without DINOv3 − BladeYOLO-v2 | **−0.108 [−0.240, −0.077]** | **−0.039 [−0.101, −0.025]** | **−0.099 [−0.216, −0.059]** |
+| YOLO12-L − BladeYOLO-v2 | −0.103 [−0.239, −0.070] | −0.035 [−0.098, −0.016] | −0.091 [−0.226, −0.046] |
+
+Point values: BladeYOLO-v2 0.202, without DINOv3 0.094, YOLO12-L 0.099. Per class (AP50, bootstrap evaluator, BladeYOLO-v2 / without DINOv3 / YOLO12-L): craze 0.035 / 0.017 / 0.014, corrosion 0.175 / 0.089 / 0.106, surface_injure 0.348 / 0.304 / 0.285, thunderstrike 0.234 / 0.001 / 0.000, crack 0.038 / 0.003 / 0.011, hide_craze 0.382 / 0.152 / 0.178.
+
+**Findings:**
+1. **Removing DINOv3 removes the whole low-data advantage.** Without it, BladeYOLO-v2 falls to YOLO12-L's level (0.094 vs 0.099 mAP50), on the aggregate and class by class. The deformable and selective-scan refinements and the WIoU loss contribute nothing measurable at 25%.
+2. **Significant and not a thunderstrike artefact:** the four well-represented classes alone lose −0.099 [−0.216, −0.059]. Earlier (§12) the 100% advantage over YOLO12-L rested mainly on thunderstrike; at 25% the DINOv3 effect is broad.
+3. **Largest on the rare and distinctive classes** (thunderstrike 0.23 → 0.00, hide_craze 0.38 → 0.15, corrosion halved), smallest on the most frequent class (surface_injure 0.35 → 0.30). In terms of §21's two kinds of class: frozen foundation features are what makes the *recognition-limited* classes learnable from few labels.
+
+**Conclusion:** BladeYOLO-v2's data efficiency comes from injecting frozen DINOv3 features, not from the architecture around it. This is the first strong, positive, causal result of the method work (Phases 19–25), and it identifies the lever: **the foundation-model prior.** It also settles the "architecture vs pretrained features" question left open in §12.
+
+**Next (decided 18 Oct):**
+1. **Complete the curve:** BladeYOLO-v2 without DINOv3 at 50% and 100%, to measure how the DINOv3 benefit changes with labelled data (25%: +0.11 mAP50, 2.2×; with YOLO12-L as the stand-in, 100%: +0.11, 1.25×).
+2. **Scale the prior:** a larger frozen DINOv3 (ViT-B/16, ViT-L/16) in place of ViT-S/16 at 25%. Hypothesis: the low-data gain grows with the foundation model. Needs the model size to be configurable in `models/dino_weights.py` / `DinoConv` (`dino_dim`, block indices) and the gated weights on Kaggle.
+3. Class-selective split tolerance at 100% (§21) is running.
+
+---
+
+## 23. Engineering problems solved
 
 | Problem | Root cause | Fix | Commit |
 |---|---|---|---|
@@ -1196,7 +1229,7 @@ Phase 18's blanket tolerance helped corrosion (mAP50-95 0.13 → 0.26) and hurt 
 
 ---
 
-## 23. Corrections to earlier conclusions
+## 24. Corrections to earlier conclusions
 
 | Earlier conclusion | Status | Why |
 |---|---|---|
@@ -1210,6 +1243,7 @@ Phase 18's blanket tolerance helped corrosion (mAP50-95 0.13 → 0.26) and hurt 
 | The first WTBD run's 0.649 val is its ceiling | **Corrected** | The completed run plateaus at ~0.63; 0.649 was noise |
 | The local thop segfault is a CPU-only quirk | **Corrected** | It is a real NaN-offset bug that also hit Kaggle (§11) |
 | BladeYOLO-v2's leak-free win over YOLO12-L shows the architecture generalises better | **Qualified** | The win rests mainly on thunderstrike (3 test scenes); without it the interval includes zero (§12) |
+| BladeYOLO-v2's advantage comes from its architecture (deformable, selective-scan, WIoU) | **Rejected** | Without DINOv3 it equals YOLO12-L at 25%; the frozen DINOv3 features carry the whole advantage (§22) |
 | Honest calibration costs 2.4 instead of 1.0 false alarms per image (Phase 16) | **Corrected** | That column counted all predictions; real false alarms are 0.2 vs 0.1 per image (§14) |
 | WTBD copies agree on 86.0% of labels (Phase 16) | **Refined** | Rotated copies inflate "loose"; axis-aligned copies agree on 87.3% (§14) |
 | WTBlade is CC BY 4.0 (Roboflow page) | **Questioned** | It contains DTU NordTank images (CC BY-NC) and synthetic copy-paste images (§14) |
@@ -1219,7 +1253,7 @@ Phase 18's blanket tolerance helped corrosion (mAP50-95 0.13 → 0.26) and hurt 
 
 ---
 
-## 24. Run registry
+## 25. Run registry
 
 | Run folder | Data | Model | Epochs | Val best (mAP50 / 50-95) | Test (mAP50 / 50-95) | Notes |
 |---|---|---|---|---|---|---|
@@ -1250,6 +1284,8 @@ Phase 18's blanket tolerance helped corrosion (mAP50-95 0.13 → 0.26) and hurt 
 | `bladeyolo2_wtbd_group_f25_sslinb_s0` | WTBD-group 25% + other 75% unlabelled | BladeYOLO-v2, in-domain, class-balanced, seed 0 | 150 | 0.344 / 0.154 (epoch 75) | **0.143 / 0.060**; TTA 0.183 / 0.079 | Phase 24 |
 | `bladeyolo2_wtbd_group_f25_sslinb_s1` | WTBD-group 25% + other 75% unlabelled | same, seed 1 | 150 | 0.352 / 0.167 (epoch 92) | **0.163 / 0.065**; TTA 0.180 / 0.075 | Phase 24; pseudo-label runaway, epochs 33–62 |
 | `bladeyolo2_wtbd_group_f25_sslinb_s2` | WTBD-group 25% + other 75% unlabelled | same, seed 2 | 150 | 0.445 / 0.205 (epoch 148) | **0.183 / 0.073**; TTA 0.213 / 0.095 | Phase 24 |
+| `bladeyolo2nodino_wtbd_group_f25_s0` | WTBD-group, 25% of train scenes | BladeYOLO-v2 without DINOv3, seed 0 | 150 | 0.229 / 0.126 (epoch 106) | **0.114 / 0.044**; TTA 0.153 / 0.063 | Phase 25 |
+| `bladeyolo2nodino_wtbd_group_f25_s1` | WTBD-group, 25% of train scenes | BladeYOLO-v2 without DINOv3, seed 1 | 150 | 0.186 / 0.105 (epoch 89) | **0.081 / 0.031**; TTA 0.126 / 0.053 | Phase 25 |
 | **`yolo12l_wtbd_group`** | WTBD-group (leak-free) | YOLO12-L | 150 | 0.419 / 0.269 (epoch 130) | **0.438 / 0.206**; TTA 0.440 / 0.230 | Same recipe |
 | **`yolo12l_wtbd_official`** | WTBD official (**leaky**) | YOLO12-L | 120 | 0.665 / 0.394 (epoch 104) | **0.704 / 0.388**; TTA 0.734 / 0.438 | Same recipe |
 
@@ -1257,7 +1293,7 @@ Val best is the best epoch in `results.csv` by fitness (0.1 × mAP50 + 0.9 × mA
 
 ---
 
-## 25. Datasets and artefacts
+## 26. Datasets and artefacts
 
 | Item | Location | Notes |
 |---|---|---|
@@ -1289,7 +1325,7 @@ Everything retired is restorable from commit `b374f4c`.
 
 ---
 
-## 26. Open work and next steps
+## 27. Open work and next steps
 
 **A. Real-view consistency for data-limited detection (Phase 19)**
 1. **Learning curves: done (§17).** Steep and significant for both detectors; BladeYOLO-v2 is the more data-efficient base model. Commands used:
@@ -1314,6 +1350,14 @@ Everything retired is restorable from commit `b374f4c`.
    ```
    - **The unlabelled pool needs care.** WTBD has no unlabelled images, so the pool comes from the other datasets used without their labels. Beijing shares 184 images with WTBD, so anything matching a WTBD val or test scene is excluded.
    - **Real views vs augmented copies:** most WTBlade "same-surface" pairs are Roboflow augmented copies (synthetic). Real second views are video frames and overlapping photos, and must be told apart (e.g. by the photometric residual after alignment), or the method silently becomes synthetic consistency.
+
+**A3. Foundation-feature prior (§22)**
+1. BladeYOLO-v2 without DINOv3 at 50% and 100%:
+   ```
+   python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l-nodino.yaml --train-subset tools/splits/wtbd_group_train_f50.txt --name bladeyolo2nodino_wtbd_group_f50 --epochs 150
+   python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l-nodino.yaml --name bladeyolo2nodino_wtbd_group --epochs 150
+   ```
+2. Larger frozen DINOv3 (ViT-B/16, ViT-L/16) at 25% (needs a configurable backbone size and the weights on Kaggle).
 
 **A2. Current round (§21): box extent and foundation features**
 1. **Done, negative (§21):** SAM 2.1 box refinement on the three supervised 25% seeds and the 100% model (local, no training):
@@ -1353,7 +1397,7 @@ Everything retired is restorable from commit `b374f4c`.
 6. **Seeds** for the existing WTBD-group pair, the **loss vs architecture separation** (`bladeyolo2-l.yaml --box-loss ciou`), and a **component ablation** (without DINOv3 fusion) to test whether the low-data advantage comes from the DINOv3 features.
 7. **WTBlade group split** with its official classes, for a second benchmark. Licence: it contains DTU NordTank (CC BY-NC) and synthetic copy-paste images (§14).
 
-## 27. Working conventions
+## 28. Working conventions
 
 - **Classes:** datasets are used with their official classes only; the custom v3 taxonomy (Phase 9) is retired.
 - **Testing:** tests and analyses run in the project's own `.venv`, with outputs under `runs/` and never `/tmp` ("research projects can have their own testing environments").
