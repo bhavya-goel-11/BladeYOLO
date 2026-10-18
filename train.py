@@ -4,6 +4,7 @@ Examples (WTBD = the folder holding WTBD-group/ and WTBD-official/):
     python train.py --data WTBD/WTBD-group/data.yaml --model bladeyolo2-l.yaml --name bladeyolo2_wtbd_group --epochs 150
     python train.py --data WTBD/WTBD-group/data.yaml --model yolo12l.pt --box-loss ciou --name yolo12l_wtbd_group --epochs 150
     python train.py --data WTBD/WTBD-group/data.yaml --model bladeyolo2-l.yaml --tolerant --name bladeyolo2_wtbd_group_tolerant
+    python train.py --data WTBD/WTBD-group/data.yaml --tolerant-classes corrosion,hide_craze --name bladeyolo2_wtbd_group_tolsel_s0
     python train.py --data WTBD/WTBD-group/data.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --name bladeyolo2_wtbd_group_f25
     python train.py --data WTBD/WTBD-group/data.yaml --test runs/detect/BladeYOLO_WindSurface/bladeyolo2_wtbd_group/weights/best.pt
     python train.py --data WTBD/WTBD-group/data.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --ssl synthetic \
@@ -75,6 +76,8 @@ def parse_args():
     p.add_argument("--ssl-start", type=int, default=30, help="epochs of supervised burn-in before pseudo-labels")
     p.add_argument("--tolerant", action="store_true",
                    help="split-tolerant box targets: a label or the region of touching same-class labels (models/tolerant.py)")
+    p.add_argument("--tolerant-classes", default=None, metavar="NAMES",
+                   help="comma-separated class names (from --data): split tolerance for these classes only; implies --tolerant")
     p.add_argument("--test", default=None, metavar="WEIGHTS",
                    help="only evaluate WEIGHTS (e.g. a run's best.pt) on the test split of --data, then exit")
     args = p.parse_args()
@@ -127,11 +130,26 @@ def resolve_data(path, train_subset=None):
     return out
 
 
+def tolerant_class_ids(args):
+    """--tolerant-classes names -> "i,j" indices in the dataset YAML's class order."""
+    with open(args.data) as f:
+        names = yaml.safe_load(f)["names"]
+    names = list(names.values()) if isinstance(names, dict) else list(names)
+    want = [c.strip() for c in args.tolerant_classes.split(",") if c.strip()]
+    unknown = [c for c in want if c not in names]
+    if unknown:
+        raise SystemExit(f"--tolerant-classes: {unknown} not in the dataset classes {names}")
+    ids = [names.index(c) for c in want]
+    print(f"[BladeYOLO] split tolerance for {want} only (class ids {ids})")
+    return ",".join(map(str, ids))
+
+
 def main():
     args = parse_args()
     os.environ["BLADEYOLO_BOX_LOSS"] = args.box_loss  # read by `import models`, inherited by DDP workers
     os.environ["BLADEYOLO_ROT90"] = str(args.rot90)  # read by BladeTrainer.build_dataset, inherited by DDP workers
-    os.environ["BLADEYOLO_TOLERANT"] = "1" if args.tolerant else "0"  # read by `import models`, inherited by DDP workers
+    os.environ["BLADEYOLO_TOLERANT"] = "1" if args.tolerant or args.tolerant_classes else "0"  # read by `import models`, inherited by DDP workers
+    os.environ["BLADEYOLO_TOLERANT_CLASSES"] = tolerant_class_ids(args) if args.tolerant_classes else ""  # models/tolerant.py
     os.environ["BLADEYOLO_SSL"] = args.ssl or ""  # read by BladeTrainer (models/view_consistency.config), inherited by DDP workers
     if args.ssl_unlabelled and args.ssl != "synthetic":
         raise SystemExit("--ssl-unlabelled needs --ssl synthetic (a plain image list has no second views)")

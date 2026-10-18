@@ -29,6 +29,24 @@ def test_region_boxes():
     print("ok test_region_boxes")
 
 
+def test_class_selective_regions():
+    """Only the selected classes get regions; other classes keep their own box, exactly as without tolerance."""
+    g = boxes([0, 0, 100, 40], [100, 0, 200, 40], [0, 100, 100, 140], [100, 100, 200, 140])
+    lab = torch.tensor([[[1], [1], [2], [2]]], dtype=torch.float32)  # two touching pairs, classes 1 and 2
+    mask = torch.ones(1, 4, 1)
+    assert tolerant.region_boxes(lab, g, mask, classes=None)[0, 2].tolist() == [0, 100, 200, 140]
+    r = tolerant.region_boxes(lab, g, mask, classes=[1])
+    assert r[0, 0].tolist() == r[0, 1].tolist() == [0, 0, 200, 40]  # class 1 merged
+    assert torch.equal(r[0, 2:], g[0, 2:])  # class 2 untouched
+    os.environ["BLADEYOLO_TOLERANT_CLASSES"] = "2"
+    try:
+        r = tolerant.region_boxes(lab, g, mask)  # read from the environment, as in training
+        assert torch.equal(r[0, :2], g[0, :2]) and r[0, 3].tolist() == [0, 100, 200, 140]
+    finally:
+        os.environ.pop("BLADEYOLO_TOLERANT_CLASSES")
+    print("ok test_class_selective_regions")
+
+
 class _Assigner:
     last_alt_targets = None
 
@@ -95,6 +113,7 @@ def test_full_loss_on_a_model():
 
 if __name__ == "__main__":
     test_region_boxes()
+    test_class_selective_regions()
     test_box_loss_picks_the_closer_target()
     test_assigner_scores_region_predictions()
     test_full_loss_on_a_model()

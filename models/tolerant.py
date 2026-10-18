@@ -9,9 +9,13 @@ are compared accept either target:
   assignment  the task-aligned assigner scores an anchor by its better overlap with the label or with its region
   box loss    each positive anchor regresses towards whichever of the two its prediction already overlaps more
 Classification targets are unchanged. Labels without touching same-class neighbours behave exactly as before.
+
+Class-selective (BLADEYOLO_TOLERANT_CLASSES="1,5", train.py --tolerant-classes): only labels of those class indices
+get regions; every other label keeps itself as its only target, exactly as in standard training.
 """
 
 import math
+import os
 
 import torch
 from ultralytics.utils.loss import BboxLoss, v8DetectionLoss
@@ -22,13 +26,23 @@ GAP = 8.0  # px at the training input: same-class labels this close are parts of
 MIN_FILL = 0.6
 
 
-def region_boxes(gt_labels, gt_bboxes, mask_gt, gap=GAP, min_fill=MIN_FILL):
-    """(b, n, 4): for each label the bounding box of its connected same-class touching labels (itself if alone or
-    if the union is mostly background). gt_labels (b, n, 1), gt_bboxes (b, n, 4) xyxy, mask_gt (b, n, 1)."""
+def tolerant_classes():
+    """Class indices that get regions (BLADEYOLO_TOLERANT_CLASSES), or None for every class."""
+    v = os.environ.get("BLADEYOLO_TOLERANT_CLASSES", "").strip()
+    return [int(c) for c in v.split(",")] if v else None
+
+
+def region_boxes(gt_labels, gt_bboxes, mask_gt, gap=GAP, min_fill=MIN_FILL, classes="env"):
+    """(b, n, 4): for each label the bounding box of its connected same-class touching labels (itself if alone, if
+    the union is mostly background, or if its class is not in `classes`: a list of indices, None for all, "env" to
+    read tolerant_classes()). gt_labels (b, n, 1), gt_bboxes (b, n, 4) xyxy, mask_gt (b, n, 1)."""
     b, n, _ = gt_bboxes.shape
     if n <= 1:
         return gt_bboxes
+    classes = tolerant_classes() if classes == "env" else classes
     valid = mask_gt[..., 0].bool()
+    if classes is not None:
+        valid = valid & torch.isin(gt_labels[..., 0].long(), torch.tensor(classes, device=gt_labels.device))
     x1, y1, x2, y2 = gt_bboxes.unbind(-1)
     ix = torch.minimum(x2[:, :, None], x2[:, None, :]) - torch.maximum(x1[:, :, None], x1[:, None, :]) + gap
     iy = torch.minimum(y2[:, :, None], y2[:, None, :]) - torch.maximum(y1[:, :, None], y1[:, None, :]) + gap

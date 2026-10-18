@@ -1154,6 +1154,23 @@ Per class (25% seed 0 → 100%):
 
 **Conclusions:** the recognition-limited classes are where data efficiency (foundation features, the DINOv3 ablation) can pay. For craze and crack the limit is the axis-aligned box itself: the annotators' grouping is inconsistent (the label audit) and IoU on thin diagonal boxes is unstable, so their scores reflect the annotation format as much as the detector.
 
+### Next after the DINOv3 ablation: class-selective split tolerance (decided 18 Oct)
+
+Phase 18's blanket tolerance helped corrosion (mAP50-95 0.13 → 0.26) and hurt surface_injure. The near-miss diagnostic, **rerun on val** so that test plays no part in the choice (`near_miss.py val`, log `near_miss_val.log`), shows where "merged" errors (a prediction spanning several touching labels, which is the case tolerance addresses) occur:
+
+| class (val) | merged, 25% seeds / 100% | part, 25% / 100% | label-audit agreement (§14) |
+|---|---|---|---|
+| corrosion | 18–23% / 31% | 3–5% / 3% | 69.0% |
+| hide_craze | 0–10% / 8% | 2% / 4% | 84.4% |
+| crack | 0–3% / 0% | 26–50% / 12% | 95.1% |
+| surface_injure | 0–2% / 0% | 0% / 0% | 82.7% |
+
+**Pre-registered selection rule:** audit agreement < 85% and a non-trivial merged rate on val → **corrosion and hide_craze**. surface_injure is excluded by the same rule (no merged errors; Phase 18 hurt it). Crack's errors are *part* errors (a prediction covering a piece of one label), which region targets do not address, so it is excluded too.
+
+**Implementation:** `train.py --tolerant-classes corrosion,hide_craze` (names from `--data`, implies `--tolerant`; unknown names stop the run) sets `BLADEYOLO_TOLERANT_CLASSES`; `models/tolerant.region_boxes` then builds regions only for those classes, and every other label keeps itself as its only target, as in standard training. Test: `tests/test_tolerant.py::test_class_selective_regions`.
+
+**Runs** (100% of WTBD-group, as in Phase 18): class-selective tolerance with seeds 0 and 1, and a second supervised seed at 100% so seed noise can be put on the comparison. **Primary score, fixed in advance:** corrosion mAP50-95. Secondary: overall mAP50-95, and surface_injure (should no longer be hurt).
+
 ### Tooling
 
 - `tools/pull_kaggle_runs.py`: downloads only the `runs/` files of the latest version of the Kaggle notebook (`beegee11/bladeyolo` by default; the output also holds the repo clone and dataset copy), stages them in `.kaggle_pull/` (gitignored, removed afterwards) and merges file by file: new files copied, identical skipped, differing local files kept and reported (`--overwrite` replaces). The notebook log is kept as `runs/kaggle_logs/<kernel>_<UTC time>.log`. `--dry-run`, `--kernel owner/name[/version]`. The Kaggle CLI is in `.venv` (`requirements.txt`).
@@ -1310,6 +1327,12 @@ Everything retired is restorable from commit `b374f4c`.
    python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l-nodino.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --seed 1 --name bladeyolo2nodino_wtbd_group_f25_s1 --epochs 150
    ```
    If DINOv3 carries the low-data advantage: larger DINOv3 backbones or light adapters as the data-efficiency lever.
+4. Class-selective split tolerance at 100%, after the DINOv3 runs (§21):
+   ```
+   python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --tolerant-classes corrosion,hide_craze --seed 0 --name bladeyolo2_wtbd_group_tolsel_s0 --epochs 150
+   python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --tolerant-classes corrosion,hide_craze --seed 1 --name bladeyolo2_wtbd_group_tolsel_s1 --epochs 150
+   python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --seed 1 --name bladeyolo2_wtbd_group_s1 --epochs 150
+   ```
 3. **Done (§21):** stricter near-miss diagnostic, per class. Open: the same at 50% of the scenes, and whether craze/crack scores are limited by the axis-aligned box format (e.g. region-level or granularity-tolerant evaluation for those classes only, §14).
 
 **B. Carried over**
@@ -1326,7 +1349,7 @@ Everything retired is restorable from commit `b374f4c`.
    python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --ssl real --ssl-pairs .../view-pool/pairs.csv --name bladeyolo2_wtbd_group_f25_sslreal2 --epochs 150
    python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --ssl synthetic --ssl-unlabelled tools/splits/wtbd_group_train_f25_rest.txt --name bladeyolo2_wtbd_group_f25_sslin --epochs 150
    ```
-5. **Class-selective split tolerance:** apply `--tolerant` only to classes with low label self-consistency (corrosion; possibly craze and hide_craze), chosen from the label audit (§14–§15). It can be combined with A as the box loss.
+5. **Class-selective split tolerance:** moved to A2 item 4 (corrosion and hide_craze, chosen from the label audit and val).
 6. **Seeds** for the existing WTBD-group pair, the **loss vs architecture separation** (`bladeyolo2-l.yaml --box-loss ciou`), and a **component ablation** (without DINOv3 fusion) to test whether the low-data advantage comes from the DINOv3 features.
 7. **WTBlade group split** with its official classes, for a second benchmark. Licence: it contains DTU NordTank (CC BY-NC) and synthetic copy-paste images (§14).
 
