@@ -5,6 +5,7 @@ Examples (WTBD = the folder holding WTBD-group/ and WTBD-official/):
     python train.py --data WTBD/WTBD-group/data.yaml --model yolo12l.pt --box-loss ciou --name yolo12l_wtbd_group --epochs 150
     python train.py --data WTBD/WTBD-group/data.yaml --model bladeyolo2-l.yaml --tolerant --name bladeyolo2_wtbd_group_tolerant
     python train.py --data WTBD/WTBD-group/data.yaml --tolerant-classes corrosion,hide_craze --name bladeyolo2_wtbd_group_tolsel_s0
+    python train.py --data WTBD/WTBD-group/data.yaml --dino b --train-subset tools/splits/wtbd_group_train_f25.txt --name bladeyolo2b_wtbd_group_f25_s0
     python train.py --data WTBD/WTBD-group/data.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --name bladeyolo2_wtbd_group_f25
     python train.py --data WTBD/WTBD-group/data.yaml --test runs/detect/BladeYOLO_WindSurface/bladeyolo2_wtbd_group/weights/best.pt
     python train.py --data WTBD/WTBD-group/data.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --ssl synthetic \
@@ -74,6 +75,8 @@ def parse_args():
                    help="class-balanced thresholds: classes the teacher rarely labels get lower ones, down to --ssl-tau-min")
     p.add_argument("--ssl-tau-min", type=float, default=0.25, help="lowest class threshold with --ssl-balance")
     p.add_argument("--ssl-start", type=int, default=30, help="epochs of supervised burn-in before pseudo-labels")
+    p.add_argument("--dino", choices=("s", "b", "l"), default="s",
+                   help="frozen DINOv3 size for BladeYOLO-v2 models: ViT-S/16 (default), ViT-B/16 or ViT-L/16")
     p.add_argument("--tolerant", action="store_true",
                    help="split-tolerant box targets: a label or the region of touching same-class labels (models/tolerant.py)")
     p.add_argument("--tolerant-classes", default=None, metavar="NAMES",
@@ -148,6 +151,7 @@ def main():
     args = parse_args()
     os.environ["BLADEYOLO_BOX_LOSS"] = args.box_loss  # read by `import models`, inherited by DDP workers
     os.environ["BLADEYOLO_ROT90"] = str(args.rot90)  # read by BladeTrainer.build_dataset, inherited by DDP workers
+    os.environ["BLADEYOLO_DINO"] = args.dino  # read when DinoConv/DinoFuse are built, inherited by DDP workers
     os.environ["BLADEYOLO_TOLERANT"] = "1" if args.tolerant or args.tolerant_classes else "0"  # read by `import models`, inherited by DDP workers
     os.environ["BLADEYOLO_TOLERANT_CLASSES"] = tolerant_class_ids(args) if args.tolerant_classes else ""  # models/tolerant.py
     os.environ["BLADEYOLO_SSL"] = args.ssl or ""  # read by BladeTrainer (models/view_consistency.config), inherited by DDP workers

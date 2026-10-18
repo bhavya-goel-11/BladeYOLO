@@ -12,14 +12,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 from ultralytics.nn.modules.conv import Conv
 
-from .dino_weights import build_dinov3_vits16
+from .dino_weights import SIZES, build_dinov3, dino_size
 
 
 class DinoConv(Conv):
-    """Conv layer 0 of the backbone that also extracts frozen DINOv3 ViT-S/16 features from the input image.
+    """Conv layer 0 of the backbone that also extracts frozen DINOv3 features from the input image.
 
-    The features (blocks 4/8/12, stride 16) are attached to the output as `.dino` for DinoFuse layers. The ViT lives
-    under `.dino`, so the trainer's freeze pattern "0.dino" keeps it frozen; train() keeps it in eval mode.
+    The ViT size comes from BLADEYOLO_DINO (train.py --dino; ViT-S/16 by default). The features (three blocks at 1/3,
+    2/3 and 3/3 depth, stride 16; ViT-S/B: blocks 4/8/12) are attached to the output as `.dino` for DinoFuse layers.
+    The ViT lives under `.dino`, so the trainer's freeze pattern "0.dino" keeps it frozen; train() keeps it in eval
+    mode. Size, width and blocks are stored per instance; checkpoints from before (ViT-S) fall back to the class values.
     """
 
     dino_blocks = (3, 7, 11)
@@ -27,7 +29,9 @@ class DinoConv(Conv):
 
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True):
         super().__init__(c1, c2, k, s, p, g, d, act)
-        self.dino = build_dinov3_vits16()
+        self.dino_size = dino_size()
+        _, self.dino_dim, _, self.dino_blocks = SIZES[self.dino_size]
+        self.dino = build_dinov3(self.dino_size)
         self.dino.requires_grad_(False)
         self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1), persistent=False)
         self.register_buffer("std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1), persistent=False)
@@ -58,7 +62,7 @@ class DinoFuse(nn.Module):
     def __init__(self, level, c):
         super().__init__()
         self.level = level
-        self.proj = Conv(c + DinoConv.dino_dim, c, 1)
+        self.proj = Conv(c + SIZES[dino_size()][1], c, 1)  # the width of the DINOv3 that DinoConv builds
         self.mix = Conv(c, c, 3, g=c)
         self.out = nn.Conv2d(c, c, 1)
         nn.init.zeros_(self.out.weight)

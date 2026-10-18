@@ -1209,6 +1209,12 @@ Point values: BladeYOLO-v2 0.202, without DINOv3 0.094, YOLO12-L 0.099. Per clas
 2. **Scale the prior:** a larger frozen DINOv3 (ViT-B/16, ViT-L/16) in place of ViT-S/16 at 25%. Hypothesis: the low-data gain grows with the foundation model. Needs the model size to be configurable in `models/dino_weights.py` / `DinoConv` (`dino_dim`, block indices) and the gated weights on Kaggle.
 3. Class-selective split tolerance at 100% (§21) is running.
 
+**Implementation of item 2 (18 Oct):** `train.py --dino s|b|l` (`BLADEYOLO_DINO`; ViT-S/16 default, so earlier runs and checkpoints are unchanged).
+- Weights: the official Hugging Face releases (`facebook/dinov3-vit{s,b,l}16-pretrain-lvd1689m`, gated; downloaded to `external/dinov3/vit?16/`). They are in the transformers layout; `models/dino_weights.hf_to_dinov3` converts them on load (q/k/v fused into qkv with a zero k bias; layer scales, MLP and norms renamed), and a `config.json` next to the file is checked so a wrong size is refused.
+- Two buffers are not stored by Hugging Face and are set as in Meta's release (`hf_buffers`): **the RoPE periods rounded to bfloat16** (Meta's checkpoint stores them in bf16, so the model was trained with rounded periods; unrounded periods change the features) and the qkv bias mask (all qkv biases are zero in this release, so it only matters for safety).
+- **Verified:** converted ViT-S/16 has all 175 weight tensors identical to Meta's original `dinov3_vits16_pretrain_lvd1689m-08c60483.pth` (SHA-256 prefix `08c60483`, matching its filename) and gives bit-identical features. ViT-B/16 (12 blocks, width 768) and ViT-L/16 (24 blocks, width 1024) build and fuse; ViT-L uses blocks 8/16/24 (the same relative depths as ViT-S/B's 4/8/12). Tests: `tests/test_dino_sizes.py`.
+- Weight search order: `DINOV3_WEIGHTS`, the project folder, `external/dinov3/vit?16/model.safetensors`, the Kaggle ViT-S model, then any `/kaggle/input/**/model.safetensors` whose path contains `vitb16` / `vitl16`.
+
 ---
 
 ## 23. Engineering problems solved
@@ -1304,6 +1310,7 @@ Val best is the best epoch in `results.csv` by fitness (0.1 × mAP50 + 0.9 × mA
 | Current runs | `runs/detect/BladeYOLO_WindSurface/` | `bladeyolo2_wtbd_{group,official,group_tolerant}`, `yolo12l_wtbd_{group,official}`, learning-curve, seed and SSL runs at 25% |
 | SAM refinement | `runs/analysis/sam_refine/` | SAM 2.1-tiny weights, cached predictions and SAM boxes, `val_grid.csv`, `report.md` |
 | Kaggle logs | `runs/kaggle_logs/` | One per `pull_kaggle_runs.py` pull |
+| DINOv3 weights | `external/dinov3/vit{s,b,l}16/` (Hugging Face, gated), `external/dinov3/official/` (Meta ViT-S .pth) | Not redistributable: keep the Kaggle copy private |
 | Retired runs and the v3 label review | `runs/analysis/archive/` | `results.csv`, `args.yaml`, test metrics; `review_test_v3.json` |
 | Dataset audit (Phase 13) | `runs/analysis/datasets/report.md` | |
 | WTBD leakage and craze diagnosis | `runs/analysis/{wtbd, wtbd_leak, wtbd_craze}/` | |
@@ -1321,7 +1328,7 @@ Val best is the best epoch in `results.csv` by fitness (0.1 × mAP50 + 0.9 × mA
 
 Everything retired is restorable from commit `b374f4c`.
 
-**Tests** (`tests/`): `test_ss2d`, `test_wiou`, `test_model`, `test_augment`, `test_fp32_blocks` (incl. fp16 attention), `test_deform_offsets`, `test_granularity_eval`, `test_view_label_audit`, `test_conformal_recall`, `test_tolerant`, `test_view_pool`, `test_view_consistency`, `test_sam_refine`. All pass in `.venv`.
+**Tests** (`tests/`): `test_ss2d`, `test_wiou`, `test_model`, `test_augment`, `test_fp32_blocks` (incl. fp16 attention), `test_deform_offsets`, `test_granularity_eval`, `test_view_label_audit`, `test_conformal_recall`, `test_tolerant`, `test_view_pool`, `test_view_consistency`, `test_sam_refine`, `test_dino_sizes`. All pass in `.venv`.
 
 ---
 
@@ -1357,7 +1364,13 @@ Everything retired is restorable from commit `b374f4c`.
    python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l-nodino.yaml --train-subset tools/splits/wtbd_group_train_f50.txt --name bladeyolo2nodino_wtbd_group_f50 --epochs 150
    python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l-nodino.yaml --name bladeyolo2nodino_wtbd_group --epochs 150
    ```
-2. Larger frozen DINOv3 (ViT-B/16, ViT-L/16) at 25% (needs a configurable backbone size and the weights on Kaggle).
+2. Larger frozen DINOv3 at 25%, two seeds each (weights as a private Kaggle dataset with folders `vitb16/`, `vitl16/`):
+   ```
+   python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --dino b --train-subset tools/splits/wtbd_group_train_f25.txt --seed 0 --name bladeyolo2b_wtbd_group_f25_s0 --epochs 150
+   python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --dino b --train-subset tools/splits/wtbd_group_train_f25.txt --seed 1 --name bladeyolo2b_wtbd_group_f25_s1 --epochs 150
+   python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --dino l --train-subset tools/splits/wtbd_group_train_f25.txt --seed 0 --name bladeyolo2l_wtbd_group_f25_s0 --epochs 150
+   python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --dino l --train-subset tools/splits/wtbd_group_train_f25.txt --seed 1 --name bladeyolo2l_wtbd_group_f25_s1 --epochs 150
+   ```
 
 **A2. Current round (§21): box extent and foundation features**
 1. **Done, negative (§21):** SAM 2.1 box refinement on the three supervised 25% seeds and the 100% model (local, no training):

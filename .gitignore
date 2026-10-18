@@ -19,6 +19,7 @@ data/
 *.pt
 *.pth
 *.onnx
+*.safetensors
 *.engine
 runs/
 *.log
