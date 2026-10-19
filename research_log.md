@@ -1351,7 +1351,7 @@ Val best is the best epoch in `results.csv` by fitness (0.1 × mAP50 + 0.9 × mA
 | Current runs | `runs/detect/BladeYOLO_WindSurface/` | `bladeyolo2_wtbd_{group,official,group_tolerant}`, `yolo12l_wtbd_{group,official}`, learning-curve, seed and SSL runs at 25% |
 | SAM refinement | `runs/analysis/sam_refine/` | SAM 2.1-tiny weights, cached predictions and SAM boxes, `val_grid.csv`, `report.md` |
 | Kaggle logs | `runs/kaggle_logs/` | One per `pull_kaggle_runs.py` pull |
-| DINOv3 weights | `external/dinov3/vit{s,b,l}16/` (Hugging Face, gated), `external/dinov3/official/` (Meta ViT-S .pth) | Not redistributable: keep the Kaggle copy private |
+| DINOv3 weights | `external/dinov3/vit{s,b,l}16/` (Hugging Face, gated), `external/dinov3/official/` (Meta ViT-S .pth) | DINOv3 License (Meta, 19 Aug 2025; `external/dinov3/vits16/LICENSE.md`): use, modification and redistribution allowed, but anything containing the weights (including our trained checkpoints) must ship with the license; publications must acknowledge DINOv3; military/ITAR uses prohibited |
 | Retired runs and the v3 label review | `runs/analysis/archive/` | `results.csv`, `args.yaml`, test metrics; `review_test_v3.json` |
 | Dataset audit (Phase 13) | `runs/analysis/datasets/report.md` | |
 | WTBD leakage and craze diagnosis | `runs/analysis/{wtbd, wtbd_leak, wtbd_craze}/` | |
@@ -1405,7 +1405,7 @@ Everything retired is restorable from commit `b374f4c`.
    python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l-nodino.yaml --train-subset tools/splits/wtbd_group_train_f50.txt --name bladeyolo2nodino_wtbd_group_f50 --epochs 150
    python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l-nodino.yaml --name bladeyolo2nodino_wtbd_group --epochs 150
    ```
-2. Larger frozen DINOv3 at 25%, two seeds each (weights as a private Kaggle dataset with folders `vitb16/`, `vitl16/`):
+2. Larger frozen DINOv3 at 25%, two seeds each (weights as a Kaggle dataset with folders `vitb16/`, `vitl16/`, plus `LICENSE.md` if it is public):
    ```
    python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --dino b --train-subset tools/splits/wtbd_group_train_f25.txt --seed 0 --name bladeyolo2b_wtbd_group_f25_s0 --epochs 150
    python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --dino b --train-subset tools/splits/wtbd_group_train_f25.txt --seed 1 --name bladeyolo2b_wtbd_group_f25_s1 --epochs 150
