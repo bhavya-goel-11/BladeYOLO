@@ -28,16 +28,13 @@ def dino_size():
 
 
 def weight_paths(size):
-    """Candidate weight files: Meta's original .pth or the Hugging Face model.safetensors (facebook/dinov3-vit?16-...)."""
+    """Candidate weight files, in order: DINOV3_WEIGHTS, the Kaggle model (beegee11/vit?16, the official Hugging Face
+    release facebook/dinov3-vit?16-pretrain-lvd1689m; latest version first), then the local download
+    (external/dinov3/vit?16/model.safetensors, from `hf download ... --local-dir`)."""
     v = f"vit{size}16"
-    paths = [os.environ.get("DINOV3_WEIGHTS", "")]  # explicit override
-    paths += sorted(glob.glob(os.path.join(ROOT_DIR, f"dinov3_{v}_pretrain_lvd1689m-*.pth")))  # local: project folder
-    paths.append(os.path.join(ROOT_DIR, "external", "dinov3", v, "model.safetensors"))  # local: hf download --local-dir
-    if size == "s":
-        paths.append("/kaggle/input/models/shamskarib/dinov3-vits/pytorch/default/1/dinov3_vits16_pretrain_lvd1689m-08c60483.pth")
-    paths += sorted(glob.glob(f"/kaggle/input/**/dinov3_{v}_pretrain_lvd1689m*.pth", recursive=True))
-    paths += sorted(p for p in glob.glob("/kaggle/input/**/model.safetensors", recursive=True) if v in p.lower())
-    return paths
+    kaggle = glob.glob(f"/kaggle/input/models/beegee11/{v}/*/default/*/model.safetensors")
+    kaggle.sort(key=lambda p: int(p.split("/")[-2]) if p.split("/")[-2].isdigit() else -1, reverse=True)
+    return [os.environ.get("DINOV3_WEIGHTS", ""), *kaggle, os.path.join(ROOT_DIR, "external", "dinov3", v, "model.safetensors")]
 
 
 def ensure_dinov3_importable():

@@ -36,9 +36,11 @@ BladeYOLO: Wind Turbine Blade Defect Detection with Limited Annotations and Weak
 Datasets are used with their **official classes** (WTBD: craze, corrosion, surface_injure, thunderstrike, crack,
 hide_craze). The full history of experiments, results and corrections is in `research_log.md`.
 
-1. Setup: `pip install -r requirements.txt`. DINOv3 ViT-S/16 weights: locally
-   `BladeYOLO/dinov3_vits16_pretrain_lvd1689m-08c60483.pth`; on Kaggle the `shamskarib/dinov3-vits` model input is used
-   in place. Override with `DINOV3_WEIGHTS=/path/to/file.pth`.
+1. Setup: `pip install -r requirements.txt`. DINOv3 weights (ViT-S/16 by default; `--dino b|l` for ViT-B/16, ViT-L/16):
+   the official Hugging Face releases `facebook/dinov3-vit{s,b,l}16-pretrain-lvd1689m` (gated; DINOv3 License, which
+   asks publications to acknowledge DINOv3). Locally `hf download facebook/dinov3-vits16-pretrain-lvd1689m
+   --local-dir external/dinov3/vits16` (likewise vitb16, vitl16); on Kaggle the `beegee11/vits16`, `beegee11/vitb16`,
+   `beegee11/vitl16` model inputs are used in place. Override with `DINOV3_WEIGHTS=/path/to/model.safetensors`.
 2. Dataset: build WTBD-group / WTBD-official as below and upload them (zipped) as a Kaggle dataset. `--data` is required;
    a read-only input (Kaggle) is copied once into the project folder so label caches can be written.
 3. Train (both GPUs, AMP, total batch 16; `python train.py -h` lists all options). Test metrics are written to
