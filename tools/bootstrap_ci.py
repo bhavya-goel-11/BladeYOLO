@@ -115,7 +115,7 @@ def per_image_matches(imgs, preds, nc):
 
 
 def score(matches, files, nc):
-    """(mAP50, mAP50-95, per-class AP50) over a multiset of images."""
+    """(mAP50, mAP50-95, per-class AP50, per-class AP50-95) over a multiset of images."""
     ap = np.full((nc, len(IOU_THRS)), np.nan)
     for c in range(nc):
         for k, t in enumerate(IOU_THRS):
@@ -123,7 +123,7 @@ def score(matches, files, nc):
             n = sum(m[2] for m in ms)
             if n:
                 ap[c, k] = dm.ap_from(np.concatenate([m[0] for m in ms]), np.concatenate([m[1] for m in ms]), n)
-    return float(np.nanmean(ap[:, 0])), float(np.nanmean(ap.mean(1))), ap[:, 0]
+    return float(np.nanmean(ap[:, 0])), float(np.nanmean(ap.mean(1))), ap[:, 0], ap.mean(1)
 
 
 def main():
