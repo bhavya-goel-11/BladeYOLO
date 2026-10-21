@@ -1405,6 +1405,31 @@ The user's decision (21 Oct): framing the paper on leakage and evaluation is the
 - **Bug fixed on the way:** the first run was OOM-killed at the kNN step (4096-row fp32 blocks against 200k patches, with 2.8 GB of features in RAM); features are now memory-mapped and scored in 512-row blocks.
 - **Decision:** drop H2. H3 is only worth a training run as a cheap add-on (retrieval map as an extra DinoFuse input); it is not a headline method by itself.
 
+### H3 implementation: retrieval prior as a detector input (`train.py --retrieval`)
+
+**Leakage while training** (`runs/analysis/priors/retrieval_leak.py` → `retrieval_leak.txt`). In training, the query image and its scene's duplicates are in the labelled memory, and under mosaic the model cannot know which image it is. Retrieval AUROC on 60 labelled images (memory: all 27,678 defect + 60,000 background patches of the 189):
+
+| rule | clean train | augmented train | test |
+|---|---|---|---|
+| none | 0.996 (defect mean 0.89) | 0.923 (0.61) | 0.830 (0.415) |
+| oracle: drop own scene group | 0.696 (0.011) | 0.712 (0.098) | — |
+| cap 0.9 | 0.867 | 0.940 (0.60) | 0.834 |
+| **cap 0.8** | 0.705 | **0.841 (0.41)** | **0.831 (0.41)** |
+| cap 0.7 | 0.702 | 0.709 (0.07) | 0.785 (0.27) |
+
+- Without a rule the prior is near-perfect in training (it reads back the image's own labels), so a detector would learn to trust it far more than it deserves at test.
+- **Chosen: ignore stored patches with cosine > 0.8, at training and test alike.** Training always sees augmented images, and with this cap the prior there is as informative as at test (AUROC 0.84 vs 0.83, mean defect score 0.41 vs 0.41) while test loses nothing (0.831 vs 0.830). Test top-1 similarity: median 0.80, 99th percentile 0.94.
+- **Open question:** leaving out the query's own scene is *weaker* than test (0.70 vs 0.83, mean defect score 0.01 vs 0.42): labelled training scenes resemble each other less than test scenes resemble them. Not explained yet (43 scene groups among the 189 images; a few large groups may hold most examples of a class).
+
+**Implementation** (`models/retrieval.py`, hooks in `models/dino_fusion.py`, `train.py --retrieval [--retrieval-cap 0.8]`; tests `tests/test_retrieval.py`):
+- Before the model is built, `train.py` encodes the labelled training images (unaugmented, 640 px, last DINOv3 block, L2-normalised): every defect patch and up to 60,000 background patches (re-weighted by background / kept), saved as `runs/retrieval_memory_<name>.pt`.
+- DinoConv registers it as persistent buffers (fp16), so checkpoints carry the memory to validation and test. ViT-B, 25%: about 88k × 768 patches, +135 MB per checkpoint.
+- Per input patch, under `no_grad`: 64 nearest stored patches by cosine, those above the cap dropped, the first 10 vote; output is per-class vote shares (6 channels), attached as `.retr`. Each DinoFuse concatenates it with its DINOv3 level, through the existing zero-initialised projection.
+- Refused with `--dino-lora` (the stored features would go stale as DINOv3 adapts).
+- Verified locally: unit tests (cap, background weighting, memory build, DinoFuse wiring, pickle round trip) and an end-to-end CPU run (16 images, 1 epoch, 320 px, ViT-B): memory build → training → val → `best.pt` → standalone fused test with TTA. The automatic test step was OOM-killed on this 7 GB machine (training process and test process both resident), not on Kaggle's 30 GB.
+
+**Pre-registered (same bar as Stage 1):** ViT-B, 25%, seeds 0 and 1, against frozen ViT-B s0/s1. Passes if test mAP50-95 rises ≥ +0.02 with P(>0) ≥ 0.95 (paired scene bootstrap, both seeds) and val agrees in direction.
+
 ---
 
 ## 25. Engineering problems solved

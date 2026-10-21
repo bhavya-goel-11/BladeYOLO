@@ -82,6 +82,10 @@ def parse_args():
                    help="frozen DINOv3 size for BladeYOLO-v2 models: ViT-S/16 (default), ViT-B/16 or ViT-L/16")
     p.add_argument("--dino-lora", type=int, default=0, metavar="R",
                    help="adapt DINOv3 with rank-R LoRA on every attention qkv and projection (0: frozen, the default)")
+    p.add_argument("--retrieval", action="store_true",
+                   help="retrieval prior: per-class votes of the nearest labelled DINOv3 patches as extra DinoFuse input (models/retrieval.py)")
+    p.add_argument("--retrieval-cap", type=float, default=0.8,
+                   help="ignore stored patches more similar than this, at training and test (keeps the query's own labels out)")
     p.add_argument("--tolerant", action="store_true",
                    help="split-tolerant box targets: a label or the region of touching same-class labels (models/tolerant.py)")
     p.add_argument("--tolerant-classes", default=None, metavar="NAMES",
@@ -175,6 +179,25 @@ def resume_setup(args):
     return last, overrides
 
 
+def build_retrieval_memory(args, data, device):
+    """--retrieval: encode the labelled training images into the memory DinoConv loads (before the model is built)."""
+    if args.dino_lora:
+        raise SystemExit("--retrieval needs frozen DINOv3: with --dino-lora the stored features would go stale")
+    from models.retrieval import build_memory
+
+    with open(data) as f:
+        cfg = yaml.safe_load(f)
+    train = cfg["train"] if os.path.isabs(cfg["train"]) else os.path.join(cfg["path"], cfg["train"])
+    if os.path.isdir(train):
+        images = sorted(os.path.join(train, n) for n in os.listdir(train) if n.lower().endswith((".jpg", ".jpeg", ".png", ".bmp")))
+    else:
+        images = [n.strip() for n in open(train) if n.strip()]
+    names = cfg["names"]
+    out = os.path.join(ROOT_DIR, "runs", f"retrieval_memory_{args.name}.pt")
+    build_memory(images, len(names), args.dino, out, imgsz=args.imgsz, cap=args.retrieval_cap, seed=args.seed, device=device)
+    os.environ.update(BLADEYOLO_RETRIEVAL=out, BLADEYOLO_RETRIEVAL_NC=str(len(names)))  # read when DinoConv/DinoFuse are built
+
+
 def tolerant_class_ids(args):
     """--tolerant-classes names -> "i,j" indices in the dataset YAML's class order."""
     with open(args.data) as f:
@@ -195,6 +218,7 @@ def main():
     os.environ["BLADEYOLO_ROT90"] = str(args.rot90)  # read by BladeTrainer.build_dataset, inherited by DDP workers
     os.environ["BLADEYOLO_DINO"] = args.dino  # read when DinoConv/DinoFuse are built, inherited by DDP workers
     os.environ["BLADEYOLO_DINO_LORA"] = str(args.dino_lora)  # read when DinoConv is built
+    os.environ["BLADEYOLO_RETRIEVAL_NC"] = "0"  # --retrieval sets it (build_retrieval_memory); resume restores the run's
     os.environ["BLADEYOLO_TOLERANT"] = "1" if args.tolerant or args.tolerant_classes else "0"  # read by `import models`, inherited by DDP workers
     os.environ["BLADEYOLO_TOLERANT_CLASSES"] = tolerant_class_ids(args) if args.tolerant_classes else ""  # models/tolerant.py
     os.environ["BLADEYOLO_SSL"] = args.ssl or ""  # read by BladeTrainer (models/view_consistency.config), inherited by DDP workers
@@ -227,6 +251,8 @@ def main():
 
     device = args.device or ",".join(str(i) for i in range(max(torch.cuda.device_count(), 1)))
     data = resolve_data(args.data, args.train_subset)
+    if args.retrieval:
+        build_retrieval_memory(args, data, test_device)
     if args.ssl_unlabelled:  # image names of the training split -> absolute paths (before DDP workers start)
         with open(data) as f:
             cfg = yaml.safe_load(f)
