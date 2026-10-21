@@ -1371,8 +1371,8 @@ before any novelty claim.
 | Ultralytics label cache on a read-only Kaggle input | Input mount not writable | Copy the dataset into the project folder once | `1d58ea2` |
 | Background processes, `!cmd &` on Kaggle | Notebook limitation | `subprocess.Popen` / Save & Run All | — |
 | Windows MX230 workstation | Pascal GPU, CUDA 12.5 driver | torch 2.6 + cu124; inference/analysis only | `091cb8a` |
-
 | LoRA weights inside DINOv3 would be frozen by the trainer | Ultralytics freezes every parameter whose name contains `model.0.dino.` | Updates registered on DinoConv as `dino_lora`; the wrapped layers only reference them; tested through deepcopy and pickle | Phase 27 |
+
 ---
 
 ## 26. Corrections to earlier conclusions
