@@ -1366,6 +1366,8 @@ before any novelty claim.
 
 **Consequence for the paper:** the defensible contribution is (1) the leakage audit and leak-free benchmark of the blade datasets the BladeYOLO paper reports on, (2) the controlled evidence that the low-label gain comes from frozen DINOv3 features alone and holds across the learning curve, and (3) whatever Stage 1–2 add. Stage 2 is an application of MEF-style training, worth running only if it gives a large gain.
 
+**On the paper's own modules:** the paper-faithful reimplementation was tried in Runs 1–3 (§2: Style Injection, WTConv detail branch, Cross-Mamba on frozen DINOv3 ViT-S/16; best ~52.6 / ~28 vs the paper's 86.5 / 57.4). Those runs predate the Phase 6 audit, so they used the weakened DINOv3 extractor (no RoPE, unnormalised input, §3), detached Style-Injection FFT gradients, SGD and the leaky Wind Surface split. They therefore support "not reproducible from the published information", not "the paper's modules add nothing beyond DINOv3". The second claim holds for our components (§22, §24); for the paper's exact modules it would need one corrected faithful run on the leak-free split, deferred unless a reviewer asks.
+
 ---
 
 ## 25. Engineering problems solved
