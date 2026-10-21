@@ -1328,6 +1328,32 @@ Bootstrap evaluator, all 6 classes (`robust_check_scale.py curve`, log `curve.lo
 2. **The val-selected ViT-L at 100%** (2 seeds, about 4 h each), to see whether the size gain persists with full data.
 3. **Light adaptation of DINOv3** (LoRA or the last blocks unfrozen) at 25%, since the frozen prior is the lever.
 
+### Programme from here (decided 21 Oct): improve the model, not diagnose it
+
+Twenty-seven phases have mapped where the headroom is; from now on every run is meant to improve results. The evidence:
+frozen DINOv3 features are the whole advantage at every data size (§22, §24); a better prior pays (ViT-B +40% at 25%)
+but size saturates; at 25% the losses are misses and localisation, not class confusion (class-agnostic AP is close
+to class-aware AP; 19–27% of defects missed); methods that act on labels or boxes failed (pseudo-labels, SAM).
+Two things were never tried: **adapting DINOv3 to blade imagery** (it has been frozen in every run) and **the native
+1024 px resolution** (every run is at 640, so a DINOv3 patch covers 25 native pixels).
+
+**Stage 1: is the prior adaptable?** ViT-B/16 at 25%, two seeds per arm, against `bladeyolo2b_wtbd_group_f25_s0/s1`:
+- **A. LoRA:** rank-16 updates on every attention qkv and output projection of DINOv3 (`--dino-lora 16`). The up-projection
+  starts at zero, so training starts from the frozen features (`tests/test_dino_lora.py`).
+- **B. Native resolution:** `--imgsz 1024` (DINOv3 grid 64×64 instead of 40×40), `--batch 8` against memory; Ultralytics
+  accumulates to a nominal batch of 64 either way.
+- **Success bar, fixed before the runs:** test mAP50-95 (bootstrap evaluator, mean of 2 seeds) at least **+0.02 over
+  frozen ViT-B with P(>0) ≥ 0.95**, and the same direction on val. Arms that pass are combined.
+- Screening on ViT-B instead of the val-selected ViT-L uses test information (ViT-B ties ViT-L on test at 0.6× the
+  cost); stated here so it can be stated in the paper.
+
+**Stage 2: label-free in-domain adaptation from real views** (if Stage 1 shows the prior is adaptable): LoRA-adapt
+DINOv3 on the 14,000 unlabelled blade images of the view pool (§18) with a dense correspondence loss across the
+49,886 verified real-view pairs (features at corresponding points of two photographs of one surface must agree),
+anchored to the original model against collapse; control: the same with synthetic views. Then detection at 25% and
+50%. Unlike the pseudo-label methods of §19–§21, it needs no labels on the unlabelled images. Needs a literature check
+before any novelty claim.
+
 ---
 
 ## 25. Engineering problems solved
@@ -1347,6 +1373,7 @@ Bootstrap evaluator, all 6 classes (`robust_check_scale.py curve`, log `curve.lo
 | Windows MX230 workstation | Pascal GPU, CUDA 12.5 driver | torch 2.6 + cu124; inference/analysis only | `091cb8a` |
 
 ---
+| LoRA weights inside DINOv3 would be frozen by the trainer | Ultralytics freezes every parameter whose name contains `model.0.dino.` | Updates registered on DinoConv as `dino_lora`; the wrapped layers only reference them; tested through deepcopy and pickle | Phase 27 |
 
 ## 26. Corrections to earlier conclusions
 
@@ -1453,7 +1480,7 @@ Val best is the best epoch in `results.csv` by fitness (0.1 × mAP50 + 0.9 × mA
 
 Everything retired is restorable from commit `b374f4c`.
 
-**Tests** (`tests/`): `test_ss2d`, `test_wiou`, `test_model`, `test_augment`, `test_fp32_blocks` (incl. fp16 attention), `test_deform_offsets`, `test_granularity_eval`, `test_view_label_audit`, `test_conformal_recall`, `test_tolerant`, `test_view_pool`, `test_view_consistency`, `test_sam_refine`, `test_dino_sizes`. All pass in `.venv`.
+**Tests** (`tests/`): `test_ss2d`, `test_wiou`, `test_model`, `test_augment`, `test_fp32_blocks` (incl. fp16 attention), `test_deform_offsets`, `test_granularity_eval`, `test_view_label_audit`, `test_conformal_recall`, `test_tolerant`, `test_view_pool`, `test_view_consistency`, `test_sam_refine`, `test_dino_sizes`, `test_dino_lora`. All pass in `.venv`.
 
 ---
 
@@ -1498,7 +1525,13 @@ Everything retired is restorable from commit `b374f4c`.
    ```
    Ran in two Kaggle sessions (seed 0 of B and L plus no DINOv3 at 50%, then seed 1 plus no DINOv3 at 100%).
 3. **Done (§24):** ViT-B beats ViT-S at 25% (+0.028 mAP50-95), ViT-L is no better than ViT-B; the DINOv3 gain holds at 50% and 100%; without DINOv3 the architecture equals or trails YOLO12-L. Analysis: `.venv/bin/python runs/analysis/bootstrap/robust_check_scale.py [curve]`.
-4. **Proposed (§24, undecided):** YOLO12-L with DINOv3 fusion only; the val-selected ViT-L at 100%; light adaptation (LoRA / last blocks unfrozen) at 25%.
+4. **Stage 1 of the programme (§24, decided 21 Oct):** ViT-B at 25%, LoRA and native resolution, two seeds each:
+   ```
+   python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --dino b --dino-lora 16 --train-subset tools/splits/wtbd_group_train_f25.txt --seed 0 --name bladeyolo2b_lora16_wtbd_group_f25_s0 --epochs 150
+   python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --dino b --imgsz 1024 --batch 8 --train-subset tools/splits/wtbd_group_train_f25.txt --seed 0 --name bladeyolo2b_1024_wtbd_group_f25_s0 --epochs 150
+   (same with --seed 1 and names …_s1)
+   ```
+   Then Stage 2 (label-free real-view adaptation) if Stage 1 shows the prior is adaptable. The simplified model (YOLO12-L + DINOv3 fusion only) and ViT-L at 100% follow once the method is fixed.
 
 **A2. Current round (§21): box extent and foundation features**
 1. **Done, negative (§21):** SAM 2.1 box refinement on the three supervised 25% seeds and the 100% model (local, no training):

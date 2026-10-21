@@ -80,6 +80,8 @@ def parse_args():
     p.add_argument("--ssl-start", type=int, default=30, help="epochs of supervised burn-in before pseudo-labels")
     p.add_argument("--dino", choices=("s", "b", "l"), default="s",
                    help="frozen DINOv3 size for BladeYOLO-v2 models: ViT-S/16 (default), ViT-B/16 or ViT-L/16")
+    p.add_argument("--dino-lora", type=int, default=0, metavar="R",
+                   help="adapt DINOv3 with rank-R LoRA on every attention qkv and projection (0: frozen, the default)")
     p.add_argument("--tolerant", action="store_true",
                    help="split-tolerant box targets: a label or the region of touching same-class labels (models/tolerant.py)")
     p.add_argument("--tolerant-classes", default=None, metavar="NAMES",
@@ -192,6 +194,7 @@ def main():
     os.environ["BLADEYOLO_BOX_LOSS"] = args.box_loss  # read by `import models`, inherited by DDP workers
     os.environ["BLADEYOLO_ROT90"] = str(args.rot90)  # read by BladeTrainer.build_dataset, inherited by DDP workers
     os.environ["BLADEYOLO_DINO"] = args.dino  # read when DinoConv/DinoFuse are built, inherited by DDP workers
+    os.environ["BLADEYOLO_DINO_LORA"] = str(args.dino_lora)  # read when DinoConv is built
     os.environ["BLADEYOLO_TOLERANT"] = "1" if args.tolerant or args.tolerant_classes else "0"  # read by `import models`, inherited by DDP workers
     os.environ["BLADEYOLO_TOLERANT_CLASSES"] = tolerant_class_ids(args) if args.tolerant_classes else ""  # models/tolerant.py
     os.environ["BLADEYOLO_SSL"] = args.ssl or ""  # read by BladeTrainer (models/view_consistency.config), inherited by DDP workers

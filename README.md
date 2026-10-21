@@ -84,7 +84,8 @@ automatically) with BladeYOLO's components added as zero-initialised residual br
 the pretrained detector: frozen DINOv3 semantics fused into P3/P4/P5 (`models/dino_fusion.py`), deformable-conv
 refinement of the P3/P4 outputs (`models/morphology.py`) and selective-scan refinement of the P5 output
 (`models/ss2d.py`). Training uses WIoU v3 (`models/wiou.py`; `--box-loss ciou` for the stock loss) and random quarter
-turns (`--rot90`). `--tolerant` uses split-tolerant box targets (`models/tolerant.py`): a label or the region of
+turns (`--rot90`). `--dino-lora R` adapts DINOv3 with rank-R LoRA on its attention layers (zero-initialised, so
+training starts from the frozen features). `--tolerant` uses split-tolerant box targets (`models/tolerant.py`): a label or the region of
 touching same-class labels, whichever the prediction is closer to.
 
 `--ssl real|synthetic --ssl-pairs <view-pool>/pairs.csv` adds teacher-student training on unlabelled view pairs

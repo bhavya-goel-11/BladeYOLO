@@ -19,6 +19,11 @@ SIZES = {
 }
 
 
+def dino_lora_rank():
+    """LoRA rank for DINOv3's attention in newly built models (BLADEYOLO_DINO_LORA, train.py --dino-lora); 0 = frozen."""
+    return int(os.environ.get("BLADEYOLO_DINO_LORA", "0") or 0)
+
+
 def dino_size():
     """DINOv3 size for newly built models (BLADEYOLO_DINO, train.py --dino): s (default), b or l."""
     size = os.environ.get("BLADEYOLO_DINO", "s") or "s"

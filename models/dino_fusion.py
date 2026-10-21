@@ -5,6 +5,9 @@ the raw image, which Ultralytics only gives to layer 0, so layer 0 is a Conv tha
 feature maps to its output tensor. DinoFuse layers take that output plus a backbone level and add the (resized,
 projected) DINOv3 features to it through a zero-initialised projection: at the start of training the backbone
 features pass through unchanged, and the network learns how much semantics to mix in.
+
+Optionally (train.py --dino-lora R) DINOv3 is adapted with LoRA: every attention qkv and output projection gets a
+trainable rank-R update whose up-projection starts at zero, so training starts from exactly the frozen features.
 """
 
 import torch
@@ -12,7 +15,39 @@ import torch.nn as nn
 import torch.nn.functional as F
 from ultralytics.nn.modules.conv import Conv
 
-from .dino_weights import SIZES, build_dinov3, dino_size
+from .dino_weights import SIZES, build_dinov3, dino_lora_rank, dino_size
+
+
+class LoRA(nn.Module):
+    """Low-rank update x -> B(A(x)) * alpha / r; B starts at zero, so the update starts at zero."""
+
+    def __init__(self, d_in, d_out, r, alpha=None):
+        super().__init__()
+        self.A = nn.Linear(d_in, r, bias=False)
+        self.B = nn.Linear(r, d_out, bias=False)
+        nn.init.kaiming_uniform_(self.A.weight, a=5**0.5)
+        nn.init.zeros_(self.B.weight)
+        self.scale = (alpha or r) / r
+
+    def forward(self, x):
+        return self.B(self.A(x)) * self.scale
+
+
+class LoRALinear(nn.Module):
+    """A frozen DINOv3 linear layer plus a LoRA update.
+
+    The update is registered on DinoConv (`dino_lora`), not here: the trainer freezes every parameter under
+    `0.dino.`, and `0.dino_lora.` falls outside that pattern. This module only holds a reference to it.
+    """
+
+    def __init__(self, base, lora):
+        super().__init__()
+        self.base = base
+        self.__dict__["lora"] = lora  # unregistered reference; owned by DinoConv.dino_lora
+        self.in_features, self.out_features = base.in_features, base.out_features  # read by DINOv3's attention
+
+    def forward(self, x):
+        return self.base(x) + self.lora(x)
 
 
 class DinoConv(Conv):
@@ -22,6 +57,8 @@ class DinoConv(Conv):
     2/3 and 3/3 depth, stride 16; ViT-S/B: blocks 4/8/12) are attached to the output as `.dino` for DinoFuse layers.
     The ViT lives under `.dino`, so the trainer's freeze pattern "0.dino" keeps it frozen; train() keeps it in eval
     mode. Size, width and blocks are stored per instance; checkpoints from before (ViT-S) fall back to the class values.
+    With a LoRA rank (BLADEYOLO_DINO_LORA) the attention layers get trainable updates in `.dino_lora` and the features
+    are computed with gradients while training.
     """
 
     dino_blocks = (3, 7, 11)
@@ -33,6 +70,16 @@ class DinoConv(Conv):
         _, self.dino_dim, _, self.dino_blocks = SIZES[self.dino_size]
         self.dino = build_dinov3(self.dino_size)
         self.dino.requires_grad_(False)
+        r = dino_lora_rank()
+        self.dino_lora = None  # frozen (older checkpoints have no attribute: _semantics treats that as None)
+        if r > 0:
+            self.dino_lora = nn.ModuleList()
+            for blk in self.dino.blocks:
+                for name in ("qkv", "proj"):
+                    base = getattr(blk.attn, name)
+                    lora = LoRA(base.in_features, base.out_features, r)
+                    self.dino_lora.append(lora)
+                    setattr(blk.attn, name, LoRALinear(base, lora))
         self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1), persistent=False)
         self.register_buffer("std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1), persistent=False)
 
@@ -42,7 +89,7 @@ class DinoConv(Conv):
         return self
 
     def _semantics(self, x):
-        with torch.no_grad():
+        with torch.set_grad_enabled(getattr(self, "dino_lora", None) is not None and torch.is_grad_enabled()):
             return self.dino.get_intermediate_layers((x - self.mean) / self.std, n=self.dino_blocks, reshape=True, norm=True)
 
     def forward(self, x):
