@@ -1354,6 +1354,18 @@ anchored to the original model against collapse; control: the same with syntheti
 50%. Unlike the pseudo-label methods of §19–§21, it needs no labels on the unlabelled images. Needs a literature check
 before any novelty claim.
 
+### Literature check (21 Oct): what is and is not new
+
+| Our element | Closest prior work | Verdict |
+|---|---|---|
+| DINOv3 in YOLOv12-L for blade defects with few labels | **The BladeYOLO paper itself** (Xu et al., arXiv 2607.28065, 30 Jul 2026; the paper of §2): DINOv3 ViT-S/16 (blocks 4/8/12) replaces YOLOv12-L's backbone, plus wavelet/Cross-Mamba and Style-Injector modules; random 10–70% label fractions. Also DINO-YOLO (arXiv 2510.25140): DINOv3 fused into YOLOv12 at P0/P3 for small civil-engineering datasets, nine DINOv3 variants | **Not new** |
+| Leakage in the blade benchmarks | No audit of WTBD, WTBlade or Wind Surface found. The BladeYOLO paper augments before a random split, has no val set, and reports on WTBlade and Wind Surface (75% of Wind Surface val have a train twin, §4). Generic precedents: CIFAR near-duplicates (1902.00423), CrowdAI (2304.02296) | **New for this domain** |
+| Leak-free group split of WTBD, scene bootstrap, causal ablations (§12, §22, §24) | None found for blade defects; the BladeYOLO paper and DINO-YOLO report single splits without scene-level intervals, and neither shows the gain coming only from DINOv3 | **New** (rigour and findings, not a method) |
+| LoRA / higher resolution for DINOv3 (Stage 1) | Standard techniques | Not new; done for results |
+| Dense multi-view correspondence fine-tuning of a foundation model (Stage 2) | MEF (ICLR 2025, 2411.19458): fine-tunes ViTs (DINOv2) for multiview feature equivariance; FiT3D (ECCV 2024): 3D-aware fine-tuning of DINOv2; Splat and Distill (2602.06032) finds MEF can hurt depth. In-domain continued SSL of DINOv2 is known (cell imaging, semiconductors) | **The loss is not new.** New only as the setting: casually captured inspection photos registered in 2D (no 3D), for detection, with a real-vs-synthetic-view control |
+
+**Consequence for the paper:** the defensible contribution is (1) the leakage audit and leak-free benchmark of the blade datasets the BladeYOLO paper reports on, (2) the controlled evidence that the low-label gain comes from frozen DINOv3 features alone and holds across the learning curve, and (3) whatever Stage 1–2 add. Stage 2 is an application of MEF-style training, worth running only if it gives a large gain.
+
 ---
 
 ## 25. Engineering problems solved
