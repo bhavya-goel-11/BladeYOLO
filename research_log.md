@@ -1430,6 +1430,29 @@ The user's decision (21 Oct): framing the paper on leakage and evaluation is the
 
 **Pre-registered (same bar as Stage 1):** ViT-B, 25%, seeds 0 and 1, against frozen ViT-B s0/s1. Passes if test mAP50-95 rises ≥ +0.02 with P(>0) ≥ 0.95 (paired scene bootstrap, both seeds) and val agrees in direction.
 
+### H4 test bed: WTBlade-group (multi-view test-time methods)
+
+WTBD cannot test multi-view methods (H1: 26 test images with a genuine second view). WTBlade can, once its leaks and copies are removed.
+
+**Group split** (`tools/wtblade_groups.py` → `runs/analysis/wtblade/{split_groups.csv, report.json}`):
+- 10,527 images; the 133 that match WTBD are left out, so the two benchmarks share nothing.
+- Same scene if same source frame (Roboflow name prefix; 2,791 frames), a verified view-pool pair (copies and real views, 68,076), or DINOv2 neighbours with cosine ≥ 0.93 / ≥ 25 ORB inliers.
+- Class-stratified 70/15/15 over groups, then the WTBD-group audit loop (held-out vs top-10 train neighbours, ORB-verified or cosine ≥ 0.93). **Converged after 11 rounds with 841 groups** and no held-out/train match. Largest groups 396–1,793 images (drone videos). Official 7 classes, all present in every split.
+
+**Dataset** (`tools/build_wtblade_group.py` → `external/WTBlade-group`, zip `runs/exports/WTBlade-group.zip`, 101 MB):
+- **One image per source frame** (first copy by name). The Roboflow copies are offline augmentations, and H1 showed copies act as free TTA.
+- Frames: **train 2,136 / val 323 / test 332**; all 640 × 640.
+- Real views: same-split frames linked in the view pool, registered again on the kept copies (ORB/RANSAC similarity + flip, both directions, ≥ 25 inliers) → `views_{val,test}.json`. **Test: 155 frames have at least one registered partner frame, 41 a different view (coverage < 0.7); val: 161 and 36.** Partner coverage median 0.82 (test), 0.84 (val). All partners are distinct captures (different source photos; Phase 21's visual check).
+- **Power caveat:** the multi-view test frames sit in few scene groups (16 for the 100 linked at pool level), so scene-bootstrap intervals will be wide. A multi-view method has to show a large effect to pass.
+- Licence: contains DTU NordTank frames (CC BY-NC). Kaggle dataset private; research use only.
+
+**Plan, in order (each step gates the next):**
+1. Base detector: BladeYOLO-v2 ViT-B on all 2,136 training frames, 50 epochs (about as many optimiser steps as the WTBD 150-epoch runs).
+2. **H1 on WTBlade** (no training): multi-view fusion of the base detector's outputs over the registered partners, settings chosen on val. If fusion does not make better detections than a single view, test-time adaptation has no signal to learn from, and H4 stops here.
+3. **H4: per-scene test-time adaptation** on pseudo-labels fused across registered real views; reset per scene.
+   - Control: the same procedure with synthetic partner views (augmentations of the frame itself, same count).
+   - Pre-registered: passes if real-view adaptation beats the synthetic-view control by ≥ +0.02 mAP50-95 with P(>0) ≥ 0.95 on test frames with a registered partner, and val agrees.
+
 ---
 
 ## 25. Engineering problems solved
