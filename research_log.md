@@ -1389,6 +1389,22 @@ The user's decision (21 Oct): framing the paper on leakage and evaluation is the
 - **All partners (copies included):** +0.023 mAP50 [+0.010, +0.063], +0.006 mAP50-95. Not a valid gain: it is test-time augmentation supplied by the dataset's duplicates, which a real flight does not produce, and val did not prefer it.
 - **Verdict:** untested rather than negative. A fair test needs real flights, e.g. a WTBlade benchmark (45,777 real-view pairs).
 
+### H2/H3 diagnostic: frozen-feature priors before building them into the detector
+
+`runs/analysis/priors/prior_diag.py` (report `report.txt`, chance level `chance.py` / `chance.log`): frozen ViT-B/16 patch features at 640 (40×40 per image), three priors scored on the 161 test images (235 boxes; 120 of them missed by ViT-B f25 s0, i.e. no prediction with conf ≥ 0.25 at IoU ≥ 0.1). A box counts as hit if any of its patches passes the threshold that flags 1% / 5% of background patches. Because boxes are large (median 111 patches), random scores already hit many boxes, so the chance level is reported alongside.
+
+| prior | patch AUROC | box recall at 1% (missed) | at 5% (missed) |
+|---|---|---|---|
+| chance (random scores) | 0.50 | 0.59 (0.60) | 0.85 (0.87) |
+| retrieval: kNN-10 over labelled 25% patches | 0.830 | 0.88 (0.85) | 0.97 (0.97) |
+| anom_lab: distance to labelled background | 0.797 | 0.31 (0.32) | 0.67 (0.72) |
+| anom_pool: distance to 800 unlabelled pool images | 0.737 | 0.22 (0.17) | 0.52 (0.48) |
+
+- **H2 (anomaly prior) fails:** both anomaly scores rank defect patches above background overall, but their most anomalous patches are not on defects, and box recall is *below chance*. Distance from normal surface picks out other unusual content (edges, sky, tower, lighting) before defects. Weakest on crack and hide_craze (0.06–0.10 at 1%).
+- **H3 (retrieval prior) is above chance but not decisive:** at 1% false alarms it hits 85% of the boxes the detector missed, against 60% by chance. So the labelled-patch memory holds information the detector does not use at its 0.25 threshold, but the same features and labels already train the detector, and a per-patch hit is far from a box.
+- **Bug fixed on the way:** the first run was OOM-killed at the kNN step (4096-row fp32 blocks against 200k patches, with 2.8 GB of features in RAM); features are now memory-mapped and scored in 512-row blocks.
+- **Decision:** drop H2. H3 is only worth a training run as a cheap add-on (retrieval map as an extra DinoFuse input); it is not a headline method by itself.
+
 ---
 
 ## 25. Engineering problems solved
