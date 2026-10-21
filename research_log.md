@@ -1370,6 +1370,27 @@ before any novelty claim.
 
 ---
 
+## 24b. Phase 28: hypotheses for a genuinely new method (21 Oct)
+
+The user's decision (21 Oct): framing the paper on leakage and evaluation is the last resort; risky hypotheses are welcome. Candidates, in order of testing cost:
+1. **Multi-view inference:** fuse detections across registered views of the same surface at test time (no training).
+2. **Normal-blade anomaly prior:** distance of DINOv3 patches from normal blade surface, as an extra detector input.
+3. **Retrieval prior:** nearest labelled defect patches in DINOv3 space, as a class-likelihood map.
+4. **Multi-view test-time training:** LoRA adapted on each flight by cross-view agreement.
+5. **RL with a granularity-invariant reward:** policy-gradient fine-tuning whose reward ignores how a defect is cut into boxes.
+6. **Label-free choice of which scenes to label** (cold-start selection on DINOv3 features).
+
+### H1 result: multi-view inference cannot be tested fairly on WTBD
+
+`tools/multiview_fusion.py` (tests: `tests/test_multiview_fusion.py`): each view's detections are moved into the target view through the label audit's verified transforms and clustered per class; a cluster's score is the mean, over the views that see its location, of each view's best score there (a view that sees the spot and detects nothing counts 0). Settings chosen on val, applied once to test; three ViT-S 25% seeds; log `runs/analysis/multiview_f25.log`, report `runs/analysis/multiview/`.
+
+- **WTBD has almost no genuine second views:** only 12/159 val and 26/161 test images have a partner that is a different photograph (moved frame covers < 70%). Most partners are copies of the same photo: of 510 test same-view pairs, 38% are near-exact (scale 1 ± 0.02, axis-aligned), the rest re-crops (scale 0.67–1.5) or rotations at arbitrary angles, consistent with WTBD's own augmentation.
+- **Other-view partners only:** no effect (mean of 3 seeds +0.000 mAP50 [−0.003, +0.011]).
+- **All partners (copies included):** +0.023 mAP50 [+0.010, +0.063], +0.006 mAP50-95. Not a valid gain: it is test-time augmentation supplied by the dataset's duplicates, which a real flight does not produce, and val did not prefer it.
+- **Verdict:** untested rather than negative. A fair test needs real flights, e.g. a WTBlade benchmark (45,777 real-view pairs).
+
+---
+
 ## 25. Engineering problems solved
 
 | Problem | Root cause | Fix | Commit |
