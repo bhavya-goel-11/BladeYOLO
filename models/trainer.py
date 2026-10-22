@@ -8,7 +8,7 @@ from ultralytics.utils import DEFAULT_CFG, LOGGER, RANK
 from ultralytics.utils.torch_utils import unwrap_model
 
 import models  # noqa: F401  (registers BladeYOLO layers and WIoU in this process, incl. DDP workers)
-from models import view_consistency
+from models import reward, view_consistency
 
 OPTIONS_FILE = "bladeyolo_options.json"  # train.py --resume restores these
 
@@ -140,6 +140,10 @@ class BladeTrainer(DetectionTrainer):
         self._last_batch = {k: v for k, v in batch.items()}  # CPU tensors as loaded, before moving to the GPU
         self._tloss_prev = self.tloss  # running epoch loss before this batch
         batch = super().preprocess_batch(batch)
+        if reward.config():
+            if reward.STATE["epoch"] != self.epoch:
+                self._write_reward_stats()
+            reward.STATE["epoch"] = self.epoch  # the reward term switches on at its start epoch
         ssl = view_consistency.config()
         if ssl and self.epoch >= ssl["start"]:
             batch = self._add_view_pseudo_labels(batch, ssl)
@@ -240,6 +244,14 @@ class BladeTrainer(DetectionTrainer):
                 f.write(f"{e + 1},{v['pairs']},{v['used']},{v['teacher']},{v['boxes']},{v['dropped']}," +
                         ",".join(map(str, v["per_class"])) + "," + ",".join(f"{t:.3f}" for t in v["thresholds"]) + "\n")
 
+    def _write_reward_stats(self):
+        stats = reward.STATE["stats"]
+        if not stats or RANK not in {-1, 0}:
+            return
+        with open(os.path.join(self.save_dir, "reward_stats.csv"), "w") as f:
+            f.write("epoch,batches,mean_reward,mean_kept_boxes\n")
+            f.writelines(f"{e + 1},{n},{r / n:.4f},{k / n:.2f}\n" for e, (n, r, k) in sorted(stats.items()))
+
     def optimizer_step(self):
         self._repair_bn()  # before the EMA copies the BatchNorm statistics
         if getattr(self, "_skip_step", False):
@@ -289,6 +301,7 @@ class BladeTrainer(DetectionTrainer):
                        f"saved {stem}.json")
 
     def validate(self):
+        self._write_reward_stats()  # every epoch end, so the last epoch is written too
         self._write_ssl_stats()
         return self._validate_guarded()
 

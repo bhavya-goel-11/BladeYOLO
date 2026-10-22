@@ -1491,6 +1491,52 @@ WTBD cannot test multi-view methods (H1: 26 test images with a genuine second vi
 - **Verdict:** H1 fails on a fair test bed, and with it the gate for H4. Pseudo-labels fused across real views are no better than single-view ones, so per-scene test-time adaptation would have no extra signal to learn from. **H4 is not run.** Together with Phases 22–23 (real-view teacher–student training no better than synthetic views), real second views have now failed as a signal at training time, at inference and as a source of pseudo-labels.
 - **Still useful:** WTBlade-group is a second leak-free benchmark (841 scene groups) for any later method.
 
+### Round 2 of Phase 28 (22 Oct): everything that could add something unexplored
+
+Your direction (22 Oct): "let's do literally everything that can contribute something previously unexplored, as much experimentation as possible." Stage 1 (LoRA, 1024 px) is dropped as not novel. Status of the candidates:
+
+| # | idea | status |
+|---|---|---|
+| 1 | copies of an image as a second annotator (consensus-aware targets) | measured below, too little signal at 25% |
+| H5 | reward fine-tuning with a granularity-invariant reward | implemented, for Kaggle |
+| H6 | label-free choice of the scenes to label (patch coverage) | implemented, for Kaggle |
+| 4 | zero-shot open-vocabulary detectors on the leak-free splits | next |
+| 5 | transfer between WTBD-group and WTBlade-group | next |
+
+**Idea 1 measured (label audit pairs, same-view copies):**
+- 25% subset: 138 of 189 images have a same-view copy in the subset. Of their 524 projected labels, 89% agree, 8% are loose, 3% split and 0.2% missing. **Only 24 images have any disagreement**, and none is about class.
+- All 745 training images: 573 have a copy, 120 have a disagreement (15% of projected labels).
+- The model already trains on both versions of each disputed box. Targets built from consensus would change 24 images at 25%, which cannot plausibly move test mAP50-95 by the +0.02 bar. **Not run at 25%**; reconsider only if a 100% experiment is made.
+
+### H5: reward fine-tuning with a granularity-invariant reward (`models/reward.py`, `train.py --reward W --reward-start E`)
+
+- **Idea:** the boxes a detector outputs are a stochastic policy, and the reward depends only on *where* defects are claimed, not on how they are cut into boxes. Unlike the split-tolerant loss (Phase 18), which changes per-anchor targets, this optimises a set-level, non-differentiable score directly. Related work: task-reward tuning of vision models (Pinto et al., ICML 2023) used standard rewards; a partition-invariant reward for amorphous defects is the new part.
+- **Policy, per image:** top 30 detections after NMS. Each is kept with probability sigmoid(its class logit), and a kept box is drawn from a Gaussian around the predicted box (sd 10% of width and height).
+- **Reward:** per class, F1 between the union of kept boxes and the union of labelled boxes on a 4 px raster, averaged over the classes present.
+- **Update:** 8 samples per image, leave-one-out baseline (RLOO); weight W on top of the unchanged supervised loss from epoch E. Per-epoch reward in `<run>/reward_stats.csv`.
+- **Tests** (`tests/test_reward.py`): a region split into two boxes earns the full reward; the policy gradient raises a correct box's logit and lowers a false one's (512 samples); the full model's loss is finite and trains.
+- **Runs:** ViT-B, 25%, `--reward 1.0 --reward-start 100`, seeds 0 and 1, 150 epochs. Before epoch 100 the run is identical to `bladeyolo2b_wtbd_group_f25_s0/s1`.
+- **Pre-registered:**
+  - Weights compared: `last.pt` against the baselines' `last.pt`, because val-mAP checkpoint selection could otherwise pick a pre-reward epoch.
+  - Primary: **region AP50** (`tools/granularity_eval.py`) at least +0.02 with P(>0) ≥ 0.95 (paired scene bootstrap, mean of 2 seeds), same direction on val.
+  - Guard: standard test mAP50-95 not more than 0.01 below the baseline (point estimate).
+  - W = 1.0 is fixed in advance; no tuning.
+
+### H6: label-free scene selection (`tools/select_scenes.py`)
+
+- **Question:** which scenes should be labelled, before any label exists? The 25% subset used so far was chosen using labels (random scene orders scored on class-mix match), so it is a strong baseline.
+- **Method:**
+  1. 128 random DINOv3 ViT-B last-block patches per training image.
+  2. k-means into 1,024 centroids.
+  3. Greedy choice of whole scenes for the largest gain per image in soft coverage, i.e. the sum over centroids of the best cosine of any selected patch. Every centroid weighs the same, so rare patterns (defects cover few patches) count as much as common ones.
+  4. Same budget: 189 images, ≤ 5% over.
+- **Controls:** two plain random scene draws of the same budget (no labels), for subset luck.
+- **Novelty:** cold-start selection on self-supervised features is known in classification (ProbCover, TypiClust). Patch-level coverage for scenes in detection with tiny objects is the new part, but modest.
+- **Runs:** ViT-B, seeds 0 and 1 for `_cover`, seed 0 for `_rand1` and `_rand2`.
+- **Pre-registered:**
+  - Passes if `_cover` reaches test mAP50-95 at least +0.02 above the class-matched subset (`bladeyolo2b_wtbd_group_f25_s0/s1`) with P(>0) ≥ 0.95, and val agrees.
+  - Also reported: `_cover` against the mean of the two plain random draws (a label-free selector should at least beat label-free random).
+
 ---
 
 ## 25. Engineering problems solved

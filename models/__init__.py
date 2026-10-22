@@ -2,7 +2,7 @@
 
 Importing this package makes the custom layers usable by name in model YAMLs, computes YOLOv12 area-attention scores
 in fp32 (models/precision.py), switches the box loss to WIoU v3 and, with BLADEYOLO_TOLERANT=1, uses split-tolerant
-box targets (models/tolerant.py).
+box targets (models/tolerant.py); with BLADEYOLO_REWARD > 0, adds reward fine-tuning (models/reward.py).
 DDP workers import it too, because they unpickle BladeTrainer from models.trainer.
 """
 
@@ -11,7 +11,7 @@ import os
 
 from ultralytics.nn import tasks
 
-from . import precision, tolerant, wiou
+from . import precision, reward, tolerant, wiou
 from .dino_weights import ensure_dinov3_importable
 from .dino_fusion import DinoConv, DinoFuse
 from .morphology import C2fMorphRes
@@ -53,6 +53,10 @@ def _register():
         wiou.install()
     if os.environ.get("BLADEYOLO_TOLERANT", "0") == "1":  # split-tolerant box targets (models/tolerant.py)
         tolerant.install()
+    if reward.config():  # granularity-invariant reward fine-tuning (models/reward.py)
+        if os.environ.get("BLADEYOLO_TOLERANT", "0") == "1":
+            raise ValueError("--reward and --tolerant both replace the detection loss; use one")
+        reward.install()
     tasks._bladeyolo_registered = True
 
 

@@ -86,6 +86,10 @@ def parse_args():
                    help="retrieval prior: per-class votes of the nearest labelled DINOv3 patches as extra DinoFuse input (models/retrieval.py)")
     p.add_argument("--retrieval-cap", type=float, default=0.8,
                    help="ignore stored patches more similar than this, at training and test (keeps the query's own labels out)")
+    p.add_argument("--reward", type=float, default=0.0, metavar="W",
+                   help="add W x a granularity-invariant policy-gradient loss (models/reward.py); 0: off")
+    p.add_argument("--reward-start", type=int, default=100, metavar="E",
+                   help="epoch (0-based) from which the reward loss is added; before it, standard training")
     p.add_argument("--tolerant", action="store_true",
                    help="split-tolerant box targets: a label or the region of touching same-class labels (models/tolerant.py)")
     p.add_argument("--tolerant-classes", default=None, metavar="NAMES",
@@ -218,6 +222,7 @@ def main():
     os.environ["BLADEYOLO_ROT90"] = str(args.rot90)  # read by BladeTrainer.build_dataset, inherited by DDP workers
     os.environ["BLADEYOLO_DINO"] = args.dino  # read when DinoConv/DinoFuse are built, inherited by DDP workers
     os.environ["BLADEYOLO_DINO_LORA"] = str(args.dino_lora)  # read when DinoConv is built
+    os.environ.update(BLADEYOLO_REWARD=str(args.reward), BLADEYOLO_REWARD_START=str(args.reward_start))  # models/reward.py
     os.environ["BLADEYOLO_RETRIEVAL_NC"] = "0"  # --retrieval sets it (build_retrieval_memory); resume restores the run's
     os.environ["BLADEYOLO_TOLERANT"] = "1" if args.tolerant or args.tolerant_classes else "0"  # read by `import models`, inherited by DDP workers
     os.environ["BLADEYOLO_TOLERANT_CLASSES"] = tolerant_class_ids(args) if args.tolerant_classes else ""  # models/tolerant.py
