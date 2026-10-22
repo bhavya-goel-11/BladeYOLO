@@ -1430,6 +1430,21 @@ The user's decision (21 Oct): framing the paper on leakage and evaluation is the
 
 **Pre-registered (same bar as Stage 1):** ViT-B, 25%, seeds 0 and 1, against frozen ViT-B s0/s1. Passes if test mAP50-95 rises ≥ +0.02 with P(>0) ≥ 0.95 (paired scene bootstrap, both seeds) and val agrees in direction.
 
+### H3 result: the retrieval prior does not help (fails the bar)
+
+Runs (Kaggle, commit `733eb67`, 150 epochs each): `bladeyolo2b_retr_wtbd_group_f25_s0/s1`. Paired scene bootstrap against frozen ViT-B s0/s1 (`runs/analysis/bootstrap/robust_check_scale.py h3` → `h3_retrieval.log`; 1,000 replicates over the 58 test scenes; an arm is the mean of its seeds):
+
+| | ViT-B | ViT-B + retrieval | difference [95% CI], P(>0) |
+|---|---|---|---|
+| test mAP50, 6 classes | 0.253 | 0.258 | +0.004 [−0.036, +0.078], 0.64 |
+| **test mAP50-95, 6 classes** | 0.104 | 0.105 | **+0.001 [−0.020, +0.030], 0.59** |
+| test mAP50-95, 4 robust classes | 0.135 | 0.141 | +0.006 [−0.018, +0.024], 0.73 |
+| val mAP50-95 (best epoch), s0 / s1 | 0.176 / 0.217 | 0.235 / 0.194 | +0.059 / −0.023 |
+
+- **Fails:** far from +0.02, and val disagrees between seeds.
+- The prior marks 85% of the missed defects at 1% false alarms as a patch map, but the detector, which already sees the same DINOv3 features, gains nothing from it. Per class, hide_craze rises (0.177 → 0.211) and thunderstrike falls (0.076 → 0.055); both are within seed noise.
+- **Closed.** Knowledge from the 25% labels is already used; a non-parametric copy of it adds no new information.
+
 ### H4 test bed: WTBlade-group (multi-view test-time methods)
 
 WTBD cannot test multi-view methods (H1: 26 test images with a genuine second view). WTBlade can, once its leaks and copies are removed.

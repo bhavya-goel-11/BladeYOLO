@@ -11,9 +11,15 @@ Partner views are weighted by w; the box is the score-weighted mean of the membe
 
 Partners are stratified as in the label audit: "other view" (the moved frame covers < SAME_VIEW of b: a different
 photograph) or "same view" (augmented copies and re-crops, which a real flight would not produce). Settings are
-chosen on val by mean mAP50-95 and applied once to test, scored with the paired scene bootstrap.
+chosen on val by mean mAP50-95 and applied once to test, scored with the paired scene bootstrap, on all test images
+and on those with a partner.
+
+With --views DIR (WTBlade-group, tools/build_wtblade_group.py) the transforms come from DIR/views_{val,test}.json,
+registered between distinct source frames: there "same view" partners are neighbouring video frames, not copies.
 
   .venv/bin/python tools/multiview_fusion.py --runs runs/detect/BladeYOLO_WindSurface/bladeyolo2_wtbd_group_f25 ...
+  .venv/bin/python tools/multiview_fusion.py --runs runs/.../bladeyolo2b_wtblade_group --data external/WTBlade-group \
+      --views external/WTBlade-group --groups external/WTBlade-group/groups.csv --out runs/analysis/multiview_wtblade
 """
 
 import argparse
@@ -106,6 +112,28 @@ def view_graph(data, split, transforms, official):
     return graph
 
 
+def view_graph_json(data, split, views):
+    """As view_graph, from tools/build_wtblade_group.py's views_<split>.json ({target: [[source, inliers, flip, M,
+    coverage], ...]}, both directions registered separately)."""
+    import cv2
+
+    here = os.path.join(os.path.abspath(data), split, "images")
+    graph = {os.path.join(here, f): [] for f in os.listdir(here)}
+    for b, srcs in json.load(open(os.path.join(views, f"views_{split}.json"))).items():
+        pb = os.path.join(here, b)
+        sb = cv2.imread(pb).shape[:2]
+        for a, inl, fl, M, cov in srcs:
+            pa = os.path.join(here, a)
+            sa = cv2.imread(pa).shape[:2]
+            A = affine(sa, sb, fl, M)
+            s = np.sqrt(abs(np.linalg.det(A[:2, :2])))
+            if inl < MIN_INLIERS or not 0.33 < s < 3:
+                continue
+            ka, kb = 640 / max(sa), 640 / max(sb)
+            graph[pb].append((pa, np.diag([kb, kb, 1]) @ A @ np.diag([1 / ka, 1 / ka, 1]), "same" if cov >= mt.SAME_VIEW else "other"))
+    return graph
+
+
 def fuse(preds, graph, iou, w, geom, partners, size=640.0, min_conf=0.001):
     """Fused predictions {image: (n,6) [x1,y1,x2,y2,score,cls]} for every image in preds."""
     out = {}
@@ -173,26 +201,30 @@ def main():
     ap.add_argument("--groups", default=os.path.join(ROOT, "runs", "analysis", "bootstrap", "wtbd_group", "groups.csv"))
     ap.add_argument("--preds", default=os.path.join(ROOT, "runs", "analysis", "sam_refine"), help="has preds_val/, preds_test/")
     ap.add_argument("--out", default=os.path.join(ROOT, "runs", "analysis", "multiview"))
+    ap.add_argument("--views", default=None, help="folder with views_{val,test}.json (WTBlade-group) instead of --transforms")
     args = ap.parse_args()
+    import yaml
+
+    nc = len(yaml.safe_load(open(os.path.join(args.data, "data.yaml")))["names"])
     os.makedirs(args.out, exist_ok=True)
     names = [os.path.basename(os.path.normpath(r)) for r in args.runs]
     S = {}
     for split in ("val", "test"):
         imgs = bc.load_yolo_split(args.data, split)
         preds = {n: bc.predict(r, imgs, os.path.join(args.preds, f"preds_{split}")) for n, r in zip(names, args.runs)}
-        graph = view_graph(args.data, split, args.transforms, args.official)
+        graph = view_graph_json(args.data, split, args.views) if args.views else view_graph(args.data, split, args.transforms, args.official)
         for st in ("other", "same"):
             k = sum(any(e[2] == st for e in v) for v in graph.values())
             print(f"{split}: {k}/{len(graph)} images have a '{st} view' partner")
         S[split] = dict(imgs=imgs, preds=preds, graph=graph, files=sorted(imgs))
 
     V = S["val"]
-    ms = lambda sp, p: bc.per_image_matches(S[sp]["imgs"], p, 6)
-    base = np.mean([bc.score(ms("val", V["preds"][n]), V["files"], 6)[:2] for n in names], 0)
+    ms = lambda sp, p: bc.per_image_matches(S[sp]["imgs"], p, nc)
+    base = np.mean([bc.score(ms("val", V["preds"][n]), V["files"], nc)[:2] for n in names], 0)
     grid, best = [], {}
     for partners in PARTNERS:
         for iou, w, geom in itertools.product(IOU, W, GEOM):
-            sc = np.mean([bc.score(ms("val", fuse(V["preds"][n], V["graph"], iou, w, geom, partners)), V["files"], 6)[:2]
+            sc = np.mean([bc.score(ms("val", fuse(V["preds"][n], V["graph"], iou, w, geom, partners)), V["files"], nc)[:2]
                           for n in names], 0)
             grid.append((partners, iou, w, geom, *sc))
             print(f"val {partners:5s} iou {iou} w {w} geom {geom:4s}: {sc[0]:.3f} / {sc[1]:.3f} (original {base[0]:.3f} / {base[1]:.3f})", flush=True)
@@ -203,31 +235,37 @@ def main():
     T = S["test"]
     g = {}
     for row in csv.DictReader(open(args.groups)):
+        if row.get("subset", "test") != "test":
+            continue
         g.setdefault(row["group"], []).append(os.path.join(os.path.abspath(args.data), "test", "images", row["image"]))
     groups = list(g.values())
     rng = np.random.default_rng(0)
     draws = [[f for gi in rng.integers(0, len(groups), len(groups)) for f in groups[gi]] for _ in range(1000)]
     lines = ["# Multi-view inference (settings from val)", "",
-             "| partners | setting | run | original mAP50 / 50-95 | fused | difference mAP50 [95% CI] | difference mAP50-95 [95% CI] |",
-             "|---|---|---|---|---|---|---|"]
+             "| images | partners | setting | run | original mAP50 / 50-95 | fused | difference mAP50 [95% CI] | difference mAP50-95 [95% CI] |",
+             "|---|---|---|---|---|---|---|---|"]
     report = {}
     for partners, (_, iou, w, geom, *_v) in best.items():
-        o_all, f_all = [], []
-        for n in names + ["mean"]:
-            if n == "mean":
-                o, f_ = np.mean(o_all, 0), np.mean(f_all, 0)
-                d = np.mean([dd for dd in D], 0)
-            else:
-                mo, mf = ms("test", T["preds"][n]), ms("test", fuse(T["preds"][n], T["graph"], iou, w, geom, partners))
-                o, f_ = bc.score(mo, T["files"], 6)[:2], bc.score(mf, T["files"], 6)[:2]
-                o_all.append(o), f_all.append(f_)
-                d = np.array([np.subtract(bc.score(mf, dr, 6)[:2], bc.score(mo, dr, 6)[:2]) for dr in draws])
-                D = (D if n != names[0] else []) + [d]
-            ci = [f"{f_[j] - o[j]:+.3f} [{np.percentile(d[:, j], 2.5):+.3f}, {np.percentile(d[:, j], 97.5):+.3f}] "
-                  f"P(>0) {np.mean(d[:, j] > 0):.2f}" for j in (0, 1)]
-            lines.append(f"| {partners} | iou {iou}, w {w}, {geom} | {n} | {o[0]:.3f} / {o[1]:.3f} | {f_[0]:.3f} / {f_[1]:.3f} | {ci[0]} | {ci[1]} |")
-            report[f"{partners}/{n}"] = dict(original=list(o), fused=list(f_))
-            print(lines[-1], flush=True)
+        linked = {f for f in T["files"] if any(partners == "all" or e[2] == "other" for e in T["graph"][f])}
+        for subset, keep in (("all", set(T["files"])), ("with a partner", linked)):
+            files = [f for f in T["files"] if f in keep]
+            sub_draws = [[f for f in dr if f in keep] for dr in draws]
+            o_all, f_all, D = [], [], []
+            for n in names + ["mean"]:
+                if n == "mean":
+                    o, f_, d = np.mean(o_all, 0), np.mean(f_all, 0), np.mean(D, 0)
+                else:
+                    mo, mf = ms("test", T["preds"][n]), ms("test", fuse(T["preds"][n], T["graph"], iou, w, geom, partners))
+                    o, f_ = bc.score(mo, files, nc)[:2], bc.score(mf, files, nc)[:2]
+                    o_all.append(o), f_all.append(f_)
+                    d = np.array([np.subtract(bc.score(mf, dr, nc)[:2], bc.score(mo, dr, nc)[:2]) for dr in sub_draws])
+                    D.append(d)
+                ci = [f"{f_[j] - o[j]:+.3f} [{np.nanpercentile(d[:, j], 2.5):+.3f}, {np.nanpercentile(d[:, j], 97.5):+.3f}] "
+                      f"P(>0) {np.mean(d[:, j] > 0):.2f}" for j in (0, 1)]
+                lines.append(f"| {subset} ({len(files)}) | {partners} | iou {iou}, w {w}, {geom} | {n} | {o[0]:.3f} / {o[1]:.3f} | "
+                             f"{f_[0]:.3f} / {f_[1]:.3f} | {ci[0]} | {ci[1]} |")
+                report[f"{subset}/{partners}/{n}"] = dict(original=list(o), fused=list(f_))
+                print(lines[-1], flush=True)
     open(os.path.join(args.out, "report.md"), "w").write("\n".join(lines) + "\n")
     json.dump(report, open(os.path.join(args.out, "report.json"), "w"), indent=1)
 
