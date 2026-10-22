@@ -1536,6 +1536,35 @@ Your direction (22 Oct): "let's do literally everything that can contribute some
 - **Pre-registered:**
   - Passes if `_cover` reaches test mAP50-95 at least +0.02 above the class-matched subset (`bladeyolo2b_wtbd_group_f25_s0/s1`) with P(>0) ≥ 0.95, and val agrees.
   - Also reported: `_cover` against the mean of the two plain random draws (a label-free selector should at least beat label-free random).
+- **Subsets** (`runs/analysis/select_scenes/wtbd_group_train_f25.txt`; 745 training images in 224 scenes):
+
+| subset | scenes | images | boxes craze / corrosion / surface_injure / thunderstrike / crack / hide_craze |
+|---|---|---|---|
+| class-matched random (existing, uses labels) | 51 | 189 | 45 / 38 / 79 / 10 / 39 / 60 |
+| **cover** (label-free) | **85** | 195 | 39 / 83 / 51 / **31** / 9 / 52 |
+| rand1 (label-free) | 84 | 189 | 24 / 49 / 94 / 12 / 8 / 100 |
+| rand2 (label-free) | 55 | 193 | 29 / 74 / 74 / 25 / 1 / 70 |
+
+  The coverage selector prefers many small scenes and, without labels, reaches every class with a more even spread (three times the thunderstrike boxes), but it finds few cracks (9 against 39).
+
+### Item 4: open-vocabulary detection without training (`tools/openvocab_eval.py`)
+
+- **Model:** OWLv2 (`google/owlv2-base-patch16-ensemble`, local copy in `external/owlv2`; the Hugging Face Xet download stalled, so the weights came from the CDN with curl).
+- **Queries:**
+  - *text*: three fixed descriptions per class, written before any result; class score = best description.
+  - *proto*: few-shot from the 25% labels without training. For each labelled box, the class embedding of the patch whose predicted box overlaps it most (exemplars: craze 45, corrosion 38, surface_injure 79, thunderstrike 10, crack 39, hide_craze 60); per class the normalised mean is the query.
+- **Scoring:** bootstrap evaluator on the WTBD-group test split (1,000 scene replicates), against the trained ViT-B 25% detector. Report `runs/analysis/openvocab/report.md`.
+
+| | mAP50 | mAP50-95 | class-agnostic mAP50 / mAP50-95 |
+|---|---|---|---|
+| OWLv2 text | 0.033 | 0.014 | 0.057 / 0.025 |
+| OWLv2 proto (25% exemplars) | 0.006 | 0.002 | 0.005 / 0.002 |
+| ViT-B 25% s0 / s1 (trained) | 0.250 / 0.257 | 0.099 / 0.108 | 0.314 / 0.297 |
+
+- text − trained: mAP50-95 −0.122 [−0.207, −0.075]; proto − trained: −0.137 [−0.225, −0.089].
+- **Result:** a web-scale open-vocabulary detector finds almost none of the blade defects, even ignoring class (0.057 class-agnostic AP50, against 0.30 for a detector trained on 189 images). Text descriptions do best on corrosion (0.08 AP50) and crack (0.06).
+- Mean exemplar prototypes are worse than text. Presumably the box-averaged embedding mostly encodes blade surface and fires on background. Variants (nearest exemplar, several prototypes per class) were not tried, since they would be chosen after seeing the result.
+- **Contribution:** a measurement, not a method. It is the first leak-free number for open-vocabulary detection on blade defects, and it shows the 25%-label regime is far from solved by foundation detectors.
 
 ---
 
