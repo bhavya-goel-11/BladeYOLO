@@ -1563,6 +1563,21 @@ Runs (Kaggle, 150 epochs, ViT-B): `bladeyolo2b_cover_wtbd_group_f25_s0/s1`, `bla
 - **Where the gain is:** per-class AP50-95 rises for thunderstrike from 0.076 to 0.337 and for crack from 0.007 to 0.159 (cover has 3× the thunderstrike boxes, but fewer crack boxes: 9 against 39). On the 4 classes with ≥ 8 test scenes the gain is +0.041 [−0.006, +0.120], P 0.951.
 - **Not yet robust.** Two random draws cannot measure subset luck, and val ranks the random draws above cover. Robustness runs are needed: 6 more random draws and 2 cover subsets with other k-means seeds (`tools/select_scenes.py --seed`).
 
+### H6 robustness round: pre-registered before the runs (23 Oct)
+
+**Subsets** (`runs/analysis/robust_subsets.sh`; all 189–197 images; `tools/splits/wtbd_group_train_f25_*`):
+- `rand3`–`rand8`: 6 more plain random scene draws (same generator; `rand1`/`rand2` reproduced byte for byte). With rand1/2: 8 draws. Their class counts vary widely, e.g. crack 1–93 boxes, thunderstrike 9–35.
+- `cover_k1`, `cover_k2`: the cover selector with k-means seeds 1 and 2 (89 and 95 scenes; thunderstrike 30 / 29, crack 17 / 15).
+- `freesel224_s0/s1`, `freesel640_s0/s1`: FreeSel (`tools/freesel.py`), as published at 224 px and at our 640 px, two sampling seeds each. It selects images, not scenes.
+
+**Runs:** ViT-B, 150 epochs, training seed 0, one run per subset (12 runs).
+
+**Pre-registered analysis** (bootstrap evaluator, paired scene bootstrap over the 58 test scenes):
+- *cover family* = mean of `cover` s0, s1, `cover_k1`, `cover_k2`; *random* = mean of the 8 random draws; *FreeSel-224* and *FreeSel-640* = mean of their two subsets.
+- **H6 holds against random** if cover family − random is ≥ +0.02 test mAP50-95 with P(>0) ≥ 0.95, and on val the cover family's mean (best-epoch mAP50-95) is above the random draws' mean. Also reported: cover's rank among the 8 random draws, on test and on val.
+- **H6 improves on FreeSel** if cover family − FreeSel-224 is ≥ +0.02 with P(>0) ≥ 0.95 (and the same direction on val). FreeSel-640 is reported as a stronger variant.
+- If cover fails against random, the first H6 result is attributed to subset luck.
+
 ### H5 result: region AP passes on test; val check pending
 
 Runs (Kaggle, 150 epochs, ViT-B, `--reward 1.0 --reward-start 100`): `bladeyolo2b_reward_wtbd_group_f25_s0/s1`. As pre-registered, `last.pt` against the baselines' `last.pt` (`runs/analysis/h5_last/`, symlinked run folders). Scored with `tools/granularity_eval.py --arms` (new option: difference of arm means; 500 replicates) → `runs/analysis/novel/granularity/h5_reward_last/report.md`:
