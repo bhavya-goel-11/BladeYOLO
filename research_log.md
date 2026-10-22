@@ -1581,6 +1581,13 @@ Runs (Kaggle, 150 epochs, ViT-B, `--reward 1.0 --reward-start 100`): `bladeyolo2
 - Training: mean reward per epoch rose from 0.49 (epoch 101) to 0.62 (epoch 150); kept boxes per image fell from ~2.0 to ~1.3.
 - Caveat: before the reward starts, seed 1 had already diverged from its baseline (val 0.384 vs 0.403 at epoch 100). GPU nondeterminism alone gives ~0.02 between nominally identical runs.
 
+**Literature check for H5 (23 Oct):**
+- **Policy-gradient detector training on a set-level reward is prior art:**
+  - Rao, Lu and Zhou, *Learning Globally Optimized Object Detector via Policy Gradient*, CVPR 2018, treat the set of detections as the action and optimise a non-differentiable mAP-based reward with REINFORCE.
+  - Pinto et al., ICML 2023, tune vision models with task rewards.
+- **Granularity for amorphous defects:** crack work handles it in the annotation (masks for cracks in Rail-5k, centre-line labels, weak and coarse labels; Xu et al., CVPRW 2023, study label errors for thin cracks). No detector training with a reward that ignores how a region is cut into boxes was found.
+- **What is new:** the reward, i.e. union-of-boxes F1 per class, invariant to splitting and merging, for detectors on amorphous defects, together with the evidence that it raises region AP without hurting box AP. RL fine-tuning of detectors itself is not new.
+
 ### Literature check for H6 (23 Oct)
 
 | work | what it does | relation to H6 |
@@ -1599,7 +1606,33 @@ Runs (Kaggle, 150 epochs, ViT-B, `--reward 1.0 --reward-start 100`): `bladeyolo2
 4. **Equal-weight coverage of global patch modes** (a deterministic facility-location objective) instead of D² sampling, which chases outliers.
 5. **Domain evidence:** the first annotation-selection result for blade inspection, on a leak-free benchmark.
 
+**Claim 1 tested and falsified** (`tools/freesel.py --diagnose` → `runs/analysis/select_scenes/freesel_attention_filter.txt`; DINO ViT-S/16, τ = 0.5, WTBD-group training images):
+
+| input | patches kept | defect patches kept | images losing every defect patch |
+|---|---|---|---|
+| 224 px (FreeSel's setting) | 16.8% | **50.1%** of 18,950 | 0.6% of 726 |
+| 640 px | 12.7% | **39.7%** of 151,454 | 0.0% of 745 |
+
+The [CLS] attention of DINO concentrates on blade defects about 3× above chance. FreeSel's filter therefore keeps defects rather than discarding them, and FreeSel is a stronger, fairer baseline than expected. The case for H6 now rests on claims 2–5 and on the head-to-head runs.
+
 **Consequence:** H6 can only be claimed as a contribution *against FreeSel (and OFDS) as baselines*, on WTBD and ideally WTBlade. Without that comparison it is an application of a known idea. Next: (1) the attention-filter diagnostic, which costs nothing; (2) FreeSel subsets (code is public) and OFDS subsets as Kaggle arms next to the robustness runs.
+
+### Item 5: transfer between the two leak-free benchmarks (`tools/transfer_eval.py`)
+
+- **Models:** WTBD-group 100% (ViT-S/16, 2 seeds) and WTBlade-group 100% (ViT-B/16), each tested on both test sets.
+- **Scoring:** damage only (WTBlade's dirt and oil dropped), class-agnostic; plus the two classes that map one to one (crack ↔ crack, thunderstrike ↔ burn). Paired scene bootstrap, 1,000 replicates. Report `runs/analysis/transfer/report.md`. The run was interrupted twice by machine restarts; prediction caches let it finish.
+
+| test set | in-domain agnostic AP50 / AP50-95 | transferred agnostic AP50 / AP50-95 | transferred − in-domain AP50 [95% CI] |
+|---|---|---|---|
+| WTBD-group (161 images, 58 scenes) | 0.563 / 0.250, 0.580 / 0.258 | 0.052 / 0.011 (WTBlade model) | −0.525 [−0.694, −0.329] |
+| WTBlade-group (332 frames, 177 scenes) | 0.475 / 0.202 | 0.040 / 0.016, 0.022 / 0.007 (WTBD models) | −0.439 [−0.496, −0.346] |
+
+- **No transfer in either direction:** a detector trained on one blade benchmark finds about 5–9% of what the in-domain detector finds on the other, even ignoring class. Mapped classes get nothing: crack AP50 is 0.000 both ways, lightning 0.073 at most.
+- **Possible causes, not yet separated:**
+  - imaging: WTBD crops 1024 px close-ups, while WTBlade is 640 px drone and video frames, often whole blades;
+  - annotation conventions: what counts as "crack", box extent and splitting (§14: labels disagree even within each dataset);
+  - taxonomy.
+- **Consequence:** results on one blade dataset say little about another, which supports reporting every method on both leak-free benchmarks. It is a measurement, not a method.
 
 ### Item 4: open-vocabulary detection without training (`tools/openvocab_eval.py`)
 
