@@ -1547,6 +1547,60 @@ Your direction (22 Oct): "let's do literally everything that can contribute some
 
   The coverage selector prefers many small scenes and, without labels, reaches every class with a more even spread (three times the thunderstrike boxes), but it finds few cracks (9 against 39).
 
+### H6 result: label-free selection passes on test (robustness pending)
+
+Runs (Kaggle, 150 epochs, ViT-B): `bladeyolo2b_cover_wtbd_group_f25_s0/s1`, `bladeyolo2b_rand{1,2}_wtbd_group_f25_s0`. Paired scene bootstrap (`runs/analysis/bootstrap/robust_check_scale.py h6` → `h6_select.log`; 1,000 replicates over the 58 test scenes; an arm is the mean of its runs):
+
+| arm | test mAP50 | test mAP50-95 | val mAP50-95 (best epoch) |
+|---|---|---|---|
+| class-matched 25% (uses labels) | 0.253 | 0.104 | 0.176 / 0.217 |
+| plain random (2 draws) | 0.318 | 0.124 | 0.235 / 0.265 |
+| **cover (label-free)** | **0.420** | **0.182** | 0.220 / 0.230 |
+
+- **cover − class-matched:** mAP50-95 **+0.078 [−0.002, +0.217], P(>0) 0.972**; mAP50 +0.167 [+0.042, +0.356]. Val is in the same direction (+0.029). **Passes the pre-registered bar.**
+- **cover − plain random:** mAP50-95 +0.058 [+0.015, +0.196], P 0.997. **Val disagrees:** both random draws beat cover on val.
+- **plain random − class-matched:** +0.020 [−0.047, +0.038]. The class-matched subset is an unlucky draw on test.
+- **Where the gain is:** per-class AP50-95 rises for thunderstrike from 0.076 to 0.337 and for crack from 0.007 to 0.159 (cover has 3× the thunderstrike boxes, but fewer crack boxes: 9 against 39). On the 4 classes with ≥ 8 test scenes the gain is +0.041 [−0.006, +0.120], P 0.951.
+- **Not yet robust.** Two random draws cannot measure subset luck, and val ranks the random draws above cover. Robustness runs are needed: 6 more random draws and 2 cover subsets with other k-means seeds (`tools/select_scenes.py --seed`).
+
+### H5 result: region AP passes on test; val check pending
+
+Runs (Kaggle, 150 epochs, ViT-B, `--reward 1.0 --reward-start 100`): `bladeyolo2b_reward_wtbd_group_f25_s0/s1`. As pre-registered, `last.pt` against the baselines' `last.pt` (`runs/analysis/h5_last/`, symlinked run folders). Scored with `tools/granularity_eval.py --arms` (new option: difference of arm means; 500 replicates) → `runs/analysis/novel/granularity/h5_reward_last/report.md`:
+
+| test, mean of 2 seeds | reward − baseline [95% CI] | P(>0) |
+|---|---|---|
+| **region AP (primary)** | **+0.081 [−0.007, +0.102]** | **0.97** |
+| standard AP50 | +0.011 [−0.037, +0.082] | 0.74 |
+| tolerant AP50 | +0.017 [−0.032, +0.078] | 0.79 |
+| standard AP50-95 (guard: ≥ −0.01) | −0.005 [−0.035, +0.013] | 0.37 |
+| tolerant AP50-95 | −0.002 [−0.033, +0.015] | 0.44 |
+
+- Region AP per run: reward 0.490 / 0.492, baseline 0.375 / 0.444.
+- **Primary metric passes on test and the guard holds.** The detector learned what the reward pays for: where defects are, not how they are cut into boxes. Standard and tolerant AP are unchanged.
+- **Val condition not yet checked:** the training logs only have standard val mAP (final epoch: s0 +0.030, s1 −0.033). Val region AP still has to be computed.
+- Training: mean reward per epoch rose from 0.49 (epoch 101) to 0.62 (epoch 150); kept boxes per image fell from ~2.0 to ~1.3.
+- Caveat: before the reward starts, seed 1 had already diverged from its baseline (val 0.384 vs 0.403 at epoch 100). GPU nondeterminism alone gives ~0.02 between nominally identical runs.
+
+### Literature check for H6 (23 Oct)
+
+| work | what it does | relation to H6 |
+|---|---|---|
+| **FreeSel** (Xie et al., NeurIPS 2023, arXiv 2309.17342) | Single pass, label-free. DINO ViT-S/16 last-layer patch features, filtered by [CLS] attention (keeps the patches holding τ of the attention mass), spectral clustering per image into K "semantic patterns"; images chosen by k-means++-style D² sampling over patterns. Detection on PASCAL VOC (SSD), Cityscapes segmentation, CIFAR | **Same core idea**: patch-level self-supervised features for choosing what to label for detection. Patch-level label-free selection is therefore **not new** |
+| **OFDS** (Popp et al., arXiv 2412.10032, 2024/25) | Object-level features: Grounding DINO prompted with the **class names** + SAM 2 object pointers; per-class k-means, rare classes first. VOC, Cityscapes, LoveDA; beats FreeSel, K-Centers, TypiClust-style baselines; largest gains on rare classes; tiny proposals filtered out | Needs an open-vocabulary proposer that recognises the classes. On blades OWLv2 finds almost nothing (item 4: class-agnostic AP50 0.057), so OFDS's premise fails here |
+| TypiClust, ProbCover, USL (Wang et al. 2022), CALR, Chen et al. 2023 "hard-to-contrast" | Cold-start selection from self-supervised **image-level** embeddings, classification | Image-level; OFDS reports image-level K-Centers below random on VOC detection |
+| DINOv2 + k-means coresets (agriculture, Frontiers 2025) | Image-level clustering for classification | Image-level |
+| Foundation-assisted AL for detection (arXiv 2607.16671, Jul 2026) | Remote sensing; UPN + SAM 2 + DINOv2 object-level diversity plus uncertainty; iterative | Object-level, needs a proposer |
+| Blade defects | No active-learning or annotation-selection work found; BladeYOLO (2607.28065) uses random label fractions | Domain gap |
+
+**What could still be new in H6 (each needs evidence):**
+1. **Tiny defects defeat saliency filtering.** FreeSel keeps only the patches the [CLS] token attends to. Defects cover a few patches of a blade photo, so they may be filtered out before selection. H6 keeps an unbiased patch sample. *Testable now:* the share of labelled defect patches that FreeSel's attention filter keeps on WTBD train. If it drops most of them, that is a clean, new negative finding about the established method.
+2. **No proposer and no class names**, in a domain where open-vocabulary proposers fail (item 4), unlike OFDS.
+3. **Scene-level selection** that respects near-duplicate groups (FreeSel and OFDS select images).
+4. **Equal-weight coverage of global patch modes** (a deterministic facility-location objective) instead of D² sampling, which chases outliers.
+5. **Domain evidence:** the first annotation-selection result for blade inspection, on a leak-free benchmark.
+
+**Consequence:** H6 can only be claimed as a contribution *against FreeSel (and OFDS) as baselines*, on WTBD and ideally WTBlade. Without that comparison it is an application of a known idea. Next: (1) the attention-filter diagnostic, which costs nothing; (2) FreeSel subsets (code is public) and OFDS subsets as Kaggle arms next to the robustness runs.
+
 ### Item 4: open-vocabulary detection without training (`tools/openvocab_eval.py`)
 
 - **Model:** OWLv2 (`google/owlv2-base-patch16-ensemble`, local copy in `external/owlv2`; the Hugging Face Xet download stalled, so the weights came from the CDN with curl).

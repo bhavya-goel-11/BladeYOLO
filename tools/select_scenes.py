@@ -72,12 +72,12 @@ def scenes(paths, cache, workers):
     return dsu.groups()
 
 
-def greedy_cover(F, groups, budget):
+def greedy_cover(F, groups, budget, seed=0):
     """Scenes chosen greedily by soft-coverage gain per image. F: (n_images, P, D); returns scene indices in order."""
     from sklearn.cluster import KMeans
 
     X = F.reshape(-1, F.shape[-1]).astype(np.float32)
-    C = KMeans(K, n_init=1, random_state=0).fit(X).cluster_centers_
+    C = KMeans(K, n_init=1, random_state=seed).fit(X).cluster_centers_
     C /= np.linalg.norm(C, axis=1, keepdims=True)
     S = np.stack([(F[g].reshape(-1, F.shape[-1]).astype(np.float32) @ C.T).max(0) for g in groups])  # (scenes, K)
     best = np.full(K, -1.0)
@@ -105,6 +105,7 @@ def main():
     ap.add_argument("--prefix", required=True)
     ap.add_argument("--random", type=int, default=2, help="plain random scene draws of the same budget")
     ap.add_argument("--dino", default="b")
+    ap.add_argument("--seed", type=int, default=0, help="k-means seed; >0 writes <prefix>_cover_k<seed>.txt and no random draws")
     ap.add_argument("--cache", default=os.path.join(ROOT, ".dataset_cache"))
     ap.add_argument("--workers", type=int, default=4)
     args = ap.parse_args()
@@ -118,7 +119,8 @@ def main():
     out = os.path.join(ROOT, "runs", "analysis", "select_scenes")
     os.makedirs(out, exist_ok=True)
     F = patch_features(paths, args.dino, os.path.join(out, f"{args.prefix}_patches_{args.dino}.npy"))
-    chosen, cov = greedy_cover(F, groups, args.budget)
+    chosen, cov = greedy_cover(F, groups, args.budget, args.seed)
+    tag = "cover" if args.seed == 0 else f"cover_k{args.seed}"
 
     def boxes(sel):
         cls = []
@@ -128,9 +130,9 @@ def main():
         return np.bincount(cls, minlength=len(names))
 
     lines = [f"{len(files)} training images in {len(groups)} scenes; budget {args.budget} images"]
-    subsets = {"cover": sorted(files[i] for g in chosen for i in groups[g])}
+    subsets = {tag: sorted(files[i] for g in chosen for i in groups[g])}
     rng = np.random.default_rng(0)
-    for k in range(1, args.random + 1):
+    for k in range(1, (args.random if args.seed == 0 else 0) + 1):
         sel, used = [], 0
         for g in rng.permutation(len(groups)):
             if used + len(groups[g]) <= args.budget * 1.05:
@@ -147,8 +149,8 @@ def main():
             open(os.path.join(ROOT, "tools", "splits", f"{args.prefix}_{name}.txt"), "w").write("\n".join(sel) + "\n")
         n_sc = len({gi for gi, g in enumerate(groups) for i in g if files[i] in set(sel)})
         lines.append(f"{name}: {n_sc} scenes, {len(sel)} images, boxes " + ", ".join(f"{n} {c}" for n, c in zip(names, boxes(sel))))
-    lines.append(f"cover: mean best cosine to the {K} centroids {cov:.3f}")
-    open(os.path.join(out, f"{args.prefix}.txt"), "w").write("\n".join(lines) + "\n")
+    lines.append(f"{tag}: mean best cosine to the {K} centroids {cov:.3f}")
+    open(os.path.join(out, f"{args.prefix}{'' if args.seed == 0 else f'_k{args.seed}'}.txt"), "w").write("\n".join(lines) + "\n")
     print("\n".join(lines))
 
 

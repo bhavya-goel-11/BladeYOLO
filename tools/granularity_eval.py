@@ -190,6 +190,8 @@ def main():
     ap.add_argument("--preds", required=True, help="folder of a tools/bootstrap_ci.py report (preds/, groups.csv)")
     ap.add_argument("--name", required=True)
     ap.add_argument("--n", type=int, default=500, help="bootstrap replicates")
+    ap.add_argument("--arms", action="store_true",
+                    help="runs are two arms of equal size (first half vs second half, e.g. seeds): difference of arm means")
     ap.add_argument("--subsets", default=None, help="CSV image,<subset>: compare score gains between image subsets")
     args = ap.parse_args()
 
@@ -231,9 +233,14 @@ def main():
         report["runs"][r] = {x: dict(value=float(np.nanmean(point[k][x])), ci=ci(boot[:, k, j])) for j, x in enumerate(keys)}
         report["per_class"][r] = {names[c]: {x: float(point[k][x][c]) for x in keys} for c in range(nc)}
     if len(preds) > 1:
-        d = boot[:, 0] - boot[:, 1]
-        report["difference"] = {x: dict(value=float(np.nanmean(point[0][x]) - np.nanmean(point[1][x])), ci=ci(d[:, j]),
+        h = len(preds) // 2 if args.arms else 1
+        A, B = (slice(0, h), slice(h, 2 * h)) if args.arms else (slice(0, 1), slice(1, 2))
+        d = boot[:, A].mean(1) - boot[:, B].mean(1)
+        pa = lambda sl, x: float(np.mean([np.nanmean(point[k][x]) for k in range(len(preds))[sl]]))  # noqa: E731
+        report["difference"] = {x: dict(value=pa(A, x) - pa(B, x), ci=ci(d[:, j]),
                                          p_le_0=float(np.mean(d[:, j] <= 0))) for j, x in enumerate(keys)}
+        if args.arms:
+            labels_diff = f"mean({', '.join(labels[A])}) − mean({', '.join(labels[B])})"
     if args.subsets:
         report["subsets"] = subset_gains(args, imgs, pre, groups, labels, names, data)
     json.dump(report, open(os.path.join(out, "report.json"), "w"), indent=2)
@@ -244,7 +251,7 @@ def main():
           "| run | standard AP50 | tolerant AP50 | region AP | standard AP50-95 | tolerant AP50-95 |", "|---|---|---|---|---|---|"]
     md += [f"| {r} | " + " | ".join(f(report["runs"][r][x]) for x in keys) + " |" for r in labels]
     if "difference" in report:
-        md += [f"| {labels[0]} − {labels[1]} | " + " | ".join(
+        md += [f"| {labels_diff if args.arms else labels[0] + ' − ' + labels[1]} | " + " | ".join(
             f(report["difference"][x]) + f" P(≤0)={report['difference'][x]['p_le_0']:.2f}" for x in keys) + " |"]
     md += ["", "| class | " + " | ".join(f"{r} std / tol / region" for r in labels) + " |",
            "|---|" + "---|" * len(labels)]
