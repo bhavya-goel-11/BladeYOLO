@@ -1337,6 +1337,8 @@ to class-aware AP; 19–27% of defects missed); methods that act on labels or bo
 Two things were never tried: **adapting DINOv3 to blade imagery** (it has been frozen in every run) and **the native
 1024 px resolution** (every run is at 640, so a DINOv3 patch covers 25 native pixels).
 
+> **Dropped (22 Oct, your decision):** Stage 1 is not run. LoRA and higher input resolution are standard techniques, so even a pass would not be a contribution; the novelty search continues with the Phase 28 hypotheses (§24b). `--dino-lora` stays in the code (tested) but has no runs.
+
 **Stage 1: is the prior adaptable?** ViT-B/16 at 25%, two seeds per arm, against `bladeyolo2b_wtbd_group_f25_s0/s1`:
 - **A. LoRA:** rank-16 updates on every attention qkv and output projection of DINOv3 (`--dino-lora 16`). The up-projection
   starts at zero, so training starts from the frozen features (`tests/test_dino_lora.py`).
@@ -1639,7 +1641,7 @@ Everything retired is restorable from commit `b374f4c`.
    ```
    Ran in two Kaggle sessions (seed 0 of B and L plus no DINOv3 at 50%, then seed 1 plus no DINOv3 at 100%).
 3. **Done (§24):** ViT-B beats ViT-S at 25% (+0.028 mAP50-95), ViT-L is no better than ViT-B; the DINOv3 gain holds at 50% and 100%; without DINOv3 the architecture equals or trails YOLO12-L. Analysis: `.venv/bin/python runs/analysis/bootstrap/robust_check_scale.py [curve]`.
-4. **Stage 1 of the programme (§24, decided 21 Oct):** ViT-B at 25%, LoRA and native resolution, two seeds each:
+4. **Dropped 22 Oct (not novel; see §24).** ~~Stage 1 of the programme (§24, decided 21 Oct):~~ ViT-B at 25%, LoRA and native resolution, two seeds each:
    ```
    python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --dino b --dino-lora 16 --train-subset tools/splits/wtbd_group_train_f25.txt --seed 0 --name bladeyolo2b_lora16_wtbd_group_f25_s0 --epochs 150
    python train.py --data .../WTBD-group/data.yaml --model bladeyolo2-l.yaml --dino b --imgsz 1024 --batch 8 --train-subset tools/splits/wtbd_group_train_f25.txt --seed 0 --name bladeyolo2b_1024_wtbd_group_f25_s0 --epochs 150
