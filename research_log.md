@@ -1470,6 +1470,27 @@ WTBD cannot test multi-view methods (H1: 26 test images with a genuine second vi
    - Control: the same procedure with synthetic partner views (augmentations of the frame itself, same count).
    - Pre-registered: passes if real-view adaptation beats the synthetic-view control by ≥ +0.02 mAP50-95 with P(>0) ≥ 0.95 on test frames with a registered partner, and val agrees.
 
+### H4 result: the gate fails, since real views do not make better detections even on WTBlade
+
+**Base detector** `bladeyolo2b_wtblade_group` (Kaggle, ViT-B, all 2,136 training frames, 50 epochs; val best at epoch 42, 0.426 / 0.172):
+- Test mAP50 / mAP50-95: **0.422 / 0.182** (Ultralytics).
+- Per class AP50-95: peeling 0.358, deformity 0.286, dirt 0.265, rust 0.133, burn 0.093, oil 0.090, crack 0.047.
+- It is the first leak-free WTBlade result.
+
+**H1 on WTBlade** (`tools/multiview_fusion.py --views external/WTBlade-group …` → `runs/analysis/multiview_wtblade/`, log `runs/analysis/multiview_wtblade.log`; settings chosen on val, applied once to test; bootstrap evaluator, 1,000 replicates over the test scene groups):
+
+| test frames | partners | setting (val) | single view | fused | Δ mAP50 | Δ mAP50-95 |
+|---|---|---|---|---|---|---|
+| all 332 | different view | IoU 0.55, w 0.5, mean | 0.419 / 0.179 | 0.407 / 0.171 | −0.011 [−0.022, +0.001] | −0.008 [−0.015, +0.000], P(>0) 0.10 |
+| 41 with a different view | different view | same | 0.548 / 0.249 | 0.512 / 0.217 | −0.036 [−0.041, +0.025] | −0.032 [−0.040, +0.062], 0.28 |
+| all 332 | any (incl. neighbouring frames) | IoU 0.4, w 0.5, own | 0.419 / 0.179 | 0.423 / 0.177 | +0.005 [−0.008, +0.018] | −0.002 [−0.008, +0.004], 0.23 |
+| 155 with any partner | any | same | 0.443 / 0.197 | 0.457 / 0.195 | +0.015 [−0.005, +0.069], 0.93 | −0.001 [−0.014, +0.020], 0.40 |
+
+- **On val, different-view fusion lowers every setting** (0.163–0.167 against 0.168). The best any-partner setting adds +0.002.
+- **Reading:** where a second view genuinely differs, moving its detections through a 2D similarity transform and averaging scores dilutes correct detections (the other view sees the spot at another scale and angle, or not at all) more than it recovers misses. Neighbouring frames behave like test-time augmentation: a small mAP50 gain that does not survive at mAP50-95.
+- **Verdict:** H1 fails on a fair test bed, and with it the gate for H4. Pseudo-labels fused across real views are no better than single-view ones, so per-scene test-time adaptation would have no extra signal to learn from. **H4 is not run.** Together with Phases 22–23 (real-view teacher–student training no better than synthetic views), real second views have now failed as a signal at training time, at inference and as a source of pseudo-labels.
+- **Still useful:** WTBlade-group is a second leak-free benchmark (841 scene groups) for any later method.
+
 ---
 
 ## 25. Engineering problems solved
