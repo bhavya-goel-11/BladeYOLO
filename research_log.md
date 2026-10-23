@@ -1578,7 +1578,7 @@ Runs (Kaggle, 150 epochs, ViT-B): `bladeyolo2b_cover_wtbd_group_f25_s0/s1`, `bla
 - **H6 improves on FreeSel** if cover family − FreeSel-224 is ≥ +0.02 with P(>0) ≥ 0.95 (and the same direction on val). FreeSel-640 is reported as a stronger variant.
 - If cover fails against random, the first H6 result is attributed to subset luck.
 
-### H5 result: region AP passes on test; val check pending
+### H5 result: passes all pre-registered conditions; the val effect is small
 
 Runs (Kaggle, 150 epochs, ViT-B, `--reward 1.0 --reward-start 100`): `bladeyolo2b_reward_wtbd_group_f25_s0/s1`. As pre-registered, `last.pt` against the baselines' `last.pt` (`runs/analysis/h5_last/`, symlinked run folders). Scored with `tools/granularity_eval.py --arms` (new option: difference of arm means; 500 replicates) → `runs/analysis/novel/granularity/h5_reward_last/report.md`:
 
@@ -1592,7 +1592,8 @@ Runs (Kaggle, 150 epochs, ViT-B, `--reward 1.0 --reward-start 100`): `bladeyolo2
 
 - Region AP per run: reward 0.490 / 0.492, baseline 0.375 / 0.444.
 - **Primary metric passes on test and the guard holds.** The detector learned what the reward pays for: where defects are, not how they are cut into boxes. Standard and tolerant AP are unchanged.
-- **Val condition not yet checked:** the training logs only have standard val mAP (final epoch: s0 +0.030, s1 −0.033). Val region AP still has to be computed.
+- **Val condition, checked** (`runs/analysis/h5_val.sh` → `runs/analysis/novel/granularity/h5_reward_last_val/report.md`; val scene groups built with the same matcher, `runs/analysis/bootstrap/h5_last_val/groups.csv`; 500 replicates): region AP reward 0.435 / 0.463 vs baseline 0.411 / 0.451, **+0.018 [−0.056, +0.071], P(>0) 0.57**. Both seeds are positive, so the direction agrees. Standard AP50 +0.031 [−0.006, +0.080], standard AP50-95 −0.000, tolerant AP50-95 −0.010.
+- **Verdict: H5 passes all three pre-registered conditions** (test region AP ≥ +0.02 with P ≥ 0.95; val same direction; standard AP50-95 not below −0.01). **But the effect is fragile:** the val gain is a quarter of the test gain and its interval includes 0, so +0.081 is likely an optimistic estimate from 58 test scenes. Before relying on it: more seeds, and a replication on WTBlade-group.
 - Training: mean reward per epoch rose from 0.49 (epoch 101) to 0.62 (epoch 150); kept boxes per image fell from ~2.0 to ~1.3.
 - Caveat: before the reward starts, seed 1 had already diverged from its baseline (val 0.384 vs 0.403 at epoch 100). GPU nondeterminism alone gives ~0.02 between nominally identical runs.
 
