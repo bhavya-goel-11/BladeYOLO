@@ -1728,6 +1728,28 @@ On the 4 robust classes (craze and thunderstrike excluded, as in earlier phases)
 (c) within the 8 random draws alone (not shaped by any selector), ρ with test has the same sign and |ρ| ≥ 0.5.
 A candidate is only a hypothesis: the selector that maximises it must then beat cover, FreeSel-224 and random in new pre-registered runs before it is claimed. If no property passes, H7 is closed.
 
+### H7 result: no label-free property predicts subset quality; H7 closed (24 Oct)
+
+`tools/subset_properties.py` → `runs/analysis/subset_properties/{table.csv, report.md}` (745 training images in 224 scenes; Spearman ρ, two-sided permutation p, 20,000 permutations; Bonferroni threshold p < 0.0056):
+
+| property | ρ test | p | ρ val | ρ test, 8 random draws |
+|---|---|---|---|---|
+| P1 scenes | +0.61 | 0.014 | +0.66 | +0.10 |
+| P2 coverage K1024 | +0.43 | 0.100 | +0.52 | −0.43 |
+| P3 coverage K64 | +0.47 | 0.063 | +0.46 | +0.31 |
+| P4 tail coverage | +0.54 | 0.030 | +0.69 | +0.02 |
+| P5 image diversity | −0.01 | 0.96 | −0.16 | −0.36 |
+| P6 MMD² to pool | −0.34 | 0.19 | −0.64 | −0.05 |
+| P7 typicality | −0.65 | 0.008 | −0.60 | −0.31 |
+| P8 FreeSel pattern coverage | +0.38 | 0.15 | +0.48 | −0.24 |
+| P9 atypical-patch mass | +0.47 | 0.067 | +0.84 | +0.29 |
+| *label-based:* boxes / min class / thunderstrike / crack / classes ≥ 10 / entropy | −0.32 / −0.13 / −0.05 / −0.36 / +0.10 / −0.06 | ≥ 0.17 | | |
+
+- **No property meets the rule.** The closest, P7 typicality (fewer typical images is better) and P1 number of scenes, miss the Bonferroni threshold and have no effect within the random draws (−0.31, +0.10). Their correlation over all 16 subsets is carried by the selector-versus-random split: the label-free selectors pick more scenes and less typical images *and* score higher, but among random draws these properties do not predict which draw is good.
+- **Class composition does not explain subset luck either:** no box-count statistic correlates with test score (|ρ| ≤ 0.36). Even rand8, the best draw (0.196), has unremarkable properties on every measure.
+- **Subset quality is partly real, not evaluation noise:** test and val agree across subsets (ρ = 0.65, p = 0.006; within the random draws 0.55, p = 0.16).
+- **Verdict: H7 is closed; no new selector follows from it.** The variation between subsets is consistent across splits but invisible to every subset-level statistic tried, label-free or label-based. This supports finding 2 of the H6 robustness round: low-label results depend on which particular scenes are labelled in a way that current selection criteria cannot predict, so they must be reported over several subsets.
+
 ---
 
 ## 25. Engineering problems solved
