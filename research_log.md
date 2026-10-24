@@ -1703,6 +1703,31 @@ On the 4 robust classes (craze and thunderstrike excluded, as in earlier phases)
   2. *Subset luck:* eight random 25% subsets with an identical model, recipe and seed span **0.090–0.196** test mAP50-95 (bootstrap evaluator), a factor of 2, larger than any model effect measured in this project (DINOv3, ViT size, H3, H5). The class-matched subset used for all earlier 25% comparisons is a below-average draw (7th of 9). Low-label results reported on one random subset, including the BladeYOLO paper's 10–70% fractions, are therefore largely luck; our earlier 25% comparisons are paired and internally valid but tied to one subset.
   3. Test and val disagree on which selector is better, a further sign that one split cannot rank selectors at this scale.
 
+### H7: what makes a labelled subset good? Pre-registered before computing (24 Oct)
+
+**Question.** 18 runs trained the same model on 16 distinct 189-image subsets (class-matched, cover, cover_k1/k2, rand1–8, FreeSel-224 s0/s1, FreeSel-640 s0/s1) and their test scores span 0.09–0.20. If a property computable *without labels* predicts that score, a selector that maximises it directly is a new, evidence-based method; if none does, subset luck is unexplained noise, which strengthens H6 finding 2.
+
+**Data.** Per subset: test mAP50-95 from the bootstrap evaluator (mean of its runs when two runs share a subset), val = best-epoch mAP50-95. Features: the cached DINOv3 ViT-B patch features of `tools/select_scenes.py` (128 random patches per training image, 640 px).
+
+**Label-free properties (fixed now; candidates for a selector):**
+- P1 number of scenes
+- P2 soft coverage, K = 1,024 centroids (the cover objective), averaged over k-means seeds 0, 1, 2
+- P3 soft coverage at K = 64 (coarse modes)
+- P4 tail coverage: soft coverage restricted to the 25% smallest of the 1,024 clusters (rare patterns)
+- P5 image diversity: mean pairwise cosine distance of the images' mean-pooled features
+- P6 distribution match: MMD² (RBF on cosine distance) between subset patches and all training patches (lower = more representative)
+- P7 typicality: mean cosine of each subset image (mean-pooled) to its 10 nearest training images
+- P8 FreeSel pattern coverage: mean over all training images' FreeSel-224 patterns (seed 0) of the best cosine to a pattern of a subset image
+- P9 atypical-patch mass: mean distance of subset patches to their nearest of the 1,024 centroids
+
+**Label-based statistics (explanatory only, not usable for selection):** total boxes, the smallest per-class box count, thunderstrike boxes, crack boxes, classes with ≥ 10 boxes, class entropy.
+
+**Decision rule.** A label-free property is a candidate if all three hold:
+(a) Spearman ρ with test mAP50-95 over the 16 subsets has |ρ| ≥ 0.6 and permutation p < 0.05 / 9 (Bonferroni over P1–P9);
+(b) ρ with val has the same sign and |ρ| ≥ 0.4;
+(c) within the 8 random draws alone (not shaped by any selector), ρ with test has the same sign and |ρ| ≥ 0.5.
+A candidate is only a hypothesis: the selector that maximises it must then beat cover, FreeSel-224 and random in new pre-registered runs before it is claimed. If no property passes, H7 is closed.
+
 ---
 
 ## 25. Engineering problems solved
