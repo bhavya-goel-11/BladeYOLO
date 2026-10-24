@@ -1750,6 +1750,18 @@ A candidate is only a hypothesis: the selector that maximises it must then beat 
 - **Subset quality is partly real, not evaluation noise:** test and val agree across subsets (ρ = 0.65, p = 0.006; within the random draws 0.55, p = 0.16).
 - **Verdict: H7 is closed; no new selector follows from it.** The variation between subsets is consistent across splits but invisible to every subset-level statistic tried, label-free or label-based. This supports finding 2 of the H6 robustness round: low-label results depend on which particular scenes are labelled in a way that current selection criteria cannot predict, so they must be reported over several subsets.
 
+### H5 replication: pre-registered before the runs (24 Oct)
+
+H5 is the only method candidate left, and its first result is fragile: test region AP +0.081, val only +0.018. Two replications, with the method and W = 1.0 unchanged:
+
+**R1: more seeds on WTBD-group 25%** (ViT-B, 150 epochs, `--reward-start 100`, class-matched subset): baseline and reward at seeds 2 and 3 (`bladeyolo2b_wtbd_group_f25_s{2,3}`, `bladeyolo2b_reward_wtbd_group_f25_s{2,3}`).
+**R2: a second dataset, WTBlade-group, all 2,136 training frames** (ViT-B, 50 epochs, the base recipe of `bladeyolo2b_wtblade_group`): baseline seed 1 (`bladeyolo2b_wtblade_group_s1`; seed 0 exists) and reward at seeds 0 and 1 (`bladeyolo2b_reward_wtblade_group_s{0,1}`). The reward runs over the last third of training, as on WTBD (epochs 100–150 of 150): `--reward-start 33` of 50. Fixed now, not tuned.
+
+**Analysis (same as H5):** `last.pt` against the baselines' `last.pt`; `tools/granularity_eval.py --arms`, paired scene bootstrap; an arm is the mean of its seeds.
+- R1 passes if, over all 4 WTBD seeds (s0–s3), test region AP50 rises ≥ +0.02 with P(>0) ≥ 0.95, val in the same direction, and standard test mAP50-95 drops by no more than 0.01. The new seeds s2/s3 alone are also reported.
+- R2 passes on the same three conditions on WTBlade-group (all 7 classes; groups from `external/WTBlade-group/groups.csv`).
+- **H5 is claimed as a method only if both R1 and R2 pass.** If R1 passes and R2 fails, it is reported as a WTBD-specific effect; if R1 fails, H5 is closed.
+
 ---
 
 ## 25. Engineering problems solved
