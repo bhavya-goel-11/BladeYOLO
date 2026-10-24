@@ -1669,6 +1669,40 @@ The [CLS] attention of DINO concentrates on blade defects about 3× above chance
 - Mean exemplar prototypes are worse than text. Presumably the box-averaged embedding mostly encodes blade surface and fires on background. Variants (nearest exemplar, several prototypes per class) were not tried, since they would be chosen after seeing the result.
 - **Contribution:** a measurement, not a method. It is the first leak-free number for open-vocabulary detection on blade defects, and it shows the 25%-label regime is far from solved by foundation detectors.
 
+### H6 robustness result: holds against random, does not improve on FreeSel (24 Oct)
+
+Runs (Kaggle, ViT-B, 150 epochs, training seed 0): `bladeyolo2b_rand{3..8}_wtbd_group_f25_s0`, `bladeyolo2b_coverk{1,2}_wtbd_group_f25_s0`, `bladeyolo2b_freesel{224,640}s{0,1}_wtbd_group_f25`. With the earlier cover s0/s1, rand1/2 and class-matched runs, 18 runs at the same 25% budget. Paired scene bootstrap as pre-registered: `runs/analysis/bootstrap/robust_check_scale.py h6r` → `h6r.log` (1,000 replicates over the 58 test scenes; an arm is the mean of its runs). Val = best-epoch mAP50-95 from `results.csv`.
+- The `freesel640s0` weights arrived as `best.zip` / `last.zip`: ordinary PyTorch checkpoints (a `.pt` is a zip archive) under the wrong extension, renamed to `.pt`. The first bootstrap attempt was killed by memory pressure from other applications; predictions are cached per run, so the reruns resumed.
+
+| arm (runs) | test mAP50 | test mAP50-95 | per-run test mAP50-95 | val mAP50-95 | rank among 8 random (test / val) |
+|---|---|---|---|---|---|
+| cover family (4) | 0.406 | **0.177** | 0.189 0.174 0.173 0.171 | 0.236 | 2/9 · 3/9 |
+| FreeSel-224 (2) | 0.429 | 0.156 | 0.156 0.156 | **0.271** | 2/9 · 1/9 |
+| FreeSel-640 (2) | 0.344 | 0.145 | 0.144 0.145 | 0.266 | 2/9 · 2/9 |
+| random (8) | 0.313 | 0.125 | 0.112 0.135 0.118 0.123 0.090 0.100 0.124 0.196 | 0.216 | — |
+| class-matched (2) | 0.253 | 0.104 | 0.099 0.108 | 0.197 | 7/9 · 7/9 |
+
+Paired differences, test mAP50-95 (all 6 classes):
+
+| comparison | Δ [95% CI] | P(>0) | val Δ |
+|---|---|---|---|
+| cover family − random | **+0.052 [+0.019, +0.105]** | **0.998** | +0.020 |
+| cover family − FreeSel-224 | +0.021 [−0.012, +0.091] | 0.917 | −0.035 |
+| cover family − FreeSel-640 | +0.032 [−0.007, +0.070] | 0.957 | −0.030 |
+| FreeSel-224 − random | +0.031 [−0.013, +0.071] | 0.900 | +0.055 |
+| FreeSel-640 − random | +0.020 [−0.000, +0.088] | 0.972 | +0.050 |
+| cover family − class-matched | +0.073 [+0.006, +0.170] | 0.986 | +0.039 |
+
+On the 4 robust classes (craze and thunderstrike excluded, as in earlier phases): cover − random +0.029 [−0.005, +0.073], P 0.937; cover − FreeSel-224 −0.001, P 0.44 (mAP50 −0.058, P 0.04); FreeSel-224 − random +0.030 [+0.012, +0.072], P 1.000.
+
+- **Against random: H6 holds** (pre-registered bar met: +0.052 ≥ +0.02, P 0.998, val higher). Stable across k-means seeds: all 4 cover subsets score 0.171–0.189, above 7 of the 8 random draws. The first H6 result was not subset luck.
+- **Against FreeSel: H6 fails.** Against FreeSel-224 (the pre-registered baseline), test +0.021 with P 0.917 < 0.95 and val in the opposite direction (−0.035). Against FreeSel-640, P 0.957 on test but val again opposite. Test favours cover and val favours FreeSel; on the 4 robust classes they are equal on mAP50-95, and FreeSel is ahead on mAP50. Cover's test edge comes from thunderstrike (AP50-95 0.315 vs 0.209) and crack (0.174 vs 0.105), classes with few test instances.
+- FreeSel at 640 px is no better than at 224 px, so keeping more defect patches in the attention filter (claim 1 diagnostic) does not translate into better subsets.
+- **Consequence for novelty:** cover is not a method contribution over FreeSel; the two are equivalent within the noise of this benchmark. What remains:
+  1. *Domain evidence:* label-free patch-level selection (either method) beats random scene selection on blade defects. Cover passes against random; FreeSel-224 is ahead of random on val and on the robust classes (P 1.000).
+  2. *Subset luck:* eight random 25% subsets with an identical model, recipe and seed span **0.090–0.196** test mAP50-95 (bootstrap evaluator), a factor of 2, larger than any model effect measured in this project (DINOv3, ViT size, H3, H5). The class-matched subset used for all earlier 25% comparisons is a below-average draw (7th of 9). Low-label results reported on one random subset, including the BladeYOLO paper's 10–70% fractions, are therefore largely luck; our earlier 25% comparisons are paired and internally valid but tied to one subset.
+  3. Test and val disagree on which selector is better, a further sign that one split cannot rank selectors at this scale.
+
 ---
 
 ## 25. Engineering problems solved
