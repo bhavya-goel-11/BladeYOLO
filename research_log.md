@@ -1762,6 +1762,40 @@ H5 is the only method candidate left, and its first result is fragile: test regi
 - R2 passes on the same three conditions on WTBlade-group (all 7 classes; groups from `external/WTBlade-group/groups.csv`).
 - **H5 is claimed as a method only if both R1 and R2 pass.** If R1 passes and R2 fails, it is reported as a WTBD-specific effect; if R1 fails, H5 is closed.
 
+### H5 replication, R1 (WTBD, 4 seeds, test): fails; H5 closed (26 Oct)
+
+`runs/analysis/h5r.sh` → `runs/analysis/novel/granularity/h5r_wtbd_4seeds/report.md`. Reward − baseline, mean of 4 seeds, `last.pt` vs `last.pt`: region AP **+0.036 [−0.016, +0.060], P(>0) 0.896**; standard AP50 +0.019 (P 0.928); standard AP50-95 +0.000 (guard holds). Per seed, region AP reward / baseline: s0 0.489 / 0.378, s1 0.493 / 0.446, s2 0.468 / 0.433, s3 0.415 / 0.462. The new seeds average about −0.006: the first +0.081 was an optimistic two-seed estimate. **R1 fails the primary condition (P < 0.95), so by the pre-registered rule H5 is closed.** The remaining reports (val, s2/s3 alone, WTBlade-group R2) are added below when the CPU evaluation finishes; they cannot reopen H5.
+
+## Phase 29: new hypotheses after H6 (26 Oct)
+
+**What the data say about where detection fails** (constraints for any new idea):
+- Defects are not small: images are 788–1,024 px, and median box short sides at 640 px input are 62–148 px (only 5% of hide_craze boxes are under 16 px). Tiling, slicing and super-resolution have nothing to recover, so they are not pursued.
+- The weak classes are found as regions but missed as boxes: at 25%, craze and crack standard AP50 0.01–0.08 against region AP 0.13–0.47 (H5 reports). They are texture-defined and amorphous, not small.
+- Rare classes are starved: thunderstrike has 79 boxes in all of train and test.
+- Already tried and closed: SAM 2.1 box refinement, split-tolerant loss, semi-supervision with real or synthetic views, retrieval and anomaly priors, multi-view fusion, set-level reward, patch-coverage selection, OWLv2. New ideas must not repeat them.
+
+**Literature (searched 26 Oct):**
+- *Learned feature upsamplers* for frozen foundation features, 2025–26: JAFAR, LoftUp, AnyUp (ICLR 2026; encoder-agnostic), UPLiFT (CVPR 2026), ViT-Up (arXiv 2606.14024). They are evaluated on segmentation, depth and probing; **no object-detection result was found**, and small or fine structures are noted as their weak point.
+- *Frequency and wavelet branches* for thin, low-contrast cracks: FD2-YOLO (Sensors 2025), YOLO11-FR (PLOS ONE 2026), TDDC-YOLO (Sci. Rep. 2026), instance-normalisation wavelet layer (Sensors 2025). These are prior art on concrete, wood and belts, not on blades and not on top of foundation features.
+- *Few-shot defect synthesis by diffusion*: AnomalyDiffusion (AAAI 2024), DualAnoDiff (CVPR 2025), DefectFill (CVPR 2025), Anomagic (2025), SynSur (2026); for blades, a diffusion-built dataset (Sci. Data 2026). These are evaluated mostly on classification or generation metrics, rarely on detection under label scarcity.
+- *Training-free VLM blade inspection*: "Seeing the Unseen" (arXiv 2510.22868) and a few-shot retrieval-grounded VLM (Results in Engineering 2026). Their claims have not been checked on a leak-free split.
+- *Box-prompted SAM masks for defects*: Boxes2Pixels (arXiv 2604.11162) trains segmentation, including on a wind-turbine benchmark. This is close to our closed SAM 2.1 refinement, so it is not pursued.
+
+**Hypotheses** (each has a cheap gate; a detector run is made only if its gate passes; every bar is fixed now):
+
+- **H8: learned feature upsampling of frozen DINOv3 features for texture-defined defects.** Our detector reads DINOv3 at stride 16; an encoder-agnostic learned upsampler (AnyUp, `torch.hub` `wimmerth/anyup`, the paper model) could restore the fine texture that separates craze, crack and hide_craze from blade surface. This would be the first detection use of these upsamplers.
+  - *Gate G8 (CPU, no detector training)*, `tools/dense_probe.py`: a dense linear probe (multinomial logistic regression, 7 outputs = 6 classes + background) on DINOv3 ViT-B last-layer features at stride 4 (160 × 160 at 640 px). Pixel targets are box unions (the smallest covering box decides the class). It is trained on the class-matched 25% subset (256 background and 256 defect pixels sampled per image) and scored on the test split by per-class pixel AP, pooled over images, with a 1,000-replicate scene bootstrap; val is reported for direction.
+  - Arms: *bilinear* (standard upsampling, the control) and *AnyUp*.
+  - **G8 passes** if AnyUp − bilinear mean pixel AP over the 6 classes is ≥ +0.02 with P(>0) ≥ 0.95, the mean over the weak classes (craze, crack, hide_craze) is positive, and val agrees in direction. If it passes, H8 becomes a detector change (AnyUp features fused at the stride-8 level) with its own pre-registration.
+- **H9: high-frequency texture cues on top of foundation features.** Retrofits the crack-detection frequency branches to blades, but tests whether they add anything *beyond* DINOv3, which those papers never did.
+  - *Gate G9* uses the same probe. Arm *bilinear + HF* adds 7 hand-crafted high-frequency channels to the bilinear features: |difference of Gaussians| at σ = 1, 2, 4, gradient magnitude at σ = 1, 2, 4, and local standard deviation (5 × 5), on the grey 640 px image, average-pooled to stride 4 and standardised.
+  - **G9 passes** if (bilinear + HF) − bilinear mean pixel AP over craze, crack and hide_craze is ≥ +0.02 with P(>0) ≥ 0.95 and val agrees.
+- **H10: few-shot generative synthesis for rare classes, judged under subset luck.** Inpaint thunderstrike and crack into defect-free blade regions with a few-shot diffusion inpainter fitted on the labelled 25% only, against a copy-paste control (pasting real defect crops) and no augmentation, each on 3 random 25% subsets. The new elements: a detection evaluation under scarcity on a leak-free split, and a comparison made across subsets rather than on one draw. Needs a GPU; its design and bar are pre-registered after G8/G9.
+- **H11: does a training-free VLM claim survive a leak-free split?** Re-test the knowledge-augmented VLM inspection of arXiv 2510.22868 on WTBD-group test. This is a measurement, like item 4; it needs a GPU.
+- **H12: do foundation features reduce subset luck?** The 8 random draws span 0.090–0.196 with DINOv3 ViT-B. The same 8 draws trained without DINOv3 would show whether stronger features shrink the dependence on which scenes are labelled. This is a measurement that sharpens the main methodological finding: 8 Kaggle runs of the cheaper no-DINOv3 model.
+
+**Order:** G8 and G9 now, on CPU after the H5 evaluation finishes (the machine has 7 GB). H12 runs are cheap and can go to Kaggle in parallel. H10 and H11 follow.
+
 ---
 
 ## 25. Engineering problems solved
