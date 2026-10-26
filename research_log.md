@@ -1857,6 +1857,8 @@ H5 is the only method candidate left, and its first result is fragile: test regi
 
 Val best is the best epoch in `results.csv` by fitness (0.1 × mAP50 + 0.9 × mAP50-95); the final validation of `best.pt` can differ slightly. Since Phase 19 the retired runs (everything before WTBD) keep only `results.csv`, `args.yaml` and test metrics, in `runs/analysis/archive/run_<name>/`; their weights were deleted.
 
+**Cleanup of 26 Oct:** 44 more runs whose results are logged were archived the same way (`runs/analysis/archive/run_<name>/`: `results.csv`, `args.yaml`, `bladeyolo_options.json`, `reward_stats.csv`, test metrics; list in `runs/analysis/archive/archived_26oct.txt`), and their weights and plots deleted (17 GB). Their test predictions stay cached under `runs/analysis/` (`bootstrap/*/preds`, `transfer/`, `openvocab/`), so every logged bootstrap result can be recomputed without the weights; tools that read `results.csv` from `runs/detect/...` (e.g. `tools/subset_properties.py`) must be pointed at the archive. Weights kept for 14 runs: the 12 H5 runs (WTBD baselines and reward runs s0–s3, WTBlade-group baselines and reward runs s0/s1) and the two 100% reference detectors `bladeyolo2_wtbd_group` and `yolo12l_wtbd_group`.
+
 ---
 
 ## 28. Datasets and artefacts
