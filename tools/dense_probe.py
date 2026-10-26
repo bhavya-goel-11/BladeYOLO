@@ -10,7 +10,8 @@ logistic regression (C = 1, standardised features), trained on the class-matched
 256 defect pixels sampled per image. Score: per-class pixel AP on test (and val), pooled over images, from per-image
 score histograms (1,000 bins of log-probability), with a scene bootstrap. Decision rules in research_log.md (Phase 29).
 
-  .venv/bin/python tools/dense_probe.py  -> runs/analysis/dense_probe/{report.md, report.json}
+  .venv/bin/python tools/dense_probe.py [--arms bilinear bilinear+hf]  -> runs/analysis/dense_probe/{report.md, report.json}
+Without --arms all three arms run; the AnyUp model is loaded only when the anyup arm is requested.
 """
 
 import csv
@@ -32,7 +33,7 @@ GROUPS = {"test": os.path.join(ROOT, "runs", "analysis", "bootstrap", "wtbd_grou
           "val": os.path.join(ROOT, "runs", "analysis", "bootstrap", "h5_last_val", "groups.csv")}
 CLASSES = ["craze", "corrosion", "surface_injure", "thunderstrike", "crack", "hide_craze"]
 WEAK = [0, 4, 5]
-ARMS = ["bilinear", "anyup", "bilinear+hf"]
+ALL_ARMS = ["bilinear", "anyup", "bilinear+hf"]
 SIDE, STRIDE = 160, 4
 N_BINS, LO = 1000, -20.0
 PER_IMAGE = 256
@@ -87,7 +88,7 @@ def ap_from_hist(h):
 
 
 class Features:
-    def __init__(self):
+    def __init__(self, arms):
         import torch
 
         from models.dino_weights import SIZES, build_dinov3
@@ -96,7 +97,8 @@ class Features:
         self.torch = torch
         self.vit = build_dinov3("b").eval()
         self.blocks = SIZES["b"][3]
-        self.up = torch.hub.load("wimmerth/anyup", "anyup", verbose=False).eval()
+        self.arms = arms
+        self.up = torch.hub.load("wimmerth/anyup", "anyup", verbose=False).eval() if "anyup" in arms else None
         self.mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
         self.std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
 
@@ -111,19 +113,28 @@ class Features:
             y = self.vit.get_intermediate_layers(x, n=self.blocks, reshape=False, norm=True)[-1]  # (1, 1600, 768)
             lr = y.transpose(1, 2).reshape(1, -1, 40, 40)
             bil = torch.nn.functional.interpolate(lr, size=(SIDE, SIDE), mode="bilinear", align_corners=False)
-            any_ = self.up(x, lr, output_size=(SIDE, SIDE), q_chunk_size=256)
+            any_ = self.up(x, lr, output_size=(SIDE, SIDE), q_chunk_size=256) if self.up is not None else None
         flat = lambda t: t[0].permute(1, 2, 0).reshape(SIDE * SIDE, -1).numpy().astype(np.float32)  # noqa: E731
         bil = flat(bil)
         hf = hf_channels(cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255).reshape(SIDE * SIDE, -1)
-        return {"bilinear": bil, "anyup": flat(any_), "bilinear+hf": np.c_[bil, hf.astype(np.float32)]}
+        out = {"bilinear": bil, "bilinear+hf": np.c_[bil, hf.astype(np.float32)]}
+        if any_ is not None:
+            out["anyup"] = flat(any_)
+        return {a: out[a] for a in self.arms}
 
 
 def main():
+    import argparse
+
     from sklearn.linear_model import LogisticRegression
     from sklearn.preprocessing import StandardScaler
 
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--arms", nargs="+", choices=ALL_ARMS, default=ALL_ARMS)
+    args = ap.parse_args()
+    ARMS = ["bilinear"] + [a for a in args.arms if a != "bilinear"]  # the control is always scored
     os.makedirs(OUT, exist_ok=True)
-    feats = Features()
+    feats = Features(ARMS)
     rng = np.random.default_rng(0)
     tr = bc.load_yolo_split(DATA, "train")
     sub = {n.strip() for n in open(SUBSET) if n.strip()}
@@ -168,7 +179,7 @@ def main():
         g = {}
         for r in csv.DictReader(open(GROUPS[split])):
             g.setdefault(r["group"], []).append(os.path.join(DATA, split, "images", r["image"]))
-        groups = [[f for f in v if f in H[ARMS[0]]] for v in g.values()]
+        groups = [[f for f in v if f in H["bilinear"]] for v in g.values()]
         groups = [v for v in groups if v]
         aps = lambda a, fs: np.array([ap_from_hist(h) for h in sum(H[a][f] for f in fs)])  # noqa: E731
         point = {a: aps(a, files) for a in ARMS}
@@ -190,14 +201,17 @@ def main():
         for a, name, cls in (("anyup", "G8: anyup − bilinear", list(range(6))), ("anyup", "G8 weak: anyup − bilinear", WEAK),
                              ("bilinear+hf", "G9: (bilinear+hf) − bilinear, weak", WEAK),
                              ("bilinear+hf", "(bilinear+hf) − bilinear, 6 classes", list(range(6)))):
+            if a not in ARMS:
+                continue
             d = np.nanmean(boot[a][:, cls], 1) - np.nanmean(boot["bilinear"][:, cls], 1)
             v = float(np.nanmean(point[a][cls]) - np.nanmean(point["bilinear"][cls]))
             ci = [float(np.nanpercentile(d, 2.5)), float(np.nanpercentile(d, 97.5))]
             report[split]["differences"][name] = dict(value=v, ci=ci, p_gt_0=float(np.mean(d > 0)))
             lines.append(f"- {name}: {v:+.3f} [{ci[0]:+.3f}, {ci[1]:+.3f}], P(>0) {np.mean(d > 0):.3f}")
         lines.append("")
-    json.dump(report, open(os.path.join(OUT, "report.json"), "w"), indent=2)
-    open(os.path.join(OUT, "report.md"), "w").write("\n".join(lines) + "\n")
+    tag = "" if set(ARMS) == set(ALL_ARMS) else "_" + "_".join(a.replace("+", "") for a in ARMS)
+    json.dump(report, open(os.path.join(OUT, f"report{tag}.json"), "w"), indent=2)
+    open(os.path.join(OUT, f"report{tag}.md"), "w").write("\n".join(lines) + "\n")
     print("\n".join(lines))
 
 
