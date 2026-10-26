@@ -98,7 +98,7 @@ class Features:
         self.vit = build_dinov3("b").eval()
         self.blocks = SIZES["b"][3]
         self.arms = arms
-        self.up = torch.hub.load("wimmerth/anyup", "anyup", verbose=False).eval() if "anyup" in arms else None
+        self.up = torch.hub.load("wimmerth/anyup", "anyup", trust_repo=True, verbose=False).eval() if "anyup" in arms else None
         self.mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
         self.std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
 
