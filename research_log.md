@@ -1841,7 +1841,32 @@ H5 is the only method candidate left, and its first result is fragile: test regi
 
 Housekeeping: a stray `runs/detect/runs/detect/BladeYOLO_WindSurface/smoke_retrieval/` (smoke-test plots from 21 Oct) came from `train.py --test` with a relative weights path, which Ultralytics resolved under its default `runs/detect/`. The test output path is now made absolute (`47a6bfc`); the stray folder and two Kaggle leftovers in `runs/detect/` (`data.yaml`, `train_subset.txt`, pointing to `/kaggle/working`) were deleted.
 
-**G8/G9 status:** the dense probe has not produced output yet (no `runs/analysis/dense_probe/` report; the AnyUp hub repo was never downloaded). It needs to be restarted.
+**G8/G9 status:** the dense probe has not produced output yet (no `runs/analysis/dense_probe/` report; the AnyUp hub repo was never downloaded). Restarted 27 Oct 19:02 (all three arms; log `runs/analysis/dense_probe/run.log`).
+
+### H10: few-shot generated rare-class defects vs matched copy-paste, across 3 subsets. Pre-registered before any run (27 Oct)
+
+**Question.** Does a generative model fitted on a few labelled defects add training signal that pasting those same real defects does not? A naïve "synthesis helps" claim is confounded by the extra images, by where they are placed, and by subset luck (H12: one draw moves mAP50-95 by ±40% of its mean). The design removes all three.
+
+**Matched arms** (`tools/synth_defects.py`, tests `tests/test_synth_defects.py`). Each augmented arm adds the same 96 images to a 25% subset: a labelled image of the subset with one extra box (64 thunderstrike, 32 crack). The plan fixes the target image, class, box size and place, and is committed (`tools/splits/h10_plan_rand{1,2,3}.csv`); only the box content differs between arms.
+- *Placement.* Box size: a real box of that class in the subset, ×0.8–1.2. Place: no overlap (>10%) with the image's boxes, and ≥ 80% of the box on the blade. The blade mask comes from SAM 2.1-t, prompted with a point at each labelled box centre, keeping the largest of its 3 masks. A first version without a blade mask put many boxes on sky and ground. Prompts beside the box let sky in, so they were dropped; the centre prompt sometimes returns only the defect, and then that image just has no free blade area.
+- *paste* (control): the real box the size was drawn from, resized, with an 8% feathered edge.
+- *synth*: Stable Diffusion 1.5 inpainting (`stable-diffusion-v1-5/stable-diffusion-inpainting`) with a rank-16 LoRA on the UNet attention, fitted per subset on that subset's thunderstrike and crack boxes only (1,500 steps, batch 4, lr 1e-4; box masks, random crops, flips and quarter turns; one fixed prompt per class). It inpaints each planned box (30 steps, guidance 7.5, seed 0 + row) and composites it with the same feathered edge.
+- *none*: the existing ViT-B runs on the same draws, `bladeyolo2b_rand{1,2,3}_wtbd_group_f25_s0` (same model, recipe and seed).
+- Training data available to fit: thunderstrike / crack boxes are 12 / 8 (rand1), 25 / 1 (rand2), 35 / 6 (rand3). Crack in rand2 is one-shot.
+- Plans as generated: 96 rows each over 76 / 75 / 61 distinct target images (rand1/2/3; at most 3 rows per image). Of each subset's images, 189/193/189 have masks (all labelled images). On the paste contact sheet nearly every box sits on blade surface; one or two of 16 still touch sky (mask errors).
+- Known mismatch: many WTBD thunderstrike boxes are whole rotors damaged by lightning, at turbine scale. Pasted onto a close-up blade surface, they are semantically odd; the synth arm inherits the same box sizes. Both arms share this, so the comparison stays matched.
+
+**Runs** (Kaggle, `bladeyolo2-l.yaml --dino b`, seed 0, 150 epochs): `bladeyolo2b_{paste,synth}_rand{k}_wtbd_group_f25`, k = 1, 2, 3.
+
+**Decision rule.** Target AP = mean AP50-95 of thunderstrike and crack (test has only 13 thunderstrike and 33 crack boxes, so neither alone has the power). Arm = mean over the 3 subsets; paired scene bootstrap over the 58 test scenes, 1,000 replicates (bootstrap evaluator). **H10 passes** if all of the following hold:
+1. synth − paste target AP ≥ +0.02 with P(>0) ≥ 0.95;
+2. synth − paste all-class mAP50-95 ≥ −0.01 (no harm elsewhere);
+3. the target-AP difference is positive on at least 2 of the 3 subsets;
+4. val agrees in direction (target AP on val from the same evaluator).
+
+Reported, not decisive: per class; synth − none and paste − none (the augmented arms see 1.5× the images per epoch, so these mix augmentation with extra steps); the contact sheets (before | after) of both arms.
+
+**Expected power.** Low. 46 target test boxes and 3 subsets; a real +0.02 may not reach P ≥ 0.95. A failure will be reported with its interval, as "not detected at this power", not as "no effect".
 
 ---
 

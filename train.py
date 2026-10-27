@@ -62,7 +62,8 @@ def parse_args():
                    help="probability of a random quarter turn (with the flips: all 8 orientations); 0 disables")
     p.add_argument("--no-amp", action="store_true", help="train in fp32 (slower; for debugging)")
     p.add_argument("--train-subset", default=None, metavar="LIST",
-                   help="train only on the images named in LIST (e.g. tools/splits/wtbd_group_train_f25.txt)")
+                   help="train only on the images named in LIST (e.g. tools/splits/wtbd_group_train_f25.txt); lines with a "
+                        "'/' are extra images, relative to the project (tools/synth_defects.py)")
     p.add_argument("--ssl", choices=("real", "synthetic"), default=None,
                    help="teacher-student training on unlabelled view pairs (models/view_consistency.py): 'real' = another "
                         "photograph of the surface (different source photo), 'synthetic' = an augmentation of the same "
@@ -133,7 +134,9 @@ def resolve_data(path, train_subset=None):
     os.makedirs(os.path.dirname(out), exist_ok=True)
     if train_subset:
         names = [n.strip() for n in open(train_subset) if n.strip()]
-        imgs = [os.path.join(root, cfg["train"], n) for n in names]
+        # a bare name is a training-split image; a path (e.g. runs/synth/..., tools/synth_defects.py) is relative to
+        # the project, with its label in the sibling labels/ folder
+        imgs = [os.path.join(ROOT_DIR, n) if "/" in n else os.path.join(root, cfg["train"], n) for n in names]
         missing = [p for p in imgs if not os.path.exists(p)]
         if missing:
             raise FileNotFoundError(f"{len(missing)} images of {train_subset} not in the training split, e.g. {missing[0]}")
