@@ -319,7 +319,7 @@ def evaluate_test(weights, data, batch, device, imgsz=640, **info):
             return
     from ultralytics import YOLO
 
-    out = os.path.join(os.path.dirname(os.path.dirname(weights)), "test")
+    out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(weights))), "test")  # relative would nest under runs/detect
     for tta in (False, True):
         print(f"\nTest-split evaluation of {weights} at {imgsz}px{' with test-time augmentation' if tta else ''}")
         try:
