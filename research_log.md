@@ -1810,6 +1810,39 @@ H5 is the only method candidate left, and its first result is fragile: test regi
 
 **Order:** G8 and G9 now, on CPU after the H5 evaluation finishes (the machine has 7 GB). H12 runs are cheap and can go to Kaggle in parallel. H10 and H11 follow.
 
+### H12 result: DINOv3 does not reduce subset luck; draw quality carries over between models (27 Oct)
+
+8 Kaggle runs of `bladeyolo2-l-nodino.yaml` on `tools/splits/wtbd_group_train_f25_rand{1..8}.txt`, seed 0, 150 epochs (`bladeyolo2nodino_rand{k}_wtbd_group_f25`), paired with the ViT-B runs on the same draws (`bladeyolo2b_rand{k}_wtbd_group_f25_s0`). Test mAP50-95 from the bootstrap evaluator (58 test scenes, 1,000 scene resamples), val is the best-epoch val mAP50-95. Script `runs/analysis/bootstrap/h12.py` → `runs/analysis/h12.log`.
+
+| draw | ViT-B test | no DINOv3 test | gain | ViT-B val | no DINOv3 val |
+|---|---|---|---|---|---|
+| rand1 | 0.112 | 0.056 | +0.056 | 0.235 | 0.168 |
+| rand2 | 0.135 | 0.067 | +0.069 | 0.265 | 0.154 |
+| rand3 | 0.118 | 0.046 | +0.072 | 0.211 | 0.097 |
+| rand4 | 0.123 | 0.063 | +0.060 | 0.211 | 0.077 |
+| rand5 | 0.090 | 0.026 | +0.064 | 0.200 | 0.076 |
+| rand6 | 0.100 | 0.056 | +0.044 | 0.172 | 0.086 |
+| rand7 | 0.124 | 0.049 | +0.076 | 0.160 | 0.096 |
+| rand8 | 0.196 | 0.072 | +0.125 | 0.270 | 0.140 |
+
+| | ViT-B | no DINOv3 |
+|---|---|---|
+| test mean | 0.125 | 0.054 |
+| test range (width) | 0.090–0.196 (0.107) | 0.026–0.072 (0.045) |
+| test SD [scene-bootstrap 95% CI] | 0.032 [0.014, 0.066] | 0.014 [0.012, 0.042] |
+| test SD / mean | 0.26 | 0.26 |
+| val mean, SD | 0.216, 0.040 | 0.112, 0.037 |
+
+- **Spread:** SD ratio ViT-B / no DINOv3 = 2.27 [0.59, 3.06], P(<1) 0.18. DINOv3 does not shrink the dependence on which scenes are labelled. In absolute terms the spread is, if anything, larger; relative to the mean it is the same (0.26 for both). On val the absolute SDs are equal (0.040 vs 0.037).
+- **DINOv3 gain is draw-independent:** +0.071 [+0.051, +0.126], P(>0) 1.000, positive on 8/8 draws (+0.044 to +0.125). The low-data advantage of the frozen foundation features (Phase 27) therefore does not depend on a lucky subset.
+- **Draw quality is a property of the draw:** Spearman ρ between the two models' draw rankings is +0.71 on test (p 0.047) and +0.62 on val; rand8 is the best draw and rand5 the worst-or-near-worst for both. Together with H7 (no label-free property predicts it), subset luck is real, model-independent and not removed by stronger features.
+
+**Verdict.** H12 answered: foundation features add a constant multiplicative gain but do not reduce subset luck. Consequence for reporting: any low-label claim on WTBD-group must be made across several labelled subsets, whatever the backbone; a single draw can move test mAP50-95 by ±40% of its mean. The 8 no-DINOv3 runs are archived (metrics kept, weights deleted; test predictions cached in `runs/analysis/bootstrap/seeds_f25/preds/`).
+
+Housekeeping: a stray `runs/detect/runs/detect/BladeYOLO_WindSurface/smoke_retrieval/` (smoke-test plots from 21 Oct) came from `train.py --test` with a relative weights path, which Ultralytics resolved under its default `runs/detect/`. The test output path is now made absolute (`47a6bfc`); the stray folder and two Kaggle leftovers in `runs/detect/` (`data.yaml`, `train_subset.txt`, pointing to `/kaggle/working`) were deleted.
+
+**G8/G9 status:** the dense probe has not produced output yet (no `runs/analysis/dense_probe/` report; the AnyUp hub repo was never downloaded). It needs to be restarted.
+
 ---
 
 ## 25. Engineering problems solved
