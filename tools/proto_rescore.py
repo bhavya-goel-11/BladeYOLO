@@ -7,7 +7,8 @@ Class score q_c = mean of the top-K cosine similarities to class c's labelled bo
 classes with labelled boxes. Rescored confidence = conf^(1 - ALPHA) * p(class of the detection)^ALPHA; the class is
 never changed, and a class without labelled boxes keeps its confidence. ALPHA, K, TAU fixed in research_log.md.
 
-  .venv/bin/python tools/proto_rescore.py  -> runs/analysis/proto_rescore/{report.md, report.json}
+  .venv/bin/python tools/proto_rescore.py [test|val]  -> runs/analysis/proto_rescore/{report.md, report.json}
+Each split is merged into report.json as it finishes (one split per process keeps memory within 7 GB).
 """
 
 import csv
@@ -193,8 +194,9 @@ def main():
     lines = ["# G15: post-hoc DINOv3 prototype rescoring", "",
              f"ALPHA {ALPHA}, K {K}, TAU {TAU}; patch tokens of DINOv3 ViT-B at 640 px. Paired scene bootstrap, "
              "1,000 replicates; family = mean over its models.", ""]
-    report = {}
-    for split in ("test", "val"):
+    rpath = os.path.join(OUT, "report.json")
+    report = json.load(open(rpath)) if os.path.exists(rpath) else {}
+    for split in sys.argv[1:] or ("test", "val"):
         models = {m: s for fam in FAMILIES.values() for m, s in fam.items()} if split == "test" else \
                  {m: FAMILIES["ViT-B"][m] for m in VAL_MODELS}
         ms, files, draws = evaluate(split, models, emb, bank)
@@ -206,26 +208,26 @@ def main():
                                             per={m: dict(orig=list(per[m][0][:2]), resc=list(per[m][1][:2]),
                                                          orig_pc=per[m][0][2].tolist(), resc_pc=per[m][1][2].tolist())
                                                  for m in mods})
-            lines += [f"## {split}: {fam}", "", "| model | mAP50-95 | rescored | rare AP50-95 | rescored |",
-                      "|---|---|---|---|---|"]
-            for m in mods:
-                (a, r, _), (a2, r2, _) = per[m]
-                lines.append(f"| {m} | {a:.3f} | {a2:.3f} | {r:.3f} | {r2:.3f} |")
-            pc_o = np.nanmean([per[m][0][2] for m in mods], 0)
-            pc_r = np.nanmean([per[m][1][2] for m in mods], 0)
-            lines += ["", "per class AP50-95 (family mean), original → rescored: "
-                      + ", ".join(f"{c} {a:.3f} → {b:.3f}" for c, a, b in zip(CLASSES, pc_o, pc_r)), ""]
-            for k, v in ci.items():
-                lines.append(f"- {k}: rescored − original {v['diff']:+.4f} [{v['lo']:+.4f}, {v['hi']:+.4f}], "
-                             f"P(>0) {v['p']:.3f}")
-            lines += [f"- rare AP improved on {up}/{len(mods)} models", ""]
-            print("\n".join(lines[-4:]), flush=True)
-    t, v = report["test ViT-B"], report["val ViT-B (class-matched, 2 seeds)"]
-    passed = (t["ci"]["rare"]["diff"] >= 0.02 and t["ci"]["rare"]["p"] >= 0.95 and t["ci"]["all"]["diff"] >= -0.005
-              and t["improved_rare"] >= 7 and v["ci"]["rare"]["diff"] > 0)
-    lines += [f"**G15 {'passes' if passed else 'fails'}** (rule in research_log.md, Phase 30)."]
+            print(f"{split} {fam}: " + "; ".join(f"{k} {v['diff']:+.4f} [{v['lo']:+.4f}, {v['hi']:+.4f}] P {v['p']:.3f}"
+                                                 for k, v in ci.items()) + f"; rare up {up}/{len(mods)}", flush=True)
+        del ms
+        json.dump(report, open(rpath, "w"), indent=1)
+    for key, r in report.items():
+        lines += [f"## {key}", "", "| model | mAP50-95 | rescored | rare AP50-95 | rescored |", "|---|---|---|---|---|"]
+        for m, v in r["per"].items():
+            lines.append(f"| {m} | {v['orig'][0]:.3f} | {v['resc'][0]:.3f} | {v['orig'][1]:.3f} | {v['resc'][1]:.3f} |")
+        pc_o = np.nanmean([v["orig_pc"] for v in r["per"].values()], 0)
+        pc_r = np.nanmean([v["resc_pc"] for v in r["per"].values()], 0)
+        lines += ["", "per class AP50-95 (family mean), original → rescored: "
+                  + ", ".join(f"{c} {a:.3f} → {b:.3f}" for c, a, b in zip(CLASSES, pc_o, pc_r)), ""]
+        lines += [f"- {k}: rescored − original {v['diff']:+.4f} [{v['lo']:+.4f}, {v['hi']:+.4f}], P(>0) {v['p']:.3f}"
+                  for k, v in r["ci"].items()] + [f"- rare AP improved on {r['improved_rare']}/{r['models']} models", ""]
+    t, v = report.get("test ViT-B"), report.get("val ViT-B (class-matched, 2 seeds)")
+    if t and v:
+        passed = (t["ci"]["rare"]["diff"] >= 0.02 and t["ci"]["rare"]["p"] >= 0.95 and t["ci"]["all"]["diff"] >= -0.005
+                  and t["improved_rare"] >= 7 and v["ci"]["rare"]["diff"] > 0)
+        lines += [f"**G15 {'passes' if passed else 'fails'}** (rule in research_log.md, Phase 30)."]
     open(os.path.join(OUT, "report.md"), "w").write("\n".join(lines) + "\n")
-    json.dump(report, open(os.path.join(OUT, "report.json"), "w"), indent=1)
     print(lines[-1])
 
 

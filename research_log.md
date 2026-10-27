@@ -1910,6 +1910,23 @@ Literature check (27 Oct): SAM 3 (arXiv 2511.16719) reports exemplar prompts on 
 
 **Order:** G15 now (CPU, local, about an hour). H14 is a Kaggle session after the H10 sessions. H13 Stage A starts once access to the SAM 3 weights is granted.
 
+### G15 result: fails the bar; a small, reliable training-free gain (27 Oct)
+
+`tools/proto_rescore.py` → `runs/analysis/proto_rescore/report.md`. The bank holds 1,109 labelled boxes in 745 training images; each model uses only its own subset's boxes. Rescored − original, test (paired scene bootstrap, family = mean over models):
+
+| family | all-class mAP50-95 | rare (thunderstrike, crack) AP50-95 | rare improved |
+|---|---|---|---|
+| ViT-B (10 models) | +0.005 [−0.001, +0.017], P 0.950 | **+0.013** [+0.003, +0.049], P 0.996 | 9/10 |
+| no DINOv3 (10 models) | +0.012 [+0.007, +0.026], P 1.000 | +0.010 [+0.003, +0.034], P 0.999 | 10/10 |
+| val, ViT-B class-matched (2) | −0.005 [−0.015, +0.013] | +0.002 [−0.009, +0.046], P 0.83 | 1/2 |
+
+- ViT-B per class on test (family mean, original → rescored): thunderstrike 0.116 → 0.137, crack 0.071 → 0.076, surface_injure 0.264 → 0.271, hide_craze 0.160 → 0.155, craze and corrosion about unchanged. Nearly all of the rare-class gain is thunderstrike.
+- No DINOv3: every class gains (craze +0.004, corrosion +0.008, surface_injure +0.018, thunderstrike +0.016, crack +0.003, hide_craze +0.022). As expected, the frozen features add more to a detector that has none.
+
+**Verdict.** G15 fails condition 1 (+0.013 < +0.02). Conditions 2 and 3 hold; val is flat (condition 4 only nominally positive, +0.002). The learned prototype head is not pursued. What stands: a parameter-free post-processing step, with settings fixed in advance, gives a small rare-class gain that is reliable on test across 19 of 20 models. Its size is below what we pre-registered as worth a method, and val does not confirm it on the two models that could be checked.
+
+Engineering: the val stage was killed twice by the out-of-memory killer (the ViT-B detector and the DINOv3 embedder together, with about 2.5 GB free). Val predictions are now made in a separate process, and each split is merged into `report.json` as it finishes.
+
 ---
 
 ## 25. Engineering problems solved
