@@ -1904,7 +1904,8 @@ Literature check (27 Oct): SAM 3 (arXiv 2511.16719) reports exemplar prompts on 
     2. it is positive on at least 2 of 3 draws;
     3. val agrees in direction.
   - Reported: the SD across draws in each arm (does guided selection shrink the spread?).
-  - Tooling: `tools/active_select.py`, to be written; it reuses `tools/scene_fractions.py` scenes.
+  - Tooling: `tools/active_select.py` (tests `tests/test_active_select.py`). The scene of every training image (745 images, 224 scenes, `select_scenes.py` grouping) is committed as `tools/splits/wtbd_group_train_scenes.csv`. The start draws `tools/splits/wtbd_group_train_f10_al{1,2,3}.txt` have 76, 78 and 75 images (32, 21 and 29 scenes; seeds 11–13).
+  - Runs: `bladeyolo2nodino_al{k}_wtbd_group_f10`, then `bladeyolo2nodino_al{k}{unc,rnd}_wtbd_group_f25`, all at seed 0 and 150 epochs. The 25% splits are written on Kaggle by `extend` and downloaded with the runs.
 - **H13: SAM 3 for rare-class defects on a leak-free split (Kaggle; measurement first).** Stage A: SAM 3 zero-shot with a text prompt per class, on WTBD-group test, scored by the bootstrap evaluator. It is compared with OWLv2 (item 4) and with BladeYOLO-ViT-B at 25%. Stage B, a few-shot fine-tune on rand1–3, is designed only if Stage A beats OWLv2 on at least one rare class. The checkpoint (`facebook/sam3`) is gated on Hugging Face and needs the user's access.
 
 **Order:** G15 now (CPU, local, about an hour). H14 is a Kaggle session after the H10 sessions. H13 Stage A starts once access to the SAM 3 weights is granted.
