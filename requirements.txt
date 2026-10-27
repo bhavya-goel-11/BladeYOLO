@@ -5,3 +5,5 @@ cloudpickle>=3.1.1    # Ultralytics multi-GPU launcher
 dinov3 @ git+https://github.com/facebookresearch/dinov3.git@6876159a11b4df116f30f667f8c9888617df0751
 kaggle
 safetensors
+diffusers
+peft
