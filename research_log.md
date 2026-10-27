@@ -1766,6 +1766,20 @@ H5 is the only method candidate left, and its first result is fragile: test regi
 
 `runs/analysis/h5r.sh` → `runs/analysis/novel/granularity/h5r_wtbd_4seeds/report.md`. Reward − baseline, mean of 4 seeds, `last.pt` vs `last.pt`: region AP **+0.036 [−0.016, +0.060], P(>0) 0.896**; standard AP50 +0.019 (P 0.928); standard AP50-95 +0.000 (guard holds). Per seed, region AP reward / baseline: s0 0.489 / 0.378, s1 0.493 / 0.446, s2 0.468 / 0.433, s3 0.415 / 0.462. The new seeds average about −0.006: the first +0.081 was an optimistic two-seed estimate. **R1 fails the primary condition (P < 0.95), so by the pre-registered rule H5 is closed.** The remaining reports (val, s2/s3 alone, WTBlade-group R2) are added below when the CPU evaluation finishes; they cannot reopen H5.
 
+**Remaining reports (27 Oct)**, reward − baseline, region AP [95% CI], P(>0); standard AP50-95 in brackets:
+
+| report | region AP | standard AP50-95 |
+|---|---|---|
+| WTBD 4 seeds, val | +0.000 [−0.048, +0.044], P 0.42 | (−0.001) |
+| WTBD s2/s3 only, test | −0.005 [−0.048, +0.046], P 0.50 | (+0.005) |
+| WTBD s2/s3 only, val | −0.010 [−0.057, +0.039], P 0.29 | (−0.002) |
+| **R2: WTBlade-group, test** | **−0.006 [−0.018, +0.012], P 0.22** | (+0.003) |
+| R2: WTBlade-group, val | −0.031 [−0.044, +0.006], P 0.05 | (+0.003) |
+
+- **R2 fails as well:** on WTBlade-group the reward slightly lowers region AP on test and val, with standard AP unchanged.
+- **Final verdict on H5: closed, no effect.** The new seeds and the second dataset show nothing; only the first two WTBD seeds on test ever showed a gain. The reward neither helps nor harms the standard metrics. This is the clearest example in the project of a pre-registered two-seed "pass" that does not replicate.
+- Reports: `runs/analysis/novel/granularity/h5r_*`. The H5 run folders were then archived as in §27: 9 runs (`runs/analysis/archive/archived_27oct.txt`). Weights are kept for 5 reference runs only: `bladeyolo2b_wtbd_group_f25_s0/s1` (the ViT-B 25% baselines for Phase 29), `bladeyolo2b_wtblade_group`, `bladeyolo2_wtbd_group` and `yolo12l_wtbd_group` (1.8 GB in all).
+
 ## Phase 29: new hypotheses after H6 (26 Oct)
 
 **What the data say about where detection fails** (constraints for any new idea):
