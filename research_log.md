@@ -1884,6 +1884,31 @@ Reported, not decisive: per class; synth − none and paste − none (the augmen
 
 **Expected power.** Low. 46 target test boxes and 3 subsets; a real +0.02 may not reach P ≥ 0.95. A failure will be reported with its interval, as "not detected at this power", not as "no effect".
 
+## Phase 30: hypotheses after G8/G9 (27 Oct)
+
+**Diagnosis carried forward.** The feature side is exhausted: AnyUp hurts, high-frequency cues add nothing beyond DINOv3 (G8, G9), and retrieval as an input did not help (H3). What remains is on the label side (few rare-class examples, which subset is labelled) and on the decision side (how the detector scores what it already finds). **Reporting rule from now on:** every verdict states its interval, so a failure reads either as "an effect above X is excluded" or as "the test cannot see effects below X". A result that passes on WTBD-group is replicated on WTBlade-group before it is claimed.
+
+Literature check (27 Oct): SAM 3 (arXiv 2511.16719) reports exemplar prompts on general benchmarks; we found no evaluation on industrial defects. Prototype classification with DINOv2 exists for few-shot detection in satellite imagery (arXiv 2403.05381), where prototypes label proposals inside the detector. We found no work on rescoring a trained detector's outputs with foundation-feature prototypes of its own labelled set. Cold-start active learning for detection is studied (e.g. arXiv 2205.07708), but we found no study that measures it across several initial labelled sets.
+
+- **H15: post-hoc prototype rescoring with frozen DINOv3 (training-free, CPU).** A detector trained on few labels often finds the right region but ranks it poorly against false alarms, and that ranking decides AP. Each detection is embedded by DINOv3 ViT-B: the mean of the last-layer patch tokens inside its box, at 640 px. It is compared with the embeddings of the labelled boxes of the model's own training subset (cosine similarity; class score = mean of the top-3 similarities to that class's boxes; softmax over the 6 classes with τ = 0.05). Rescored confidence = conf^0.5 · p(class of the detection)^0.5. The class is never changed, and a class without labelled boxes keeps its confidence. α = 0.5, k = 3 and τ = 0.05 are fixed now; none is tuned.
+  - *Data:* cached test predictions of 20 trained models with known subsets: ViT-B on rand1–8 and on the class-matched subset (seeds 0, 1), and no-DINOv3 on the same 10 subsets. Tool `tools/proto_rescore.py` → `runs/analysis/proto_rescore/`.
+  - **G15 passes** if, for the 10 ViT-B models (arm = mean over models; paired scene bootstrap, 1,000 replicates), all of the following hold:
+    1. rescored − original mean AP50-95 over thunderstrike and crack ≥ +0.02 with P(>0) ≥ 0.95;
+    2. all-class mAP50-95 ≥ −0.005;
+    3. rare-class AP improves on ≥ 7 of 10 models;
+    4. val agrees in direction for the two class-matched models (the only ViT-B runs whose weights remain).
+  - The no-DINOv3 family is reported separately (secondary: does a detector without DINOv3 gain more?). If G15 passes, the next step is a learned version (prototype head trained jointly), pre-registered separately, with a WTBlade replication.
+- **H14: does detector-guided active learning reduce subset luck? (Kaggle, no-DINOv3 model, which H12 showed has the same relative luck at a third of the cost.)** Start from 3 random scene-level 10% draws. Train on each, then add 15% of the scenes chosen either by the detector's uncertainty (scenes ranked by the mean, over their images, of 1 − the highest detection confidence above 0.05, so images with no confident detection count as uncertain) or at random, and retrain at 25%. That is 3 runs at 10% and 6 runs at 25%.
+  - **H14 passes** if, over the 3 draws (paired scene bootstrap), all of the following hold:
+    1. uncertainty − random test mAP50-95 ≥ +0.02 with P(>0) ≥ 0.95;
+    2. it is positive on at least 2 of 3 draws;
+    3. val agrees in direction.
+  - Reported: the SD across draws in each arm (does guided selection shrink the spread?).
+  - Tooling: `tools/active_select.py`, to be written; it reuses `tools/scene_fractions.py` scenes.
+- **H13: SAM 3 for rare-class defects on a leak-free split (Kaggle; measurement first).** Stage A: SAM 3 zero-shot with a text prompt per class, on WTBD-group test, scored by the bootstrap evaluator. It is compared with OWLv2 (item 4) and with BladeYOLO-ViT-B at 25%. Stage B, a few-shot fine-tune on rand1–3, is designed only if Stage A beats OWLv2 on at least one rare class. The checkpoint (`facebook/sam3`) is gated on Hugging Face and needs the user's access.
+
+**Order:** G15 now (CPU, local, about an hour). H14 is a Kaggle session after the H10 sessions. H13 Stage A starts once access to the SAM 3 weights is granted.
+
 ---
 
 ## 25. Engineering problems solved
