@@ -1841,7 +1841,23 @@ H5 is the only method candidate left, and its first result is fragile: test regi
 
 Housekeeping: a stray `runs/detect/runs/detect/BladeYOLO_WindSurface/smoke_retrieval/` (smoke-test plots from 21 Oct) came from `train.py --test` with a relative weights path, which Ultralytics resolved under its default `runs/detect/`. The test output path is now made absolute (`47a6bfc`); the stray folder and two Kaggle leftovers in `runs/detect/` (`data.yaml`, `train_subset.txt`, pointing to `/kaggle/working`) were deleted.
 
-**G8/G9 status:** the dense probe has not produced output yet (no `runs/analysis/dense_probe/` report; the AnyUp hub repo was never downloaded). Restarted 27 Oct 19:02 (all three arms; log `runs/analysis/dense_probe/run.log`).
+**G8/G9 status:** restarted 27 Oct 19:02 after the first start never got past loading; results below.
+
+### G8 and G9 results: both fail; H8 and H9 closed (27 Oct)
+
+`tools/dense_probe.py`, all three arms, run 27 Oct 19:02–21:15 → `runs/analysis/dense_probe/report.md`. Probe trained on the class-matched 25% subset (189 images, 96,029 pixels); per-class pixel AP at stride 4, scene bootstrap of 1,000 replicates.
+
+| arm | test mean AP (6) | test weak (3) | val mean AP (6) | val weak (3) |
+|---|---|---|---|---|
+| bilinear | 0.203 | 0.164 | 0.226 | 0.204 |
+| AnyUp | 0.144 | 0.118 | 0.206 | 0.190 |
+| bilinear + HF | 0.206 | 0.163 | 0.230 | 0.207 |
+
+- **G8 fails, in the wrong direction.** Test: AnyUp − bilinear = −0.059 [−0.081, −0.008], P(>0) 0.010. Weak classes: −0.046 [−0.099, +0.002]. Val: −0.020 and −0.013, same direction. AnyUp loses most on craze (0.155 → 0.053) and thunderstrike (0.166 → 0.056); only hide_craze gains (+0.017 test, +0.039 val). This is a reliable negative, not a lack of power.
+- **G9 fails as an informative null.** Weak classes, test: (bilinear + HF) − bilinear = −0.001 [−0.006, +0.005], P(>0) 0.354; val +0.003 [−0.005, +0.007]. All 6 classes: +0.003 (test), +0.004 (val). The interval excludes the +0.02 bar by a wide margin. Hand-crafted high-frequency cues add nothing that DINOv3 features do not already carry.
+- **Caveat (not a rescue).** The pixel targets are box unions, not masks. Edge-aligned upsampling (AnyUp's purpose) sharpens features to object boundaries, while the targets fill the whole box. That alone could penalise it, so G8 shows only that AnyUp does not help a box-level task like detection; it is silent on segmentation. The defects' size also matters (median short side 62–148 px at 640): stride-16 features already resolve them, so finer features had little to recover.
+
+**Verdict.** H8 and H9 closed: neither feature-side change is taken to a detector. Together with the earlier closures, the feature side (stronger backbones aside, Phase 27) is not where the remaining error is. That points back to the label side: few examples of the rare classes (H10), and the box-vs-region mismatch of the weak classes.
 
 ### H10: few-shot generated rare-class defects vs matched copy-paste, across 3 subsets. Pre-registered before any run (27 Oct)
 
