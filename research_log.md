@@ -2141,6 +2141,15 @@ Subset-level coverage varies over a narrow range (X 0.738–0.760). Unlike every
 
 If G17 passes, H17 (25% boxes + 75% click-derived boxes vs 25% boxes, on several subsets) is pre-registered separately.
 
+**Result (28 Oct): G17 fails.** Clicks with a pseudo-box at IoU ≥ 0.5: **0.420** (s0 0.422, s1 0.418), against the 0.60 bar. Outputs: `runs/analysis/click_gate/{report.md, clicks.csv}` (`tools/click_gate.py`).
+
+- IoU ≥ 0.75: 0.173; mean IoU 0.439.
+- The detector supplies a box for 62% of clicks. 66.5% of those boxes reach IoU ≥ 0.5; the median-size fallback almost never does (1.6%). Without the fallback: 0.414.
+- Per class, IoU ≥ 0.5: thunderstrike 0.625, surface_injure 0.476, corrosion 0.430, hide_craze 0.394, craze 0.359, crack 0.322.
+- Context, plain pseudo-labels at τ = 0.5: 327/357 boxes, precision 0.676/0.658, ground truth recovered 0.223/0.267.
+
+**Scope check.** Clicks raise recall: 0.41 of the ground truth gets a correct box, against 0.22–0.27 for plain pseudo-labels. Precision does not improve, though: 0.665 for detector boxes chosen by a click, versus 0.66–0.68 at τ = 0.5. So once a click has settled existence and class, the 25% detector still gets the *extent* wrong about a third of the time. That is the same weakness that sank semi-supervision (§21), and this time it is in localisation rather than existence. Training on these boxes would add about 350 correct boxes and 230 wrong ones, the noise mix that already failed. Point-supervised detection is prior art (Point DETR, P2BNet), so a better click-to-box head would not be new either. **H17 is dropped and no runs are made.** One note survives: on these defects the label bottleneck at 25% is box extent, not existence, which agrees with §14 (13–16% extent disagreement). Next: V1.
+
 ### Other directions (proposed, not pre-registered)
 
 - **H17: clicks on many scenes instead of boxes on few.**
@@ -2167,6 +2176,7 @@ If G17 passes, H17 (25% boxes + 75% click-derived boxes vs 25% boxes, on several
 1. G16 on CPU once the H10 scorer has finished. It uses cached data only and takes minutes of compute.
 2. Kaggle in the meantime: H13 stage A (SAM 3).
 3. Then, depending on the results: H16b (4 runs), V1 (RF-DETR at 25% on rand1–3 and the class-matched subset), and G17.
+4. **Status (28 Oct):** G16 holds at the instance level only (H16b not run); G17 fails (H17 dropped). Next: V1.
 
 ---
 
