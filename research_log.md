@@ -2178,6 +2178,24 @@ If G17 passes, H17 (25% boxes + 75% click-derived boxes vs 25% boxes, on several
 3. Then, depending on the results: H16b (4 runs), V1 (RF-DETR at 25% on rand1–3 and the class-matched subset), and G17.
 4. **Status (28 Oct):** G16 holds at the instance level only (H16b not run); G17 fails (H17 dropped). Next: V1.
 
+### V1: RF-DETR as the base detector (Kaggle). Pre-registered before any run (28 Oct)
+
+**Question.** Does a foundation-native detector, fine-tuned end to end, clearly beat BladeYOLO-v2 ViT-B (frozen DINOv3) at 25% on the same subsets and test images?
+
+**Arms.** RF-DETR Medium (`rfdetr[train]==1.11.2`, fine-tuned DINOv2 backbone, 576 px), with the package's default fine-tuning recipe: 100 epochs, lr 1e-4 (encoder 1.5e-4), batch 4 × accumulation 4, EMA, seed 0. The best checkpoint is chosen on our val split by RF-DETR's own val mAP. Subsets: class-matched (`wtbd_group_train_f25.txt`) and rand1–3. Each is paired with the cached ViT-B seed-0 run on the same subset (`bladeyolo2b_wtbd_group_f25_s0`, `bladeyolo2b_rand{1,2,3}_wtbd_group_f25_s0`).
+
+**Scoring.** Test predictions at conf 0.001 go through `tools/bootstrap_ci.py` (scene bootstrap, 2,000 replicates) with mAP50-95 as the metric. Tool `tools/rfdetr_v1.py` (prepare / train / predict on Kaggle; import locally), tests `tests/test_rfdetr_v1.py`.
+
+**"Clearly beats"** (all three must hold):
+- mean RF-DETR − ViT-B mAP50-95 over the 4 subsets ≥ +0.03;
+- positive on ≥ 3 of 4 subsets;
+- pooled bootstrap P(difference ≤ 0) < 0.05.
+
+**Decision.**
+- *If it clearly beats ViT-B:* method work moves to RF-DETR. Semi-supervision (§20–21) and the click gate (G17) are re-checked with the RF-DETR teacher, using cached predictions first.
+- *If it does not:* the frozen-DINOv3 base is defensible, and this becomes a reported baseline row.
+- *Reported, not decisive:* val mAP50-95, per-class AP, and the spread across subsets (does the end-to-end fine-tune reduce subset luck?).
+
 ---
 
 ## 25. Engineering problems solved
