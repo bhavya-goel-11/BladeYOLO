@@ -1927,6 +1927,123 @@ Literature check (27 Oct): SAM 3 (arXiv 2511.16719) reports exemplar prompts on 
 
 Engineering: the val stage was killed twice by the out-of-memory killer (the ViT-B detector and the DINOv3 embedder together, with about 2.5 GB free). Val predictions are now made in a separate process, and each split is merged into `report.json` as it finishes.
 
+## Phase 31: one variable behind the large effects? The coverage hypothesis (proposed 28 Oct)
+
+**Why.** Thirty phases have closed most single-mechanism ideas: the feature side (G8, G9, H3), the label side (semi-supervision, H5), the decision side (G15, SAM refinement) and real views (H1, H4). The largest effect measured is also unexplained: which 25% of the scenes is labelled moves test mAP50-95 by a factor of 2 (0.090–0.196 over 8 random draws, H6 robustness round), more than DINOv3 does (+0.071, H12), and no property of a subset predicts it (H7). Each of the other large effects in this log can be read as one quantity, **how close a test defect is, in foundation-feature space, to a labelled defect of its class**:
+- Leakage: a test image with a train twin is at proximity ≈ 1, and the published split inflates mAP50 by +0.29 (§11).
+- Transfer: a detector trained on one blade dataset finds 5–9% of what the in-domain detector finds on the other (item 5).
+- Rare classes: thunderstrike AP50-95 goes from 0.08 (class-matched subset) to 0.34 (cover), while box counts do not predict subset quality (H7).
+- The closed priors: retrieval as an input (H3) and prototype rescoring (G15) hand the detector exactly this information, and gain little. That is expected if the trained detector already behaves like a proximity function.
+
+H7 measured every subset property against the training pool, never against the scenes the detector is tested on. That link is untested.
+
+**H16 (coverage hypothesis).** In low-label detection, whether a held-out defect is detected is governed by its proximity, in frozen DINOv3 space, to the nearest labelled defect of its class. Subset luck is the variation of that coverage between draws. Testable consequences:
+- (a) Instance level: for the same test defect across subsets, closer exemplars give a higher detection score, beyond the number of exemplars.
+- (b) Subset level: coverage of the test set predicts subset quality, including within random draws, where all nine pool properties of H7 failed.
+- (c) A label-free selector that targets the deployment images (transductive) beats pool coverage (cover) and FreeSel.
+
+**Literature check (28 Oct).**
+
+| work | relation |
+|---|---|
+| Feldman & Zhang, *What neural networks memorize and why* (NeurIPS 2020, arXiv 2008.03703) | Long-tail theory: rare test examples are got right through memorised similar training examples, measured by subsampled influence. Classification only; closest theory |
+| TFA (Wang et al., ICML 2020, arXiv 2003.06957); VFA (arXiv 2301.13411); RF100-VL (arXiv 2505.20612) | Few-shot detection results vary strongly with the sampled shots; TFA re-ran over multiple sample groups, VFA models support-set variance, RF100-VL reports seed variance. None explains which sample sets are good |
+| Transductive experimental design (Yu et al., ICML 2006); ITL (Hübotter et al., NeurIPS 2024, arXiv 2402.15441) | Select examples informative about a known target set. Classification fine-tuning (MNIST, CIFAR-100), not detection |
+| FreeSel, OFDS (2412.10032), foundation-assisted AL (2607.16671) | Cold-start selection for detection; targets the unlabelled pool, not the deployment set |
+| BoS (ICLR 2024, arXiv 2403.13803), PCR (arXiv 2508.12082) | Label-free performance estimation for detectors from the model's outputs, not from proximity to labelled data |
+| Data attribution for detectors | None found (searches 28 Oct) |
+
+**What would be new:**
+- an instance-level law for detection, measured across many labelled subsets of one benchmark (about 50 trained models with known subsets already exist here);
+- an explanation of subset luck where pool statistics failed;
+- the link to leakage and transfer;
+- a deployment-targeted selector whose gain is pre-registered.
+
+The idea that test items similar to training items are predicted well is folklore. The claim stands or falls on how well it predicts.
+
+### G16: the coverage gate (CPU, cached data only). Pre-registered before computing (28 Oct)
+
+**Data.**
+- Cached test predictions of ViT-B models on 16 subsets: 18 models (class-matched s0/s1, rand1–8, cover s0/s1, cover_k1, cover_k2, FreeSel-224 s0/s1, FreeSel-640 s0/s1).
+- Cached test predictions of no-DINOv3 models on 9 subsets: 10 models (class-matched s0/s1, rand1–8).
+- Models sharing a subset are averaged.
+- Embeddings are DINOv3 ViT-B last-layer patch tokens at 640 px: G15's cached test and val maps and its bank of training-box embeddings. A box embedding is the mean of the tokens inside the box, L2-normalised.
+
+**Quantities.**
+- x(b, S): proximity of test box b to subset S, the highest cosine similarity between b and any labelled box of b's class in S. It is undefined if S has no box of that class.
+- y(b, m): the highest confidence among model m's predictions of b's class with IoU ≥ 0.5 to b; 0 if there is none.
+- n(c, S): the number of labelled boxes of class c in S.
+
+**Conditions.**
+1. *Instance-level law (decides whether H16 holds).*
+   - Fit: least squares of y on x and log(1 + n), with test-box and subset fixed effects. Pairs where x is undefined are left out.
+   - Pass: the coefficient of x is positive with P(>0) ≥ 0.95 under a 1,000-replicate cluster bootstrap over the 58 test scene groups. This must hold in the ViT-B family and, separately, in the no-DINOv3 family.
+2. *Subset luck explained.* Subset coverage X(S) is the mean over the 6 classes of the mean x(b, S) over that class's test boxes, with x = 0 where undefined. Spearman ρ between X(S) and test mAP50-95 (bootstrap evaluator, full test set) must meet all of:
+   - ≥ 0.6 over the 16 ViT-B subsets, with permutation p < 0.05;
+   - ≥ 0.5 within the 8 random draws, for ViT-B and for no-DINOv3;
+   - on val (val boxes, best-epoch val mAP50-95), the same sign and ≥ 0.4 over the 16 subsets.
+
+   This is H7's bar; the best pool property there reached +0.31 within random draws.
+3. *A label-free proxy exists (decides whether H16b runs).* Transductive coverage T(S) is the cover objective with the training pool replaced by the unlabelled test images:
+   - 128 random patches per test image (seed 0), clustered by k-means into 1,024 centroids (seed 0);
+   - T(S) = the mean over centroids of the highest cosine to any of the subset's training patches (128 per image).
+
+   Spearman ρ with test mAP50-95 must be ≥ 0.6 over the 16 subsets (p < 0.05) and ≥ 0.5 within the 8 random draws. On val (target = val images) it must have the same sign and be ≥ 0.4.
+
+**Reported, not decisive:**
+- the top-3 mean instead of the maximum;
+- class-agnostic and region-found outcomes;
+- detection when the class is absent from the subset;
+- the law along the nested ViT-S curve (25 / 50 / 100%);
+- proximity of the official-split test boxes to the official train set, against their inflation.
+
+**Verdict.**
+- H16 holds if condition 1 passes in both families.
+- H16 explains subset luck if condition 2 passes.
+- H16b runs only if condition 3 passes. If 1 and 2 pass but 3 fails, the selector needs a defect-focused proxy, designed and pre-registered separately.
+
+### H16b: deployment-targeted scene selection (Kaggle; run only if G16 condition 3 passes). Pre-registered now
+
+**Selector.** `tools/select_scenes.py`'s greedy whole-scene coverage, with the 1,024 target centroids taken from the unlabelled test images (*trans-test*) or the unlabelled val images (*trans-val*). It uses k-means seeds 0 and 1, selects 189 images (at most 5% over) and uses no labels.
+
+**Runs.** ViT-B, seed 0, 150 epochs: 4 runs. The baselines already exist: cover (4 runs), FreeSel (4), random (8), class-matched (2).
+
+**Passes if** all of the following hold:
+1. trans-test family − cover family ≥ +0.02 test mAP50-95 with P(>0) ≥ 0.95 (paired scene bootstrap);
+2. the trans-val family is above the cover family on val (best-epoch val mAP50-95, the split it targets);
+3. both trans families are above the random family on their own target split.
+
+Cross-target results (trans-test on val, trans-val on test) are reported. They separate "targeting this deployment set" from "a better selector in general".
+
+**Framing.** This is transductive, like active learning with a known target set: the unlabelled images of a new inspection campaign exist before anything is labelled. No test label is used.
+
+### Other directions (proposed, not pre-registered)
+
+- **H17: clicks on many scenes instead of boxes on few.**
+  - Evidence: labelled scenes are what pay (§17, H6). Box extent is the least reliable part of the labels (13–16% disagreement on identical images, §14). At 25%, misses are as common as near-misses (§21), and class confusion is rare.
+  - Proposal: one click per defect on the other 75% of the scenes, with the box drawn by the 25% detector (its highest-scoring box of the clicked class that contains the click). Plain pseudo-labelling failed on existence (66% precision at τ = 0.5, §21); a click settles existence and class, and the detector only supplies extent.
+  - Prior art: mixing points and boxes under a budget is known (UFO², arXiv 2010.10804: about 3.9 point-labelled images per box; Point DETR, arXiv 2104.07434).
+  - New here: amorphous defects whose extent is a convention anyway, scored under subset luck.
+  - *Gate G17 (CPU):*
+    - Setup: the kept class-matched ViT-B models predict the 556 images outside the subset, and one click per ground-truth box is simulated (uniform inside the box).
+    - Pseudo-box: the highest-confidence prediction of the clicked class containing the click (conf ≥ 0.05). Without one, a box of the class's median size centred on the click.
+    - Pass: ≥ 60% of clicks yield a pseudo-box with IoU ≥ 0.5.
+- **V1: a foundation-native detector as the base (validity, not novelty).**
+  - Candidates: RF-DETR (fine-tuned DINOv2 backbone; state of the art on RF100-VL), DEIMv2 (DINOv3 backbones, arXiv 2509.20787) and SAM 3 (H13).
+  - FT-FSOD (CVPR 2026, arXiv 2603.28182) reports that fine-tuning decides cross-domain few-shot detection: RF100-VL 10-shot 41.9 against SAM 3's 35.7. Every run here kept DINOv3 frozen.
+  - If one of these clearly beats BladeYOLO-v2 ViT-B at 25%, method work should move to it, and the label-side methods that failed with a weak teacher should be re-checked on it.
+- **R1 (high risk): transfer between blade datasets.**
+  - If G16 holds, its cross-dataset proximity separates two explanations of the transfer failure: distance in appearance (which coverage can fix) or annotation convention (which it cannot).
+  - Method idea: a detector conditioned on a dataset (convention) token, calibrated on a few boxes of a new dataset.
+  - Multi-dataset detectors with dataset-specific heads exist; few-shot convention calibration is not known to us.
+  - Needs at least 3 leak-free datasets. Only after G16.
+- **H14 deferred.** At cold start with a weak model, uncertainty sampling usually loses to random (TypiClust). If G16 passes, the deployment-targeted selector replaces its uncertainty arm.
+
+**Order.**
+1. G16 on CPU once the H10 scorer has finished. It uses cached data only and takes minutes of compute.
+2. Kaggle in the meantime: H13 stage A (SAM 3).
+3. Then, depending on the results: H16b (4 runs), V1 (RF-DETR at 25% on rand1–3 and the class-matched subset), and G17.
+
 ---
 
 ## 25. Engineering problems solved
