@@ -1884,6 +1884,51 @@ Reported, not decisive: per class; synth − none and paste − none (the augmen
 
 **Expected power.** Low. 46 target test boxes and 3 subsets; a real +0.02 may not reach P ≥ 0.95. A failure will be reported with its interval, as "not detected at this power", not as "no effect".
 
+### H10 result: generated defects fail; matched copy-paste helps (28 Oct)
+
+Runs (Kaggle, ViT-B, seed 0, 150 epochs): `bladeyolo2b_{paste,synth}_rand{1,2,3}_wtbd_group_f25`.
+
+**Integrity** (`runs/analysis/bootstrap/h10_integrity.py`):
+- All 6 arms have 96 images and 96 labels each.
+- Each train list is exactly its subset plus the generated images, in plan order.
+- Every generated label is the source labels plus the planned box.
+- Pixels outside the box are unchanged (mean difference ≤ 0.47).
+- All three LoRA fits ran 1,500 finite steps.
+- `synth_rand3` stopped early at epoch 142 (best epoch 42, patience 100).
+
+**Defects of the synth arm itself:**
+- 19 of 288 synth boxes (7%) are almost unchanged (mean pixel change < 5), so they are labels on clean surface. The worst case is rand2 crack, 7 of 32.
+- The generated thunderstrikes repeat one memorised burn shape.
+- The generated cracks come out as dark smears.
+
+Scored with `runs/analysis/bootstrap/h10.py` → `runs/analysis/h10.log`: bootstrap evaluator, 1,000 scene replicates. Target AP is the mean AP50-95 of thunderstrike and crack.
+
+| test | target AP (rand1 / 2 / 3, mean) | mAP50-95 (mean) |
+|---|---|---|
+| synth | 0.139 / 0.111 / 0.039, **0.096** | 0.134 |
+| paste | 0.156 / 0.210 / 0.128, **0.164** | 0.159 |
+| none | 0.079 / 0.081 / 0.099, **0.086** | 0.122 |
+
+| comparison | target AP [95% CI], P(>0); per subset | mAP50-95 [95% CI], P(>0) |
+|---|---|---|
+| **synth − paste (primary)** | **−0.068 [−0.123, +0.109], 0.16**; −0.017 −0.098 −0.089 | −0.025 [−0.086, +0.032], 0.11 |
+| synth − none | +0.010 [−0.026, +0.126], 0.68; +0.060 +0.030 −0.060 | +0.012 [−0.014, +0.048], 0.85 |
+| **paste − none** | **+0.078 [+0.000, +0.110], 0.975**; +0.077 +0.128 +0.029 | **+0.037 [+0.011, +0.081], 0.999** |
+| val: synth − paste | −0.050 [−0.106, +0.007], 0.048; +0.002 −0.126 −0.025 | −0.009 [−0.030, +0.015], 0.20 |
+
+**Verdict: H10 fails.** All four conditions fail. Generated defects are worse than pasting the same real defects, on test and on val, on all 3 subsets on test, and on 2 of 3 on val. Synthesis is discarded.
+
+**Scope check (what survives).** Matched copy-paste of the subset's own thunderstrike and crack boxes onto blade-masked places beats no augmentation:
+- target AP +0.078, positive on all 3 subsets;
+- all-class mAP50-95 +0.037 [+0.011, +0.081], about +30%.
+
+Caveats:
+- The augmented arms train on 285 instead of 189 images, so they take 1.5× the steps per epoch.
+- The "none" arm has no val predictions (its weights are archived).
+- Copy-paste is known (Simple Copy-Paste, Ghiasi et al., CVPR 2021), so this is a recipe gain, not a contribution. It is noted for later recipes. No further runs are spent on it.
+
+The 6 runs are archived (`runs/analysis/archive/archived_28oct_h10.txt`); test and val predictions are cached.
+
 ## Phase 30: hypotheses after G8/G9 (27 Oct)
 
 **Diagnosis carried forward.** The feature side is exhausted: AnyUp hurts, high-frequency cues add nothing beyond DINOv3 (G8, G9), and retrieval as an input did not help (H3). What remains is on the label side (few rare-class examples, which subset is labelled) and on the decision side (how the detector scores what it already finds). **Reporting rule from now on:** every verdict states its interval, so a failure reads either as "an effect above X is excluded" or as "the test cannot see effects below X". A result that passes on WTBD-group is replicated on WTBlade-group before it is claimed.
@@ -1952,6 +1997,24 @@ H7 measured every subset property against the training pool, never against the s
 | FreeSel, OFDS (2412.10032), foundation-assisted AL (2607.16671) | Cold-start selection for detection; targets the unlabelled pool, not the deployment set |
 | BoS (ICLR 2024, arXiv 2403.13803), PCR (arXiv 2508.12082) | Label-free performance estimation for detectors from the model's outputs, not from proximity to labelled data |
 | Data attribution for detectors | None found (searches 28 Oct) |
+
+**Two new blade papers (read 28 Oct; PDFs at the repo root).**
+- **KGP-YOLO** (Li et al., *IEEE Sensors J.* 26(2), Jan 2026; `11290107.pdf`).
+  - Method: a keypoint network locates the blade in 1920 × 1080 UAV frames and crops it into 4 blocks; YOLOv11 with BiFormer routing attention then detects defects in the blocks.
+  - Results: 87.3 / 92.4 / 88.5 mAP50 on SY-PLUS / DTU / Blade30.
+  - Protocol: each dataset is augmented (flips, brightness, saturation) *before* the train/val/test split, e.g. DTU goes from 130 images to 780, split 624/78/78. Results are single runs.
+- **GA-YOLOv5 + Unity synthetic data** (Zhang et al., *IEEE Trans. Ind. Appl.* 61(1), 2025; `10717455.pdf`).
+  - Data: 432 annotated DTU NordTank images (3 classes), doubled by CLAHE copies, with a random 60/40 split of a dataset that holds repeated 2017/2018 shots of the same turbine.
+  - Results: a genetic search over 30 hyperparameters adds +0.040 mAP50. Rendered Unity images add up to +0.022, with the best of six amounts read off the test set.
+  - Protocol: single runs.
+
+**How they bear on this programme:**
+1. They add two more cases of the protocol §4 and §11 measured: augmentation or duplication before a random split, single runs, no intervals. This strengthens the leakage and rigour finding.
+2. Their gains (+0.02–0.04 mAP50) are smaller than the seed noise measured here at 25% (±0.026 mAP50, §21) and far smaller than subset luck.
+3. KGP-YOLO's blade cropping answers a small-defect problem in 1080p whole-blade frames. WTBD's defects are not small (median short side 62–148 px at 640, §29), so it does not change the WTBD direction. It could matter for WTBlade-type frames.
+4. Synthetic data: H10 found that generated defects lose to pasting the same real defects. That fits the coverage hypothesis below, since rendered or generated defects are far from real test defects.
+
+The direction is unchanged.
 
 **What would be new:**
 - an instance-level law for detection, measured across many labelled subsets of one benchmark (about 50 trained models with known subsets already exist here);
@@ -2269,5 +2332,6 @@ Everything retired is restorable from commit `b374f4c`.
 - **Testing:** tests and analyses run in the project's own `.venv`, with outputs under `runs/` and never `/tmp` ("research projects can have their own testing environments").
 - **NaN handling:** fix the root cause. Batches are only dropped by the guard as a last line of defence, logged and reported.
 - **Selection and reporting:** model selection on val, results reported on test. Never tune on test.
+- **Failed hypotheses (from 28 Oct):** after a bad result, run one scope check, i.e. whether any part of the result is usable. If there is none, discard and move to the next hypothesis. No rescue runs.
 - **Git:** push only on request. Commits end with "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>". Datasets, weights, zips and `runs/` are gitignored.
 - **Kaggle:** run long jobs with **Save Version → Save & Run All (Commit)** so `/kaggle/working` survives. Download run folders into `runs/detect/BladeYOLO_WindSurface/`.
