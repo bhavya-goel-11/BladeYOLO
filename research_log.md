@@ -1953,6 +1953,11 @@ Literature check (27 Oct): SAM 3 (arXiv 2511.16719) reports exemplar prompts on 
   - Runs: `bladeyolo2nodino_al{k}_wtbd_group_f10`, then `bladeyolo2nodino_al{k}{unc,rnd}_wtbd_group_f25`, all at seed 0 and 150 epochs. The 25% splits are written on Kaggle by `extend` and downloaded with the runs.
 - **H13: SAM 3 for rare-class defects on a leak-free split (Kaggle; measurement first).** Stage A: SAM 3 zero-shot with a text prompt per class, on WTBD-group test, scored by the bootstrap evaluator. It is compared with OWLv2 (item 4) and with BladeYOLO-ViT-B at 25%. Stage B, a few-shot fine-tune on rand1–3, is designed only if Stage A beats OWLv2 on at least one rare class. The checkpoint (`facebook/sam3`) is gated on Hugging Face; the user has access (28 Oct). Tool `tools/sam3_eval.py`: `predict` on a Kaggle GPU (transformers `Sam3Model`; OWLv2's 18 fixed prompts, which the tool checks are identical; vision encoder once per image; instances with score ≥ 0.01, at most 100 per prompt, pooled per class, NMS at IoU 0.5, top 300 per image), then `score` locally with the bootstrap evaluator against OWLv2 text and the trained ViT-B 25% detector, class-aware and class-agnostic. The report states the Stage B condition.
 
+*H13 update (28 Oct).*
+- **Prior work:** the BladeYOLO paper (§V-G, Fig. 11) already ran SAM 3 zero-shot on blade defects, with and without "expert" text prompts. The analysis was qualitative only, with no numbers. They found redundant boxes, localisation deviations and category confusion, and concluded that the model needs task-specific adaptation.
+- **Stage A** is therefore a measurement, not a hypothesis. It gives the first quantitative, leak-free number for their qualitative claim, and it is the zero-shot row of V1. It runs because it is ready and costs about 30 minutes of GPU.
+- **Stage B** (fine-tuning on our labels) no longer depends on Stage A. It moves into V1, to be decided after G16.
+
 **Order:** G15 now (CPU, local, about an hour). H14 is a Kaggle session after the H10 sessions. H13 Stage A starts once access to the SAM 3 weights is granted.
 
 ### G15 result: fails the bar; a small, reliable training-free gain (27 Oct)
