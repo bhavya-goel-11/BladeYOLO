@@ -2118,6 +2118,29 @@ Subset-level coverage varies over a narrow range (X 0.738–0.760). Unlike every
 
 **Scope check.** What survives is a mechanism-level finding for the paper, with no run attached. Per defect, low-label detection is a proximity function in foundation-feature space, and DINOv3 doubles its slope. The weak subset-level link means subset luck is not just aggregated coverage: it depends on *which* defects are covered. No rescue runs are made (fail-fast rule).
 
+### G17: click gate (CPU). Pre-registered before computing (28 Oct)
+
+**Question.** If an annotator clicks once on each defect of the 556 training images outside the class-matched 25% subset (`tools/splits/wtbd_group_train_f25_rest.txt`, 838 ground-truth boxes), and the click gives location and class, how often can the 25% detector supply a correct box?
+
+**Inputs.**
+- The kept ViT-B class-matched models `bladeyolo2b_wtbd_group_f25_s0/s1` predict the 556 images (conf 0.001, NMS 0.7, as `tools/bootstrap_ci.py`).
+- One click per ground-truth box, drawn uniformly inside the box (seed 0).
+
+**Pseudo-box.**
+- The highest-confidence prediction of the clicked class whose box contains the click, with conf ≥ 0.05.
+- If there is none (fallback), a box of the class's median width and height in the 25% subset, centred on the click and clipped to the image.
+
+**G17 passes** if, averaged over the two models, **≥ 60% of clicks** yield a pseudo-box with IoU ≥ 0.5 to the clicked ground-truth box.
+
+**Reported, not decisive:**
+- the rate per class and per model;
+- the rate without the fallback;
+- mean IoU;
+- AP50-95-style quality (the share at IoU ≥ 0.75);
+- context: plain pseudo-labelling at τ = 0.5 on the same images, i.e. the share of ground truth recovered and the precision.
+
+If G17 passes, H17 (25% boxes + 75% click-derived boxes vs 25% boxes, on several subsets) is pre-registered separately.
+
 ### Other directions (proposed, not pre-registered)
 
 - **H17: clicks on many scenes instead of boxes on few.**
