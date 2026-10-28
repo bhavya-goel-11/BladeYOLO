@@ -2085,6 +2085,39 @@ Cross-target results (trans-test on val, trans-val on test) are reported. They s
 
 **Framing.** This is transductive, like active learning with a known target set: the unlabelled images of a new inspection campaign exist before anything is labelled. No test label is used.
 
+### G16 result: the instance-level law holds; it does not explain subset luck; H16b is not run (28 Oct)
+
+`tools/coverage_gate.py` (tests `tests/test_coverage_gate.py`) → `runs/analysis/coverage_gate/{report.md, pairs.csv, subsets.csv}`. 235 test boxes × 16 ViT-B subsets (3,760 pairs) and × 9 no-DINOv3 subsets (2,115).
+
+**Condition 1, passes.** The fit is box and subset fixed effects with a log(1 + n) covariate; the interval is a cluster bootstrap over the 58 test scenes.
+
+| family | outcome, proximity | coefficient of x [95% CI] | P(>0) |
+|---|---|---|---|
+| ViT-B | class-aware, max (primary) | **+0.770 [+0.448, +0.982]** | 1.000 |
+| ViT-B | class-aware, top-3 mean | +0.974 [+0.620, +1.346] | 1.000 |
+| ViT-B | class-agnostic, max | +0.711 [+0.375, +0.895] | 1.000 |
+| no DINOv3 | class-aware, max (primary) | **+0.376 [+0.176, +0.834]** | 1.000 |
+| no DINOv3 | class-aware, top-3 mean | +0.582 [+0.289, +1.204] | 1.000 |
+| no DINOv3 | class-agnostic, max | +0.321 [+0.152, +0.710] | 1.000 |
+
+The comparison is the same test defect across subsets, with the subset's overall quality and the number of same-class exemplars held fixed. A closer labelled exemplar raises the detection confidence, in both families and for every variant of the statistic. The effect is twice as large with DINOv3 in the detector. This fits the closed priors H3 and G15: the detector already uses proximity in DINOv3 space.
+
+**Conditions 2 and 3 fail.** They are directionally positive but below the bar:
+
+| statistic | ρ test (16 subsets), p | within 8 random draws | ρ val |
+|---|---|---|---|
+| X: test-box coverage (uses labels; explanatory) | +0.43, 0.098 | +0.38 (ViT-B), +0.69 (no DINOv3) | +0.59 |
+| T: transductive patch coverage (label-free) | +0.54, 0.032 | +0.45 (ViT-B) | +0.56 |
+
+Subset-level coverage varies over a narrow range (X 0.738–0.760). Unlike every H7 pool property, both statistics are positive on test, within the random draws and on val. T reaches +0.45 within the random draws, where H7's best was +0.31. Neither meets the pre-registered bar (ρ ≥ 0.6, ≥ 0.5 within the random draws).
+
+**Verdict.**
+- H16 holds at the instance level.
+- It does not explain subset luck at the subset level.
+- By the pre-registered rule, H16b (transductive selection) is **not run**.
+
+**Scope check.** What survives is a mechanism-level finding for the paper, with no run attached. Per defect, low-label detection is a proximity function in foundation-feature space, and DINOv3 doubles its slope. The weak subset-level link means subset luck is not just aggregated coverage: it depends on *which* defects are covered. No rescue runs are made (fail-fast rule).
+
 ### Other directions (proposed, not pre-registered)
 
 - **H17: clicks on many scenes instead of boxes on few.**
