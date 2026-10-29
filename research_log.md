@@ -1958,6 +1958,23 @@ Literature check (27 Oct): SAM 3 (arXiv 2511.16719) reports exemplar prompts on 
 - **Stage A** is therefore a measurement, not a hypothesis. It gives the first quantitative, leak-free number for their qualitative claim, and it is the zero-shot row of V1. It runs because it is ready and costs about 30 minutes of GPU.
 - **Stage B** (fine-tuning on our labels) no longer depends on Stage A. It moves into V1, to be decided after G16.
 
+*H13 Stage A result (29 Oct).*
+- **Run:** Kaggle T4, `transformers` `Sam3Model`, 161 test images, 47,951 boxes, about 18 min. The predictions were fetched from the committed output of the `beegee11/bladeyolo` notebook (`kaggle kernels output`). Report: `runs/analysis/sam3/report.md`.
+- **Class-aware mAP50-95:**
+  - SAM 3 text: **0.042** [0.019, 0.072] (mAP50 0.078).
+  - OWLv2 text: 0.014.
+  - ViT-B 25%: s0 0.099, s1 0.108.
+- **Differences:**
+  - SAM 3 − OWLv2: +0.029 [−0.004, +0.055], P(>0) 0.94.
+  - SAM 3 − ViT-B 25% (mean of the two seeds): about −0.062, interval [−0.189, −0.033].
+- **Per class (AP50-95):** SAM 3 gets nearly all of its score from hide_craze (0.142) and surface_injure (0.091). The other classes are close to zero: craze 0.002, corrosion 0.010, thunderstrike 0.003, crack 0.005.
+- **Class-agnostic mAP50-95:**
+  - SAM 3 0.066, OWLv2 0.025, ViT-B 0.125 / 0.127.
+  - SAM 3 − OWLv2: +0.041 [+0.002, +0.108].
+  - SAM 3 − ViT-B: interval [−0.123, −0.003].
+- **Reading:** this is the first quantitative, leak-free number for BladeYOLO's qualitative SAM 3 claim. Zero-shot SAM 3 beats OWLv2 but stays far below a detector trained on 189 labelled images. Most of the gap is class assignment from text: class-agnostic SAM 3 reaches about half of ViT-B. Everything here agrees with "needs task-specific adaptation".
+- **Stage B condition:** formally met on thunderstrike (0.003 vs 0.001), but both values are effectively zero, so it carries no signal. Stage B is not triggered by Stage A. A SAM 3 fine-tune is decided in V1 only, after RF-DETR.
+
 **Order:** G15 now (CPU, local, about an hour). H14 is a Kaggle session after the H10 sessions. H13 Stage A starts once access to the SAM 3 weights is granted.
 
 ### G15 result: fails the bar; a small, reliable training-free gain (27 Oct)
