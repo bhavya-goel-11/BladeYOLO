@@ -2264,6 +2264,22 @@ If G17 passes, H17 (25% boxes + 75% click-derived boxes vs 25% boxes, on several
 - **Decision.** H17 stays dropped. The semi-supervision recheck is not triggered: detector-box precision 0.651 does not clearly exceed 66%, and τ = 0.5 precision is 0.502.
 - **What survives:** the stronger base mainly sharpens extents (IoU ≥ 0.75 nearly doubles), but at 25% it does not make click-derived labels clean enough.
 
+### G16-R: the proximity law on RF-DETR (CPU). Pre-registered before computing (30 Oct)
+
+**Question.** Does G16's instance-level law (a test defect is detected if a labelled same-class defect is close in frozen DINOv3 ViT-B space) also hold for RF-DETR, which fine-tunes its own DINOv2 backbone end to end? Is the slope flatter than for the frozen-feature model?
+
+**Setup.**
+- Same definitions as G16 condition 1: x = max cosine to the subset's same-class boxes; y = highest same-class confidence at IoU ≥ 0.5; y ~ x + log(1+n) with box and subset fixed effects; cluster bootstrap over the 58 test scenes, 1,000 replicates.
+- Subsets: class-matched and rand1–3, where RF-DETR runs exist. RF-DETR family: `rfdetrm_*`. Comparison: ViT-B seed 0 on the same 4 subsets.
+- Slope difference RF-DETR − ViT-B is computed on the same scene draws.
+- Caveat: the confidence scales differ (sigmoid focal vs YOLO). So the comparison is also reported with y binarised (detected at conf ≥ 0.05).
+
+**Readout.**
+- The law **holds for RF-DETR** if the class-aware slope is positive with P(>0) ≥ 0.95.
+- **Flatter** if the binarised slope difference RF-DETR − ViT-B < 0 with P ≥ 0.95. That would mean end-to-end fine-tuning generalises beyond the labelled neighbours.
+- Reported, not decisive: top-3 proximity, class-agnostic outcome, and the raw-confidence difference.
+- No runs depend on this. It decides whether "detection = proximity to labelled defects" is a detector-independent finding.
+
 ---
 
 ## 25. Engineering problems solved
