@@ -5,8 +5,12 @@ pseudo-box = highest-confidence prediction of the clicked class containing the c
 box of the class's median size in the 25% subset, centred on the click and clipped to the image.
 
   .venv/bin/python tools/click_gate.py  -> runs/analysis/click_gate/{report.md, clicks.csv}
+  .venv/bin/python tools/click_gate.py --models rfdetrm_wtbd_group_f25 --tag rfdetr
+      -> runs/analysis/click_gate/rfdetr/ (V1 recheck; predictions must already be cached in click_gate/preds,
+         see tools/rfdetr_v1.py predict --splits train)
 """
 
+import argparse
 import csv
 import os
 import sys
@@ -46,8 +50,8 @@ def pseudo_box(click, cls, pred, size, img_wh, min_conf=MIN_CONF):
     return np.array([max(x - w / 2, 0), max(y - h / 2, 0), min(x + w / 2, W), min(y + h / 2, H)]), False
 
 
-def main():
-    os.makedirs(OUT, exist_ok=True)
+def main(models=MODELS, out=OUT):
+    os.makedirs(out, exist_ok=True)
     rest = set(open(os.path.join(SPLITS, "wtbd_group_train_f25_rest.txt")).read().split())
     sub = set(open(os.path.join(SPLITS, "wtbd_group_train_f25.txt")).read().split())
     tr = bc.load_yolo_split(DATA, "train")
@@ -57,7 +61,7 @@ def main():
     print(f"{len(imgs)} images, {sum(len(v['gt']) for v in imgs.values())} boxes", flush=True)
 
     rows, ctx = [], []
-    for m in MODELS:
+    for m in models:
         pred = bc.predict(os.path.join(RUNS, m), imgs, os.path.join(OUT, "preds"), batch=2)
         rng = np.random.default_rng(0)
         hit_gt = 0
@@ -78,7 +82,7 @@ def main():
                 n_correct += int((iou.max(1) >= 0.5).sum())
                 hit_gt += int((iou.max(0) >= 0.5).sum())
         ctx.append((m, n_conf, n_correct, hit_gt))
-    with open(os.path.join(OUT, "clicks.csv"), "w", newline="") as fh:
+    with open(os.path.join(out, "clicks.csv"), "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=list(rows[0]))
         w.writeheader()
         w.writerows(rows)
@@ -87,12 +91,13 @@ def main():
     det = np.array([r["from_detector"] for r in rows])
     mod = np.array([r["model"] for r in rows])
     cls = np.array([r["cls"] for r in rows])
-    per_model = [float((iou[mod == m] >= 0.5).mean()) for m in MODELS]
+    per_model = [float((iou[mod == m] >= 0.5).mean()) for m in models]
     rate = float(np.mean(per_model))
-    n_gt = int((mod == MODELS[0]).sum())
+    n_gt = int((mod == models[0]).sum())
     lines = ["# G17: click gate (pre-registered, research_log.md Phase 31)", "",
              f"{len(imgs)} images outside the class-matched 25% subset, {n_gt} ground-truth boxes, one click each.", "",
-             f"**Clicks with a pseudo-box at IoU ≥ 0.5: {rate:.3f}** (s0 {per_model[0]:.3f}, s1 {per_model[1]:.3f}); "
+             f"**Clicks with a pseudo-box at IoU ≥ 0.5: {rate:.3f}** ("
+             + ", ".join(f"{m} {r:.3f}" for m, r in zip(models, per_model)) + "); "
              f"bar {PASS:.2f} → G17 {'**passes**' if rate >= PASS else 'fails'}.", "",
              f"- IoU ≥ 0.75: {(iou >= 0.75).mean():.3f}; mean IoU {iou.mean():.3f}",
              f"- box from the detector: {det.mean():.3f} of clicks; IoU ≥ 0.5 among those {(iou[det] >= 0.5).mean():.3f}, "
@@ -104,11 +109,15 @@ def main():
     lines += ["", "| class | clicks per model | IoU ≥ 0.5 | IoU ≥ 0.75 | from detector |", "|---|---|---|---|---|"]
     for c in CLASSES:
         s = cls == c
-        lines.append(f"| {c} | {s.sum() // len(MODELS)} | {(iou[s] >= 0.5).mean():.3f} | {(iou[s] >= 0.75).mean():.3f} | "
+        lines.append(f"| {c} | {s.sum() // len(models)} | {(iou[s] >= 0.5).mean():.3f} | {(iou[s] >= 0.75).mean():.3f} | "
                      f"{det[s].mean():.3f} |")
-    open(os.path.join(OUT, "report.md"), "w").write("\n".join(lines) + "\n")
+    open(os.path.join(out, "report.md"), "w").write("\n".join(lines) + "\n")
     print("\n".join(lines))
 
 
 if __name__ == "__main__":
-    main()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--models", nargs="+", default=MODELS)
+    ap.add_argument("--tag", default="", help="write to runs/analysis/click_gate/<tag>/ instead")
+    a = ap.parse_args()
+    main(a.models, os.path.join(OUT, a.tag) if a.tag else OUT)

@@ -2252,6 +2252,18 @@ If G17 passes, H17 (25% boxes + 75% click-derived boxes vs 25% boxes, on several
 - **Decision (pre-registered):** method work moves to RF-DETR. First, G17 (click → box) is re-checked with the RF-DETR class-matched teacher, using the same rule and bar as before. Semi-supervision is re-checked only if the box precision clearly exceeds 66%.
 - **Paper:** RF-DETR at 25% becomes the base row. The frozen-DINOv3 YOLO is a baseline. BladeYOLO's claims are compared on the same leak-free split.
 
+**G17 recheck with the RF-DETR teacher (29 Oct): still fails.**
+- RF-DETR class-matched predictions on the 745 training images were made locally on CPU from the recovered checkpoint, in a separate project venv `.venv-rfdetr` (rfdetr 1.11.2, transformers 5.22, torch 2.15 CPU). That took about 6 min; 6,980 no-object boxes were dropped.
+- `tools/click_gate.py --models rfdetrm_wtbd_group_f25 --tag rfdetr` → `runs/analysis/click_gate/rfdetr/report.md`. Same rule and bar as before.
+- **Clicks with a pseudo-box at IoU ≥ 0.5: 0.519** (ViT-B 0.420; bar 0.60).
+  - IoU ≥ 0.75: 0.327 (ViT-B 0.173). Mean IoU 0.519.
+  - The detector supplies a box for 79% of clicks; 65.1% of those boxes are correct (ViT-B 66.5%).
+  - Per class: thunderstrike 0.804, surface_injure 0.589, craze 0.511, crack 0.492, hide_craze 0.444, corrosion 0.430.
+  - Plain pseudo-labels at τ = 0.5: precision 0.502, ground truth recovered 0.288.
+- **Scope check (diagnostic, not a gate).** The upper bound picks the best-IoU candidate among the conf ≥ 0.05 boxes containing the click. Same class: 0.661 (ViT-B 0.483). Any class, with the class taken from the click: 0.735 (ViT-B 0.556). Even a perfect same-class selector would only just clear the bar, and a realistic one would land below it. Training would still see roughly 35–45% wrong boxes, and point-supervised detection is prior art.
+- **Decision.** H17 stays dropped. The semi-supervision recheck is not triggered: detector-box precision 0.651 does not clearly exceed 66%, and τ = 0.5 precision is 0.502.
+- **What survives:** the stronger base mainly sharpens extents (IoU ≥ 0.75 nearly doubles), but at 25% it does not make click-derived labels clean enough.
+
 ---
 
 ## 25. Engineering problems solved
