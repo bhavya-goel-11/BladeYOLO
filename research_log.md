@@ -2280,6 +2280,25 @@ If G17 passes, H17 (25% boxes + 75% click-derived boxes vs 25% boxes, on several
 - Reported, not decisive: top-3 proximity, class-agnostic outcome, and the raw-confidence difference.
 - No runs depend on this. It decides whether "detection = proximity to labelled defects" is a detector-independent finding.
 
+**Result (30 Oct): the law holds for RF-DETR's confidence, but no longer for whether a defect is found at all.** Report: `runs/analysis/coverage_gate/rfdetr/report.md` (`tools/coverage_gate.py rfdetr`). 235 test boxes × 4 subsets, 58 scene clusters.
+
+| detector | class-aware conf | class-agnostic conf | detected (conf ≥ 0.05) |
+|---|---|---|---|
+| RF-DETR | +0.478 [+0.169, +0.929], P 0.994 | +0.363, P 0.976 | **−0.016 [−0.886, +0.603], P 0.498** |
+| ViT-B s0 | +0.593 [−0.022, +0.921], P 0.972 | +0.662, P 0.994 | +1.098 [+0.113, +1.684], P 0.984 |
+
+- **Difference RF-DETR − ViT-B:**
+  - binarised −1.114 [−2.342, +0.182], P(<0) 0.957: **flatter**, by the pre-registered rule;
+  - class-aware confidence −0.116, P 0.60;
+  - class-agnostic −0.299, P 0.85.
+- **Detection rate:** at conf ≥ 0.05, RF-DETR detects 64.1% of test defects, ViT-B 48.2%.
+- **Reading:**
+  - For the frozen-feature detector, *whether* a defect is found at all depends on a close labelled neighbour.
+  - The end-to-end fine-tuned detector finds defects regardless of proximity: the binarised slope is about 0. Proximity still shapes *how confidently* it scores them.
+  - So in RF-DETR, coverage moves from recall to ranking. Far-from-labelled defects are found but ranked low, which is the regime where AP is lost to ranking against false alarms.
+- **Caveats:** 4 subsets only, and one seed per detector. Proximity is measured in DINOv3 ViT-B space, not in RF-DETR's own DINOv2 features.
+- **Implication (not pre-registered):** a ranking-side intervention is better motivated on RF-DETR than it was on ViT-B. G15 (prototype rescoring, +0.013 on ViT-B) is the cheapest instance and can be re-checked on the cached RF-DETR test predictions, with its settings fixed as in G15.
+
 ---
 
 ## 25. Engineering problems solved

@@ -12,6 +12,8 @@ training patches of tools/select_scenes.py.
   3. T(S) = transductive coverage of the unlabelled test (val) images' patches vs subset quality
 
   .venv/bin/python tools/coverage_gate.py  -> runs/analysis/coverage_gate/{report.md, pairs.csv, subsets.csv}
+  .venv/bin/python tools/coverage_gate.py rfdetr  -> runs/analysis/coverage_gate/rfdetr/ (G16-R: condition 1 for
+      RF-DETR vs ViT-B s0 on the same 4 subsets, slope difference on shared scene draws)
 """
 
 import csv
@@ -283,5 +285,92 @@ def main():
     print("\n".join(lines))
 
 
+V1_SUBSETS = {"": ("rfdetrm_wtbd_group_f25", "bladeyolo2b_wtbd_group_f25_s0"),
+              **{f"_rand{k}": (f"rfdetrm_rand{k}_wtbd_group_f25", f"bladeyolo2b_rand{k}_wtbd_group_f25_s0")
+                 for k in (1, 2, 3)}}
+DET_CONF = 0.05
+
+
+def main_rfdetr():
+    """G16-R (research_log.md): condition 1 per detector on the 4 V1 subsets, and the paired slope difference."""
+    out = os.path.join(OUT, "rfdetr")
+    os.makedirs(out, exist_ok=True)
+    bank = np.load(os.path.join(PROTO, "train_bank.npz"), allow_pickle=True)["bank"].item()
+    te, tboxes = split_boxes("test")
+    q = np.stack([b["emb"] for b in tboxes])
+    qc = np.array([b["cls"] for b in tboxes])
+    P = []  # rows: subset, box, group, n, x, x3, y/yagn per detector
+    for suf, runs in V1_SUBSETS.items():
+        names = subset_names(suf)
+        e = np.concatenate([bank[n][1] for n in names if n in bank])
+        c = np.concatenate([bank[n][0][:, 0] for n in names if n in bank]).astype(int)
+        n_c = np.bincount(c, minlength=NC)
+        x1, x3 = proximity(q, qc, e, c, 1), proximity(q, qc, e, c, 3)
+        ys = {}
+        for det, r in zip(("RF-DETR", "ViT-B"), runs):
+            pred = bc.predict(os.path.join(RUNS, r), te, PREDS)
+            g = lambda b, agn: outcome(b["box"][None], pred.get(b["img"], np.zeros((0, 6))), agn)[0]  # noqa: E731
+            ys[det] = (np.array([g(b, False) for b in tboxes]), np.array([g(b, True) for b in tboxes]))
+        for i, b in enumerate(tboxes):
+            P.append(dict(subset=suf or "_class-matched", box=i, group=b["group"], n=int(n_c[b["cls"]]), x=x1[i],
+                          x3=x3[i], **{f"{d}_{k}": ys[d][j][i] for d in ys for j, k in enumerate(("y", "yagn"))}))
+    keys = list(P[0])
+    with open(os.path.join(out, "pairs.csv"), "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=keys)
+        w.writeheader()
+        w.writerows(P)
+
+    groups = sorted({p["group"] for p in P})
+    by_group = {g: [i for i, p in enumerate(P) if p["group"] == g] for g in groups}
+    bx, sb = np.array([p["box"] for p in P]), np.array([p["subset"] for p in P])
+    rng = np.random.default_rng(0)
+    draws = [np.concatenate([by_group[groups[g]] for g in rng.integers(0, len(groups), len(groups))])
+             for _ in range(N_BOOT)]
+
+    def slope(yv, xk, idx=None):
+        xv = np.array([p[xk] for p in P])
+        X = np.c_[xv, np.log1p([p["n"] for p in P])]
+        ok = np.isfinite(xv)
+        idx = np.arange(len(P)) if idx is None else idx
+        idx = idx[ok[idx]]
+        return fe_slope(yv[idx], X[idx], bx[idx], sb[idx])[0]
+
+    def ci(b):
+        return f"[{np.percentile(b, 2.5):+.3f}, {np.percentile(b, 97.5):+.3f}]"
+
+    lines = ["# G16-R: proximity law on RF-DETR vs ViT-B s0 (class-matched, rand1-3; research_log.md)", "",
+             f"{len(tboxes)} test boxes x {len(V1_SUBSETS)} subsets, {len(groups)} scene clusters, {N_BOOT} replicates.",
+             "", "| detector | outcome | proximity | coef of x | 95% CI | P(>0) |", "|---|---|---|---|---|---|"]
+    variants = [("y", "x", "class-aware conf"), ("y", "x3", "class-aware conf, top-3"),
+                ("yagn", "x", "class-agnostic conf"), ("ybin", "x", f"detected (conf ≥ {DET_CONF})")]
+    Y = {d: {"y": np.array([p[f"{d}_y"] for p in P]), "yagn": np.array([p[f"{d}_yagn"] for p in P])}
+         for d in ("RF-DETR", "ViT-B")}
+    for d in Y:
+        Y[d]["ybin"] = (Y[d]["y"] >= DET_CONF).astype(float)
+    boots = {}
+    for d in Y:
+        for yk, xk, lab in variants:
+            est = slope(Y[d][yk], xk)
+            b = np.array([slope(Y[d][yk], xk, i) for i in draws])
+            boots[(d, yk, xk)] = (est, b)
+            lines.append(f"| {d} | {lab} | {'top-3 mean' if xk == 'x3' else 'max'} | {est:+.3f} | {ci(b)} | "
+                         f"{(b > 0).mean():.3f} |")
+    holds = boots[("RF-DETR", "y", "x")][0] > 0 and (boots[("RF-DETR", "y", "x")][1] > 0).mean() >= 0.95
+    lines += ["", "| difference RF-DETR − ViT-B | estimate | 95% CI | P(<0) |", "|---|---|---|---|"]
+    flat = None
+    for yk, xk, lab in variants:
+        d_est = boots[("RF-DETR", yk, xk)][0] - boots[("ViT-B", yk, xk)][0]
+        d_b = boots[("RF-DETR", yk, xk)][1] - boots[("ViT-B", yk, xk)][1]
+        if yk == "ybin":
+            flat = (d_b < 0).mean() >= 0.95
+        lines.append(f"| {lab}, {'top-3' if xk == 'x3' else 'max'} | {d_est:+.3f} | {ci(d_b)} | {(d_b < 0).mean():.3f} |")
+    det_rate = {d: Y[d]["ybin"].mean() for d in Y}
+    lines += ["", f"Detected at conf ≥ {DET_CONF}: RF-DETR {det_rate['RF-DETR']:.3f}, ViT-B {det_rate['ViT-B']:.3f}.", "",
+              f"**Readout:** the law {'**holds**' if holds else 'does not hold'} for RF-DETR (class-aware, max); "
+              f"RF-DETR's binarised slope is {'**flatter**' if flat else 'not flatter'} than ViT-B's."]
+    open(os.path.join(out, "report.md"), "w").write("\n".join(lines) + "\n")
+    print("\n".join(lines))
+
+
 if __name__ == "__main__":
-    main()
+    main_rfdetr() if sys.argv[1:] == ["rfdetr"] else main()
