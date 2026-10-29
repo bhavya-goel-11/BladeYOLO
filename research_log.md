@@ -2299,6 +2299,23 @@ If G17 passes, H17 (25% boxes + 75% click-derived boxes vs 25% boxes, on several
 - **Caveats:** 4 subsets only, and one seed per detector. Proximity is measured in DINOv3 ViT-B space, not in RF-DETR's own DINOv2 features.
 - **Implication (not pre-registered):** a ranking-side intervention is better motivated on RF-DETR than it was on ViT-B. G15 (prototype rescoring, +0.013 on ViT-B) is the cheapest instance and can be re-checked on the cached RF-DETR test predictions, with its settings fixed as in G15.
 
+### G15-R: prototype rescoring on RF-DETR (CPU). Pre-registered before computing (30 Oct)
+
+**Setup.**
+- G15's method unchanged: DINOv3 ViT-B box embeddings at 640 px; each model's own training-subset bank; K 3, τ 0.05, α 0.5; class never changed.
+- Applied to the 4 RF-DETR models (class-matched, rand1–3), on test and on val (the cached val predictions of all 4 exist).
+- Paired scene bootstrap, 1,000 replicates; family = mean over the 4 models.
+
+**G15-R passes** under G15's rule with 4 models. All of these must hold:
+1. rare-class (thunderstrike, crack) AP50-95 gain ≥ +0.02 with P(>0) ≥ 0.95;
+2. all-class mAP50-95 ≥ −0.005;
+3. rare-class AP improves on ≥ 3 of 4 models;
+4. val family mean rare gain > 0.
+
+**Secondary (reported, motivated by G16-R):** the all-class mAP50-95 gain and its interval. If coverage now acts on ranking, the gain should exceed G15's ViT-B +0.005.
+
+**If it passes:** a learned, coverage-calibrated ranking head on RF-DETR is pre-registered separately. **If it fails:** one scope check, then the box-extent direction.
+
 ---
 
 ## 25. Engineering problems solved
