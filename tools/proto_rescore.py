@@ -8,6 +8,8 @@ classes with labelled boxes. Rescored confidence = conf^(1 - ALPHA) * p(class of
 never changed, and a class without labelled boxes keeps its confidence. ALPHA, K, TAU fixed in research_log.md.
 
   .venv/bin/python tools/proto_rescore.py [test|val]  -> runs/analysis/proto_rescore/{report.md, report.json}
+  .venv/bin/python tools/proto_rescore.py rfdetr [test|val]  -> runs/analysis/proto_rescore/rfdetr/ (G15-R: the 4
+      RF-DETR models of V1, cached predictions; same settings)
 Each split is merged into report.json as it finishes (one split per process keeps memory within 7 GB).
 """
 
@@ -41,6 +43,8 @@ FAMILIES = {  # model -> training subset suffix
                   "bladeyolo2nodino_wtbd_group_f25_s0": "", "bladeyolo2nodino_wtbd_group_f25_s1": ""},
 }
 VAL_MODELS = ["bladeyolo2b_wtbd_group_f25_s0", "bladeyolo2b_wtbd_group_f25_s1"]  # weights kept
+RFDETR = {"rfdetrm_wtbd_group_f25": "", **{f"rfdetrm_rand{k}_wtbd_group_f25": f"_rand{k}" for k in (1, 2, 3)}}
+RFDETR_VAL_PREDS = os.path.join(ROOT, "runs", "analysis", "bootstrap", "v1_val_preds")
 
 
 class Embedder:
@@ -186,6 +190,47 @@ def compare(ms, files, draws):
     return per, ci
 
 
+def main_rfdetr(splits):
+    """G15-R (research_log.md): G15 unchanged on the 4 RF-DETR models, test and val, one family."""
+    out = os.path.join(OUT, "rfdetr")
+    os.makedirs(out, exist_ok=True)
+    PREDS["val"] = RFDETR_VAL_PREDS
+    emb = Embedder()
+    bank = train_bank(emb)
+    rpath = os.path.join(out, "report.json")
+    report = json.load(open(rpath)) if os.path.exists(rpath) else {}
+    for split in splits:
+        ms, files, draws = evaluate(split, RFDETR, emb, bank)
+        per, ci = compare(ms, files, draws)
+        up = sum(per[m][1][1] > per[m][0][1] for m in RFDETR)
+        report[split] = dict(ci=ci, improved_rare=up, models=len(RFDETR),
+                             per={m: dict(orig=list(per[m][0][:2]), resc=list(per[m][1][:2]),
+                                          orig_pc=per[m][0][2].tolist(), resc_pc=per[m][1][2].tolist()) for m in RFDETR})
+        print(f"{split}: " + "; ".join(f"{k} {v['diff']:+.4f} [{v['lo']:+.4f}, {v['hi']:+.4f}] P {v['p']:.3f}"
+                                       for k, v in ci.items()) + f"; rare up {up}/{len(RFDETR)}", flush=True)
+        del ms
+        json.dump(report, open(rpath, "w"), indent=1)
+    lines = ["# G15-R: G15 prototype rescoring on the 4 RF-DETR models", "",
+             f"ALPHA {ALPHA}, K {K}, TAU {TAU}; DINOv3 ViT-B at 640 px; paired scene bootstrap, 1,000 replicates.", ""]
+    for key, r in report.items():
+        lines += [f"## {key}", "", "| model | mAP50-95 | rescored | rare AP50-95 | rescored |", "|---|---|---|---|---|"]
+        for m, v in r["per"].items():
+            lines.append(f"| {m} | {v['orig'][0]:.3f} | {v['resc'][0]:.3f} | {v['orig'][1]:.3f} | {v['resc'][1]:.3f} |")
+        pc_o = np.nanmean([v["orig_pc"] for v in r["per"].values()], 0)
+        pc_r = np.nanmean([v["resc_pc"] for v in r["per"].values()], 0)
+        lines += ["", "per class AP50-95 (family mean), original → rescored: "
+                  + ", ".join(f"{c} {a:.3f} → {b:.3f}" for c, a, b in zip(CLASSES, pc_o, pc_r)), ""]
+        lines += [f"- {k}: rescored − original {v['diff']:+.4f} [{v['lo']:+.4f}, {v['hi']:+.4f}], P(>0) {v['p']:.3f}"
+                  for k, v in r["ci"].items()] + [f"- rare AP improved on {r['improved_rare']}/{r['models']} models", ""]
+    t, v = report.get("test"), report.get("val")
+    if t and v:
+        passed = (t["ci"]["rare"]["diff"] >= 0.02 and t["ci"]["rare"]["p"] >= 0.95 and t["ci"]["all"]["diff"] >= -0.005
+                  and t["improved_rare"] >= 3 and v["ci"]["rare"]["diff"] > 0)
+        lines += [f"**G15-R {'passes' if passed else 'fails'}** (rule in research_log.md)."]
+    open(os.path.join(out, "report.md"), "w").write("\n".join(lines) + "\n")
+    print(lines[-1])
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     emb = Embedder()
@@ -232,4 +277,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:2] == ["rfdetr"]:
+        main_rfdetr(sys.argv[2:] or ("test", "val"))
+    else:
+        main()

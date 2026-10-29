@@ -2316,6 +2316,29 @@ If G17 passes, H17 (25% boxes + 75% click-derived boxes vs 25% boxes, on several
 
 **If it passes:** a learned, coverage-calibrated ranking head on RF-DETR is pre-registered separately. **If it fails:** one scope check, then the box-extent direction.
 
+**Result (30 Oct): G15-R passes.** Report: `runs/analysis/proto_rescore/rfdetr/report.md` (`tools/proto_rescore.py rfdetr`). Rescored − original, family mean of 4 models:
+
+| split | rare (thunderstrike, crack) AP50-95 | all-class mAP50-95 | rare improved |
+|---|---|---|---|
+| test | **+0.046** [+0.013, +0.109], P 0.999 | +0.011 [−0.002, +0.058], P 0.952 | 4/4 |
+| val | **+0.037** [+0.008, +0.076], P 0.995 | +0.013 [−0.001, +0.043], P 0.967 | 4/4 |
+
+- **Per model (test mAP50-95):** class-matched 0.189 → 0.209; rand1 0.205 → 0.217; rand2 0.215 → 0.223; rand3 0.147 → 0.153.
+- **Rare AP (test):** 0.133 → 0.202, 0.066 → 0.106, 0.052 → 0.090, 0.006 → 0.044. rand3's thunderstrike collapse is partly repaired.
+- **Per class (test, family mean):**
+  - gains: thunderstrike 0.072 → 0.125, crack 0.056 → 0.097, hide_craze +0.012;
+  - small losses: surface_injure −0.023, craze −0.008, corrosion −0.005.
+- **Against G15 on ViT-B:** rare +0.046 vs +0.013 (3.5×), all-class +0.011 vs +0.005, and val now agrees (4/4 on val vs 1/2 before).
+- **Mechanism, consistent with G16-R:** RF-DETR finds far-from-labelled defects but ranks them low. A coverage signal from the labelled exemplars re-ranks them. ViT-B never found them, so there was little to re-rank.
+- **Caveats:**
+  - The all-class gain is small and its interval includes 0.
+  - Frequent classes lose a little: the fixed α = 0.5 applies the same pull to every class.
+  - Only 4 models, one seed each.
+  - Prototype/kNN rescoring with foundation features has prior art in few-shot detection, so the novelty must be checked before any method claim.
+- **Next (as pre-registered):**
+  1. A literature check on prototype/exemplar re-ranking of detector outputs.
+  2. Then a learned, coverage-calibrated ranking head on RF-DETR, pre-registered separately.
+
 ---
 
 ## 25. Engineering problems solved
