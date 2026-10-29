@@ -2219,6 +2219,24 @@ If G17 passes, H17 (25% boxes + 75% click-derived boxes vs 25% boxes, on several
 - Fix: `predict` drops that slot and logs the count. `train` now skips a run that already has a best checkpoint.
 - No test numbers yet; rerun.
 
+**Attempt 2 (Kaggle v69, 29 Oct): 3 of 4 subsets finished.**
+- Class-matched, rand1 and rand2 finished (best EMA val 0.263 / 0.288 / 0.260). Prediction dropped 0.9–1.7k no-object boxes per split.
+- rand3 died at epoch ~29 with `No space left on device`: the 10-epoch `.ckpt` files of all runs filled `/kaggle/working`. Fix: `checkpoint_interval = epochs`, and every checkpoint except the best is deleted after training.
+- The class-matched best checkpoint was recovered from the v69 output (`runs/detect/BladeYOLO_WindSurface/rfdetrm_wtbd_group_f25/checkpoint_best_total.pth`, gitignored) as the teacher for follow-ups.
+- New subcommand `tools/rfdetr_v1.py score` → `runs/analysis/v1/report.md`.
+
+**Interim test result (3/4 subsets; the verdict waits for rand3).** Test mAP50-95, RF-DETR vs ViT-B s0:
+
+| subset | RF-DETR | ViT-B | diff [95% CI] | P(≤ 0) |
+|---|---|---|---|---|
+| class-matched | 0.189 | 0.099 | +0.090 [−0.026, +0.155] | 0.057 |
+| rand1 | 0.205 | 0.112 | +0.093 [+0.028, +0.215] | 0.003 |
+| rand2 | 0.215 | 0.135 | +0.080 [+0.019, +0.154] | 0.006 |
+
+- **Mean +0.087 [+0.034, +0.158], P 0.001, positive on 3/3.** All three parts of the bar already hold on these subsets.
+- RF-DETR at 25% (0.19–0.22) approaches our 100% ViT-S number (0.245, Ultralytics evaluator).
+- The gains are largest on hide_craze (+0.19 to +0.22 AP50-95) and surface_injure. craze goes from about 0 to 0.04–0.09. crack is mixed: +0.157 on class-matched, −0.087 on rand2.
+
 ---
 
 ## 25. Engineering problems solved

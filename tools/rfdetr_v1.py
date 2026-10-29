@@ -6,6 +6,7 @@ BladeYOLO-v2 ViT-B runs, scored with the scene bootstrap (tools/bootstrap_ci.py)
   predict  (Kaggle) test and val predictions, conf 0.001, keyed by file name, boxes in 640-input pixels
   import   (local)  file-name keys -> local paths in the bootstrap cache, so bootstrap_ci.py scores the run like any
                     other (its run argument only names the cache file)
+  score    (local)  the pre-registered paired comparison with ViT-B seed 0 on each subset -> runs/analysis/v1/report.md
 
 Kaggle, per subset:
   python tools/rfdetr_v1.py prepare --data <WTBD-group> --subset tools/splits/wtbd_group_train_f25_rand1.txt --out ds_rand1
@@ -72,8 +73,12 @@ def train(dataset, out, size, epochs, batch, accum, seed):
     opts = dict(dataset=os.path.abspath(dataset), size=size, epochs=epochs, batch_size=batch, grad_accum_steps=accum,
                 seed=seed)
     json.dump(opts, open(os.path.join(out, "v1_options.json"), "w"), indent=2)
+    # periodic checkpoints only at the end: four runs of 10-epoch checkpoints filled Kaggle's disk (v69)
     model_class(size)().train(dataset_dir=os.path.abspath(dataset), output_dir=os.path.abspath(out), epochs=epochs,
-                              batch_size=batch, grad_accum_steps=accum, seed=seed)
+                              batch_size=batch, grad_accum_steps=accum, seed=seed, checkpoint_interval=epochs)
+    for f in os.listdir(out):
+        if f.endswith((".ckpt", ".pth")) and f != best_checkpoint(out).split(os.sep)[-1]:
+            os.remove(os.path.join(out, f))
 
 
 def best_checkpoint(run):
@@ -129,6 +134,56 @@ def import_preds(run, data=DATA, cache=CACHE):
         print(f"{split}: {len(local)} images -> {c}/{name}.json")
 
 
+PAIRS = [("class-matched", "rfdetrm_wtbd_group_f25", "bladeyolo2b_wtbd_group_f25_s0")] + [
+    (f"rand{k}", f"rfdetrm_rand{k}_wtbd_group_f25", f"bladeyolo2b_rand{k}_wtbd_group_f25_s0") for k in (1, 2, 3)]
+CLASSES = ["craze", "corrosion", "surface_injure", "thunderstrike", "crack", "hide_craze"]
+
+
+def score_v1(n_boot=2000, seed=0):
+    """Scene bootstrap over WTBD-group test: per subset RF-DETR - ViT-B mAP50-95, and the mean over the subsets present.
+    Pre-registered bar: mean >= +0.03, positive on >= 3 of 4 subsets, pooled P(mean <= 0) < 0.05."""
+    import bootstrap_ci as bc
+
+    imgs = bc.load_yolo_split(DATA, "test")
+    files = sorted(imgs)
+    groups = [[files[i] for i in g] for g in bc.scene_groups(files, os.path.join(ROOT, ".dataset_cache"), 4)]
+    nc = len(CLASSES)
+    load = lambda n: {k: np.array(v).reshape(-1, 6) for k, v in json.load(open(os.path.join(CACHE["test"], n + ".json"))).items()}  # noqa: E731
+    have = [p for p in PAIRS if os.path.exists(os.path.join(CACHE["test"], p[1] + ".json"))]
+    m = {n: bc.per_image_matches(imgs, load(n), nc) for _, a, b in have for n in (a, b)}
+    point = {n: bc.score(v, files, nc) for n, v in m.items()}
+    rng = np.random.default_rng(seed)
+    d = np.zeros((n_boot, len(have)))
+    for i in range(n_boot):
+        draw = [f for g in rng.integers(0, len(groups), len(groups)) for f in groups[g]]
+        d[i] = [bc.score(m[a], draw, nc)[1] - bc.score(m[b], draw, nc)[1] for _, a, b in have]
+    diff = np.array([point[a][1] - point[b][1] for _, a, b in have])
+    mean, pm = float(diff.mean()), float(np.mean(d.mean(1) <= 0))
+    ok = [mean >= 0.03, int((diff > 0).sum()) >= 3, pm < 0.05]
+    complete = len(have) == len(PAIRS)
+    ci = lambda x: f"[{np.percentile(x, 2.5):+.3f}, {np.percentile(x, 97.5):+.3f}]"  # noqa: E731
+    lines = ["# V1: RF-DETR Medium vs BladeYOLO-v2 ViT-B (seed 0), 25% subsets, WTBD-group test", "",
+             f"{len(files)} test images in {len(groups)} scene groups, {n_boot} scene-bootstrap replicates.", "",
+             "| subset | RF-DETR mAP50 | RF-DETR mAP50-95 | ViT-B mAP50 | ViT-B mAP50-95 | diff mAP50-95 [95% CI] | P(diff <= 0) |",
+             "|---|---|---|---|---|---|---|"]
+    for k, (s_, a, b) in enumerate(have):
+        lines.append(f"| {s_} | {point[a][0]:.3f} | {point[a][1]:.3f} | {point[b][0]:.3f} | {point[b][1]:.3f} | "
+                     f"{diff[k]:+.3f} {ci(d[:, k])} | {np.mean(d[:, k] <= 0):.3f} |")
+    lines += ["", f"Mean over {len(have)} subsets: {mean:+.3f} {ci(d.mean(1))}, P(<= 0) {pm:.3f}; positive on "
+              f"{int((diff > 0).sum())}/{len(have)}.", "",
+              f"Bar (mean >= +0.03; >= 3/4 positive; P < 0.05): {ok} -> "
+              + ("**clearly beats**" if complete and all(ok) else "does not clearly beat" if complete
+                 else f"incomplete ({len(have)}/{len(PAIRS)} subsets)"), "",
+              "| subset | model | " + " | ".join(CLASSES) + " |", "|---|---|" + "---|" * nc]
+    for s_, a, b in have:
+        for n in (a, b):
+            lines.append(f"| {s_} | {n} | " + " | ".join(f"{x:.3f}" for x in point[n][3]) + " |")
+    out = os.path.join(ROOT, "runs", "analysis", "v1")
+    os.makedirs(out, exist_ok=True)
+    open(os.path.join(out, "report.md"), "w").write("\n".join(lines) + "\n")
+    print("\n".join(lines))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sp = ap.add_subparsers(dest="cmd", required=True)
@@ -151,6 +206,7 @@ def main():
     a.add_argument("--splits", nargs="+", default=["test", "val"])
     a = sp.add_parser("import")
     a.add_argument("--run", required=True)
+    sp.add_parser("score")
     args = ap.parse_args()
     if args.cmd == "prepare":
         prepare(args.data, args.subset, args.out)
@@ -158,8 +214,10 @@ def main():
         train(args.dataset, args.out, args.size, args.epochs, args.batch, args.accum, args.seed)
     elif args.cmd == "predict":
         predict(args.run, args.data, args.size, args.splits)
-    else:
+    elif args.cmd == "import":
         import_preds(args.run)
+    else:
+        score_v1()
 
 
 if __name__ == "__main__":
