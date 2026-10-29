@@ -65,6 +65,9 @@ def model_class(size):
 
 
 def train(dataset, out, size, epochs, batch, accum, seed):
+    if any(os.path.exists(os.path.join(out, b)) for b in BEST):
+        print(f"{out} already has a best checkpoint; not retraining")
+        return
     os.makedirs(out, exist_ok=True)
     opts = dict(dataset=os.path.abspath(dataset), size=size, epochs=epochs, batch_size=batch, grad_accum_steps=accum,
                 seed=seed)
@@ -92,17 +95,21 @@ def predict(run, data, size, splits):
     model = model_class(size)(pretrain_weights=best_checkpoint(run), num_classes=len(names))
     for split in splits:
         d = os.path.join(data, split, "images")
-        out = {}
+        out, dropped = {}, 0
         for i, f in enumerate(sorted(os.listdir(d))):
             im = Image.open(os.path.join(d, f)).convert("RGB")
             det = model.predict(im, threshold=0.001, include_source_image=False)
             cls = np.asarray(det.class_id)
-            assert len(cls) == 0 or (cls.min() >= 0 and cls.max() < len(names)), f"class ids {np.unique(cls)}"
-            out[f] = to_rows(det.xyxy, det.confidence, cls, 640 / max(im.size)).tolist()
+            assert len(cls) == 0 or (cls.min() >= 0 and cls.max() <= len(names)), f"class ids {np.unique(cls)}"
+            keep = cls < len(names)  # the head has num_classes + 1 outputs; the last is the no-object slot
+            dropped += int((~keep).sum())
+            out[f] = to_rows(np.asarray(det.xyxy)[keep], np.asarray(det.confidence)[keep], cls[keep],
+                             640 / max(im.size)).tolist()
             if (i + 1) % 50 == 0:
                 print(f"  {split}: {i + 1}", flush=True)
         json.dump(out, open(os.path.join(run, f"preds_{split}.json"), "w"))
-        print(f"{split}: {len(out)} images, {sum(len(v) for v in out.values())} boxes -> {run}/preds_{split}.json")
+        print(f"{split}: {len(out)} images, {sum(len(v) for v in out.values())} boxes ({dropped} no-object boxes dropped) "
+              f"-> {run}/preds_{split}.json")
 
 
 def import_preds(run, data=DATA, cache=CACHE):

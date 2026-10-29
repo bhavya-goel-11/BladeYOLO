@@ -2213,6 +2213,12 @@ If G17 passes, H17 (25% boxes + 75% click-derived boxes vs 25% boxes, on several
 - *If it does not:* the frozen-DINOv3 base is defensible, and this becomes a reported baseline row.
 - *Reported, not decisive:* val mAP50-95, per-class AP, and the spread across subsets (does the end-to-end fine-tune reduce subset luck?).
 
+**Attempt 1 (Kaggle v68, 29 Oct): stopped at prediction.**
+- Class-matched training finished: 100 epochs in 35 min, best EMA val mAP50-95 **0.253** (RF-DETR's COCO evaluator, our val split).
+- `predict` then failed: the predictions contained class id 6. RF-DETR's head has `num_classes + 1` outputs, the last being a no-object slot, and RF-DETR's own evaluator ignores it because it isn't a category.
+- Fix: `predict` drops that slot and logs the count. `train` now skips a run that already has a best checkpoint.
+- No test numbers yet; rerun.
+
 ---
 
 ## 25. Engineering problems solved
