@@ -2339,6 +2339,18 @@ If G17 passes, H17 (25% boxes + 75% click-derived boxes vs 25% boxes, on several
   1. A literature check on prototype/exemplar re-ranking of detector outputs.
   2. Then a learned, coverage-calibrated ranking head on RF-DETR, pre-registered separately.
 
+**Literature check (30 Oct).** Scoring detections by similarity to labelled support instances is established in few-shot and cross-domain detection:
+- the NTIRE 2025 CD-FSOD report (arXiv 2504.10685): one team uses cosine similarity to support instances as the confidence;
+- prototype similarity on DINOv2 (arXiv 2606.23069, 2026);
+- prototype calibration of pseudo-labels (Calibrate Before Adapt, 2026);
+- detector calibration in FSOD (ECCV 2022).
+
+G15-R's rescoring is therefore **not a contribution in itself**. What we did not find:
+- a measured account of *when* exemplar re-ranking pays off: fine-tuning decouples recall from coverage (G16-R), so the gain appears on a fine-tuned base and barely on a frozen-feature one (G15 vs G15-R);
+- its use as a coverage signal under subset luck.
+
+Any method claim must rest on that mechanism, plus a learned or adaptive version that beats the fixed rule, not on rescoring as such.
+
 ---
 
 ## 25. Engineering problems solved
