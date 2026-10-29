@@ -2237,6 +2237,21 @@ If G17 passes, H17 (25% boxes + 75% click-derived boxes vs 25% boxes, on several
 - RF-DETR at 25% (0.19–0.22) approaches our 100% ViT-S number (0.245, Ultralytics evaluator).
 - The gains are largest on hide_craze (+0.19 to +0.22 AP50-95) and surface_injure. craze goes from about 0 to 0.04–0.09. crack is mixed: +0.157 on class-matched, −0.087 on rand2.
 
+**Final result (Kaggle v70 adds rand3, 29 Oct): V1 clearly beats ViT-B.** rand3 trained cleanly: best EMA val 0.234, 751 no-object boxes dropped on test.
+
+| subset | RF-DETR | ViT-B | diff [95% CI] | P(≤ 0) |
+|---|---|---|---|---|
+| class-matched | 0.189 | 0.099 | +0.090 [−0.026, +0.155] | 0.057 |
+| rand1 | 0.205 | 0.112 | +0.093 [+0.028, +0.215] | 0.003 |
+| rand2 | 0.215 | 0.135 | +0.080 [+0.019, +0.154] | 0.006 |
+| rand3 | 0.147 | 0.118 | +0.029 [−0.061, +0.079] | 0.304 |
+
+- **Mean +0.073 [+0.023, +0.119], P 0.002, positive on 4/4.** The pre-registered bar holds: mean ≥ +0.03, ≥ 3/4 positive, P < 0.05.
+- **Subset luck is not reduced:** RF-DETR spans 0.147–0.215 (range 0.068) against ViT-B's 0.099–0.135 (0.036).
+- **rand3 caveat:** thunderstrike collapses for RF-DETR (0.004 vs ViT-B 0.186), although rand3 has the most thunderstrike boxes (35). So the end-to-end fine-tune can lose a class that the frozen-feature model keeps. The cause is not investigated.
+- **Decision (pre-registered):** method work moves to RF-DETR. First, G17 (click → box) is re-checked with the RF-DETR class-matched teacher, using the same rule and bar as before. Semi-supervision is re-checked only if the box precision clearly exceeds 66%.
+- **Paper:** RF-DETR at 25% becomes the base row. The frozen-DINOv3 YOLO is a baseline. BladeYOLO's claims are compared on the same leak-free split.
+
 ---
 
 ## 25. Engineering problems solved
