@@ -10,6 +10,10 @@ predictions and applied to their test predictions. Arms on test: original, fixed
   .venv/bin/python tools/rerank_h18.py  -> runs/analysis/rerank_h18/{report.md, report.json}
   .venv/bin/python tools/rerank_h18.py replicate  -> runs/analysis/rerank_h18/replicate/ (H18-R: the calibrator fitted
       on the seed-0 models' val, applied unchanged to the seed-1 models' test and val)
+  .venv/bin/python tools/rerank_h18.py wtblade-prep  -> DINOv3 subset bank and val/test patch maps for WTBlade-group
+      (no predictions needed; run while the detectors train)
+  .venv/bin/python tools/rerank_h18.py wtblade  -> runs/analysis/rerank_h18/wtblade/ (H18-W: the recipe refitted on
+      WTBlade val, H18-R bars, 2,000 replicates over the 177 test scenes)
 """
 
 import json
@@ -27,7 +31,7 @@ import proto_rescore as pr  # noqa: E402
 
 OUT = os.path.join(ROOT, "runs", "analysis", "rerank_h18")
 PREDS = {"test": pr.PREDS["test"], "val": pr.RFDETR_VAL_PREDS}
-NC, N_BOOT = 6, 1000
+N_BOOT = 1000
 EPS = 1e-6
 
 
@@ -54,8 +58,9 @@ def targets(gt, pred, thrs=dm.IOU_THRS):
     return t / len(thrs)
 
 
-def features(pred, emb, bank, bank_cls, nc=NC, k=pr.K, tau=pr.TAU):
+def features(pred, emb, bank, bank_cls, nc=None, k=pr.K, tau=pr.TAU):
     """(n, 7 + nc) feature matrix for predictions with box embeddings emb, against one model's subset bank."""
+    nc = pr.NC if nc is None else nc
     n = len(pred)
     cls = pred[:, 5].astype(int)
     p = pr.class_probs(emb, bank, bank_cls, nc, k, tau)[np.arange(n), cls] if n else np.zeros(0)
@@ -88,11 +93,10 @@ def fit(X, t, C=1.0):
 RFDETR_S1 = {m.replace("rfdetrm_", "rfdetrm_s1_"): suf for m, suf in pr.RFDETR.items()}
 
 
-def model_banks(bank, models=pr.RFDETR):
+def model_banks(bank, models=None):
     out = {}
-    for m, suf in models.items():
-        names = [n.strip() for n in open(os.path.join(pr.SPLITS, f"wtbd_group_train_f25{suf}.txt")) if n.strip()]
-        sel = [bank[n] for n in names if n in bank]
+    for m, suf in (pr.RFDETR if models is None else models).items():
+        sel = [bank[n] for n in pr.subset_names(suf) if n in bank]
         out[m] = (np.concatenate([e for _, e in sel]), np.concatenate([g[:, 0] for g, _ in sel]).astype(int))
     return out
 
@@ -140,7 +144,7 @@ def with_conf(preds, files, conf):
 def compare(arms, imgs, split):
     """arms {arm: {model: preds}} -> point metrics per arm and model, bootstrap of family-mean differences."""
     files = sorted(imgs)
-    ms = {a: {m: bc.per_image_matches(imgs, p, NC) for m, p in v.items()} for a, v in arms.items()}
+    ms = {a: {m: bc.per_image_matches(imgs, p, pr.NC) for m, p in v.items()} for a, v in arms.items()}
     point = {a: {m: pr.metrics(x, files) for m, x in v.items()} for a, v in ms.items()}
     groups = pr.scenes(split, files)
     rng = np.random.default_rng(0)
@@ -183,7 +187,7 @@ def main_replicate():
         lines += [f"| {m} | " + " | ".join(f"{point[a][m][0]:.3f}" for a in ("original", "fixed", "H18")) + " |"
                   for m in b1]
         lines += ["", "| family mean | mAP50-95 | rare AP50-95 | " + " | ".join(pr.CLASSES) + " |",
-                  "|---|---|---|" + "---|" * NC] + [f"| {a} | " + " | ".join(f"{x:.3f}" for x in fam[a]) + " |"
+                  "|---|---|---|" + "---|" * pr.NC] + [f"| {a} | " + " | ".join(f"{x:.3f}" for x in fam[a]) + " |"
                                                      for a in fam]
         e_fix, e_org = fam["H18"][0] - fam["fixed"][0], fam["H18"][0] - fam["original"][0]
         lines += ["", f"- H18 − fixed: {e_fix:+.4f} {ci(d_fix)}, P(>0) {(d_fix > 0).mean():.3f}",
@@ -197,8 +201,32 @@ def main_replicate():
     print("\n".join(lines))
 
 
-def main():
-    os.makedirs(OUT, exist_ok=True)
+def wtblade_prep():
+    """H18-W inputs that do not depend on the detectors: the subset bank and the val/test patch maps."""
+    pr.use_wtblade()
+    emb = pr.Embedder()
+    only = {n for suf in pr.RFDETR.values() for n in pr.subset_names(suf)}
+    bank = pr.train_bank(emb, only)
+    print(f"bank: {sum(len(g) for g, _ in bank.values())} boxes in {len(bank)} images", flush=True)
+    for split in ("val", "test"):
+        files = sorted(bc.load_yolo_split(pr.DATA, split))
+        for i, f in enumerate(files):
+            emb(f, os.path.join(pr.OUT, "maps", split, os.path.splitext(os.path.basename(f))[0] + ".npy"))
+            if (i + 1) % 50 == 0:
+                print(f"  {split} maps {i + 1}/{len(files)}", flush=True)
+
+
+def main_wtblade():
+    """H18-W (research_log.md)."""
+    global N_BOOT
+    pr.use_wtblade()
+    PREDS.update(pr.PREDS)
+    N_BOOT = 2000
+    main(os.path.join(OUT, "wtblade"), "h18w")
+
+
+def main(out=OUT, rule="h18"):
+    os.makedirs(out, exist_ok=True)
     bank = np.load(os.path.join(pr.OUT, "train_bank.npz"), allow_pickle=True)["bank"].item()
     banks = model_banks(bank)
     vimgs, vpreds, V = split_data("val", banks)
@@ -225,7 +253,8 @@ def main():
               "fixed": {m: with_conf(vpreds[m], V[m][0], V[m][3]) for m in pr.RFDETR},
               "H18": {m: with_conf(vpreds[m], V[m][0], vconf[m]) for m in pr.RFDETR}}
 
-    report, lines = {}, ["# H18: learned coverage-aware re-ranker on RF-DETR (research_log.md)", "",
+    title = "H18-W: H18 recipe on WTBlade-group" if rule == "h18w" else "H18: learned coverage-aware re-ranker on RF-DETR"
+    report, lines = {}, [f"# {title} (research_log.md)", "",
                          f"Calibrator fitted on {len(Xv)} val detections of the 4 models; test untouched. Paired scene "
                          f"bootstrap, {N_BOOT} replicates; family = mean over the 4 models.", ""]
     ci = lambda x: f"[{np.percentile(x, 2.5):+.4f}, {np.percentile(x, 97.5):+.4f}]"  # noqa: E731
@@ -236,7 +265,7 @@ def main():
         for m in pr.RFDETR:
             lines.append(f"| {m} | " + " | ".join(f"{point[a][m][0]:.3f}" for a in ("original", "fixed", "H18")) + " |")
         lines += ["", "| family mean | mAP50-95 | rare AP50-95 | " + " | ".join(pr.CLASSES) + " |",
-                  "|---|---|---|" + "---|" * NC]
+                  "|---|---|---|" + "---|" * pr.NC]
         for a in fam:
             lines.append(f"| {a} | " + " | ".join(f"{x:.3f}" for x in fam[a]) + " |")
         d_all = boot["H18"][:, 0] - boot["fixed"][:, 0]
@@ -251,16 +280,30 @@ def main():
                   f"- rare H18 − original: {e_rare:+.4f} {ci(d_rare)}, P(>0) {(d_rare > 0).mean():.3f}",
                   f"- per class H18 − original: " + ", ".join(f"{c} {x:+.3f}" for c, x in zip(pr.CLASSES, cls_drop)),
                   f"- H18 beats the fixed rule on {wins}/4 models", ""]
+        if rule == "h18w":
+            d_fo = boot["fixed"][:, 0] - boot["original"][:, 0]
+            d_org = boot["H18"][:, 0] - boot["original"][:, 0]
+            e_org = fam["H18"][0] - fam["original"][0]
+            lines += [f"- fixed − original (G15-R transfer): {fam['fixed'][0] - fam['original'][0]:+.4f} {ci(d_fo)}, "
+                      f"P(>0) {(d_fo > 0).mean():.3f}", ""]
+            ok = [e_all > 0 and (d_all > 0).mean() >= 0.90, e_org > 0 and (d_org > 0).mean() >= 0.95, wins >= 3]
+            report[split] = dict(fam={a: fam[a].tolist() for a in fam}, all_vs_fixed=e_all, p_all=(d_all > 0).mean(),
+                                 all_vs_orig=e_org, p_orig=(d_org > 0).mean(), wins=wins, conditions=ok)
+            if split == "test":
+                lines += [f"Conditions (H18 − fixed > 0, P ≥ 0.90; H18 − original > 0, P ≥ 0.95; ≥ 3/4 models): {ok} "
+                          f"→ **H18-W {'replicates' if all(ok) else 'does not replicate'}**", ""]
+            continue
         ok = [e_all >= 0.01 and (d_all > 0).mean() >= 0.95, e_rare >= 0.03, cls_drop.min() >= -0.01, wins >= 3]
         report[split] = dict(fam={a: fam[a].tolist() for a in fam}, all_vs_fixed=e_all, p_all=(d_all > 0).mean(),
                              rare_vs_orig=e_rare, class_change=cls_drop.tolist(), wins=wins, conditions=ok)
         if split == "test":
             lines += [f"Conditions (all ≥ +0.01 vs fixed with P ≥ 0.95; rare ≥ +0.03 vs original; no class < −0.01; "
                       f"≥ 3/4 models): {ok} → **H18 {'passes' if all(ok) else 'fails'}**", ""]
-    json.dump(report, open(os.path.join(OUT, "report.json"), "w"), indent=1, default=float)
-    open(os.path.join(OUT, "report.md"), "w").write("\n".join(lines) + "\n")
+    json.dump(report, open(os.path.join(out, "report.json"), "w"), indent=1, default=float)
+    open(os.path.join(out, "report.md"), "w").write("\n".join(lines) + "\n")
     print("\n".join(lines))
 
 
 if __name__ == "__main__":
-    main_replicate() if sys.argv[1:] == ["replicate"] else main()
+    {"replicate": main_replicate, "wtblade-prep": wtblade_prep, "wtblade": main_wtblade}.get(
+        (sys.argv[1:] or [""])[0], main)()

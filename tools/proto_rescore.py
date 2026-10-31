@@ -35,6 +35,7 @@ GROUPS = {"test": os.path.join(ROOT, "runs", "analysis", "bootstrap", "wtbd_grou
 OUT = os.path.join(ROOT, "runs", "analysis", "proto_rescore")
 CLASSES = ["craze", "corrosion", "surface_injure", "thunderstrike", "crack", "hide_craze"]
 RARE = [3, 4]
+NC, PREFIX = 6, "wtbd_group_train_f25"
 ALPHA, K, TAU, GRID, STRIDE = 0.5, 3, 0.05, 40, 16
 FAMILIES = {  # model -> training subset suffix
     "ViT-B": {**{f"bladeyolo2b_rand{k}_wtbd_group_f25_s0": f"_rand{k}" for k in range(1, 9)},
@@ -45,6 +46,25 @@ FAMILIES = {  # model -> training subset suffix
 VAL_MODELS = ["bladeyolo2b_wtbd_group_f25_s0", "bladeyolo2b_wtbd_group_f25_s1"]  # weights kept
 RFDETR = {"rfdetrm_wtbd_group_f25": "", **{f"rfdetrm_rand{k}_wtbd_group_f25": f"_rand{k}" for k in (1, 2, 3)}}
 RFDETR_VAL_PREDS = os.path.join(ROOT, "runs", "analysis", "bootstrap", "v1_val_preds")
+
+
+def use_wtblade():
+    """Point the module at WTBlade-group (H18-W): its 7 classes, groups.csv scenes, 25% subsets and RF-DETR runs.
+    Rare = the two classes with the fewest full-train boxes (burn 141, oil 149), the rule that gave WTBD's [3, 4]."""
+    global DATA, PREDS, GROUPS, OUT, CLASSES, RARE, NC, PREFIX, RFDETR, RFDETR_VAL_PREDS
+    DATA = os.path.join(ROOT, "external", "WTBlade-group")
+    cache = os.path.join(ROOT, "runs", "analysis", "bootstrap", "wtblade_f25")
+    PREDS = {s: os.path.join(cache, s) for s in ("test", "val")}
+    RFDETR_VAL_PREDS = PREDS["val"]
+    GROUPS = {s: os.path.join(DATA, "groups.csv") for s in ("test", "val")}
+    OUT = os.path.join(ROOT, "runs", "analysis", "proto_rescore", "wtblade")
+    CLASSES = ["burn", "crack", "deformity", "dirt", "oil", "peeling", "rust"]
+    RARE, NC, PREFIX = [0, 4], 7, "wtblade_group_train_f25"
+    RFDETR = {"rfdetrm_wtblade_group_f25": "", **{f"rfdetrm_rand{k}_wtblade_group_f25": f"_rand{k}" for k in (1, 2, 3)}}
+
+
+def subset_names(suf):
+    return [n.strip() for n in open(os.path.join(SPLITS, f"{PREFIX}{suf}.txt")) if n.strip()]
 
 
 class Embedder:
@@ -92,9 +112,10 @@ def box_embed(fmap, boxes):
     return (e / np.maximum(np.linalg.norm(e, axis=1, keepdims=True), 1e-12)).astype(np.float32)
 
 
-def class_probs(det, bank, bank_cls, nc=6, k=K, tau=TAU):
+def class_probs(det, bank, bank_cls, nc=None, k=K, tau=TAU):
     """(n, nc) softmax over classes of the mean top-k cosine similarity to each class's labelled boxes; columns of
     classes without labelled boxes are NaN."""
+    nc = NC if nc is None else nc
     sim = det @ bank.T
     q = np.full((len(det), nc), -np.inf)
     for c in range(nc):
@@ -122,16 +143,18 @@ def rescore(pred, emb, bank, bank_cls, alpha=ALPHA):
     return out
 
 
-def train_bank(emb):
-    """{train image name: (boxes (n, 5) [cls, x1, y1, x2, y2], embeddings (n, d))} for every labelled train image."""
+def train_bank(emb, only=None):
+    """{train image name: (boxes (n, 5) [cls, x1, y1, x2, y2], embeddings (n, d))} for every labelled train image
+    (only those named in `only`, if given)."""
     path = os.path.join(OUT, "train_bank.npz")
     if os.path.exists(path):
         z = np.load(path, allow_pickle=True)
         return z["bank"].item()
+    os.makedirs(OUT, exist_ok=True)
     tr = bc.load_yolo_split(DATA, "train")
     bank = {}
     for i, (f, im) in enumerate(sorted(tr.items())):
-        if len(im["gt"]):
+        if len(im["gt"]) and (only is None or os.path.basename(f) in only):
             bank[os.path.basename(f)] = (im["gt"], box_embed(emb(f), im["gt"][:, 1:]))
         if (i + 1) % 50 == 0:
             print(f"  train {i + 1}/{len(tr)}", flush=True)
@@ -142,6 +165,8 @@ def train_bank(emb):
 def scenes(split, files):
     g = {}
     for r in csv.DictReader(open(GROUPS[split])):
+        if r.get("subset", split) != split:  # WTBlade-group's groups.csv covers all splits
+            continue
         g.setdefault(r["group"], []).append(os.path.join(DATA, split, "images", r["image"]))
     groups = [[os.path.abspath(f) for f in v] for v in g.values()]
     assert sorted(f for v in groups for f in v) == sorted(files), f"{split}: groups do not cover the split"
@@ -155,8 +180,7 @@ def evaluate(split, models, emb, bank, rng_seed=0):
     preds = {m: bc.predict(os.path.join(RUNS, m), imgs, PREDS[split]) for m in models}
     banks = {}
     for m, suf in models.items():
-        names = [n.strip() for n in open(os.path.join(SPLITS, f"wtbd_group_train_f25{suf}.txt")) if n.strip()]
-        sel = [bank[n] for n in names if n in bank]
+        sel = [bank[n] for n in subset_names(suf) if n in bank]
         banks[m] = (np.concatenate([e for _, e in sel]), np.concatenate([g[:, 0] for g, _ in sel]).astype(int))
     new = {m: {} for m in models}
     for i, f in enumerate(files):
@@ -166,7 +190,7 @@ def evaluate(split, models, emb, bank, rng_seed=0):
             new[m][f] = rescore(p, box_embed(fmap, p[:, :4]), *banks[m]) if len(p) else p
         if (i + 1) % 20 == 0:
             print(f"  {split} {i + 1}/{len(files)}", flush=True)
-    ms = {m: (bc.per_image_matches(imgs, preds[m], 6), bc.per_image_matches(imgs, new[m], 6)) for m in models}
+    ms = {m: (bc.per_image_matches(imgs, preds[m], NC), bc.per_image_matches(imgs, new[m], NC)) for m in models}
     rng = np.random.default_rng(rng_seed)
     groups = scenes(split, files)
     draws = [[f for gi in rng.integers(0, len(groups), len(groups)) for f in groups[gi]] for _ in range(1000)]
@@ -175,7 +199,7 @@ def evaluate(split, models, emb, bank, rng_seed=0):
 
 def metrics(match, files):
     """(all-class mAP50-95, rare-class mean AP50-95, per-class AP50-95)."""
-    _, m, _, pc = bc.score(match, files, 6)
+    _, m, _, pc = bc.score(match, files, NC)
     return m, float(np.nanmean(pc[RARE])), pc
 
 
