@@ -136,10 +136,11 @@ def import_preds(run, data=DATA, cache=CACHE):
 
 PAIRS = [("class-matched", "rfdetrm_wtbd_group_f25", "bladeyolo2b_wtbd_group_f25_s0")] + [
     (f"rand{k}", f"rfdetrm_rand{k}_wtbd_group_f25", f"bladeyolo2b_rand{k}_wtbd_group_f25_s0") for k in (1, 2, 3)]
+PAIRS_S1 = [(s, a.replace("rfdetrm_", "rfdetrm_s1_"), b) for s, a, b in PAIRS]  # seed 1 (H18-R), same ViT-B s0
 CLASSES = ["craze", "corrosion", "surface_injure", "thunderstrike", "crack", "hide_craze"]
 
 
-def score_v1(n_boot=2000, seed=0):
+def score_v1(n_boot=2000, seed=0, pairs=PAIRS, tag=""):
     """Scene bootstrap over WTBD-group test: per subset RF-DETR - ViT-B mAP50-95, and the mean over the subsets present.
     Pre-registered bar: mean >= +0.03, positive on >= 3 of 4 subsets, pooled P(mean <= 0) < 0.05."""
     import bootstrap_ci as bc
@@ -149,7 +150,7 @@ def score_v1(n_boot=2000, seed=0):
     groups = [[files[i] for i in g] for g in bc.scene_groups(files, os.path.join(ROOT, ".dataset_cache"), 4)]
     nc = len(CLASSES)
     load = lambda n: {k: np.array(v).reshape(-1, 6) for k, v in json.load(open(os.path.join(CACHE["test"], n + ".json"))).items()}  # noqa: E731
-    have = [p for p in PAIRS if os.path.exists(os.path.join(CACHE["test"], p[1] + ".json"))]
+    have = [p for p in pairs if os.path.exists(os.path.join(CACHE["test"], p[1] + ".json"))]
     m = {n: bc.per_image_matches(imgs, load(n), nc) for _, a, b in have for n in (a, b)}
     point = {n: bc.score(v, files, nc) for n, v in m.items()}
     rng = np.random.default_rng(seed)
@@ -160,7 +161,7 @@ def score_v1(n_boot=2000, seed=0):
     diff = np.array([point[a][1] - point[b][1] for _, a, b in have])
     mean, pm = float(diff.mean()), float(np.mean(d.mean(1) <= 0))
     ok = [mean >= 0.03, int((diff > 0).sum()) >= 3, pm < 0.05]
-    complete = len(have) == len(PAIRS)
+    complete = len(have) == len(pairs)
     ci = lambda x: f"[{np.percentile(x, 2.5):+.3f}, {np.percentile(x, 97.5):+.3f}]"  # noqa: E731
     lines = ["# V1: RF-DETR Medium vs BladeYOLO-v2 ViT-B (seed 0), 25% subsets, WTBD-group test", "",
              f"{len(files)} test images in {len(groups)} scene groups, {n_boot} scene-bootstrap replicates.", "",
@@ -173,14 +174,14 @@ def score_v1(n_boot=2000, seed=0):
               f"{int((diff > 0).sum())}/{len(have)}.", "",
               f"Bar (mean >= +0.03; >= 3/4 positive; P < 0.05): {ok} -> "
               + ("**clearly beats**" if complete and all(ok) else "does not clearly beat" if complete
-                 else f"incomplete ({len(have)}/{len(PAIRS)} subsets)"), "",
+                 else f"incomplete ({len(have)}/{len(pairs)} subsets)"), "",
               "| subset | model | " + " | ".join(CLASSES) + " |", "|---|---|" + "---|" * nc]
     for s_, a, b in have:
         for n in (a, b):
             lines.append(f"| {s_} | {n} | " + " | ".join(f"{x:.3f}" for x in point[n][3]) + " |")
     out = os.path.join(ROOT, "runs", "analysis", "v1")
     os.makedirs(out, exist_ok=True)
-    open(os.path.join(out, "report.md"), "w").write("\n".join(lines) + "\n")
+    open(os.path.join(out, f"report{tag}.md"), "w").write("\n".join(lines) + "\n")
     print("\n".join(lines))
 
 
@@ -206,7 +207,8 @@ def main():
     a.add_argument("--splits", nargs="+", default=["test", "val"])
     a = sp.add_parser("import")
     a.add_argument("--run", required=True)
-    sp.add_parser("score")
+    a = sp.add_parser("score")
+    a.add_argument("--seed1", action="store_true", help="score the seed-1 runs (rfdetrm_s1_*) -> report_s1.md")
     args = ap.parse_args()
     if args.cmd == "prepare":
         prepare(args.data, args.subset, args.out)
@@ -217,7 +219,7 @@ def main():
     elif args.cmd == "import":
         import_preds(args.run)
     else:
-        score_v1()
+        score_v1(pairs=PAIRS_S1, tag="_s1") if args.seed1 else score_v1()
 
 
 if __name__ == "__main__":

@@ -8,6 +8,8 @@ original confidence order). One logistic calibrator (fractional targets, L2, C =
 predictions and applied to their test predictions. Arms on test: original, fixed rule (G15-R), H18.
 
   .venv/bin/python tools/rerank_h18.py  -> runs/analysis/rerank_h18/{report.md, report.json}
+  .venv/bin/python tools/rerank_h18.py replicate  -> runs/analysis/rerank_h18/replicate/ (H18-R: the calibrator fitted
+      on the seed-0 models' val, applied unchanged to the seed-1 models' test and val)
 """
 
 import json
@@ -83,9 +85,12 @@ def fit(X, t, C=1.0):
 
 # ---- data ----
 
-def model_banks(bank):
+RFDETR_S1 = {m.replace("rfdetrm_", "rfdetrm_s1_"): suf for m, suf in pr.RFDETR.items()}
+
+
+def model_banks(bank, models=pr.RFDETR):
     out = {}
-    for m, suf in pr.RFDETR.items():
+    for m, suf in models.items():
         names = [n.strip() for n in open(os.path.join(pr.SPLITS, f"wtbd_group_train_f25{suf}.txt")) if n.strip()]
         sel = [bank[n] for n in names if n in bank]
         out[m] = (np.concatenate([e for _, e in sel]), np.concatenate([g[:, 0] for g, _ in sel]).astype(int))
@@ -93,14 +98,14 @@ def model_banks(bank):
 
 
 def split_data(split, banks):
-    """imgs, preds {model: {file: pred}}, per model: (files per row, X, t, fixed-rule conf)."""
+    """imgs, preds {model: {file: pred}}, per model: (files per row, X, t, fixed-rule conf); models = banks' keys."""
     imgs = bc.load_yolo_split(pr.DATA, split)
-    preds = {m: bc.predict(os.path.join(pr.RUNS, m), imgs, PREDS[split]) for m in pr.RFDETR}
-    rows = {m: ([], [], [], []) for m in pr.RFDETR}
+    preds = {m: bc.predict(os.path.join(pr.RUNS, m), imgs, PREDS[split]) for m in banks}
+    rows = {m: ([], [], [], []) for m in banks}
     for i, f in enumerate(sorted(imgs)):
         fmap = np.load(os.path.join(pr.OUT, "maps", split, os.path.splitext(os.path.basename(f))[0] + ".npy"))
         fmap = fmap.astype(np.float32)
-        for m in pr.RFDETR:
+        for m in banks:
             p = preds[m].get(f, np.zeros((0, 6)))
             if not len(p):
                 continue
@@ -145,6 +150,51 @@ def compare(arms, imgs, split):
         for a in ms:
             boot[a].append(np.mean([np.r_[r[:2], r[2]] for r in (pr.metrics(x, d) for x in ms[a].values())], 0))
     return point, {a: np.array(b) for a, b in boot.items()}
+
+
+def summarise(point, boot, models):
+    """Family means per arm, and the H18-R quantities."""
+    fam = {a: np.mean([np.r_[v[:2], v[2]] for v in point[a].values()], 0) for a in point}
+    d_fix = boot["H18"][:, 0] - boot["fixed"][:, 0]
+    d_org = boot["H18"][:, 0] - boot["original"][:, 0]
+    wins = sum(point["H18"][m][0] > point["fixed"][m][0] for m in models)
+    return fam, d_fix, d_org, wins
+
+
+def main_replicate():
+    """H18-R (research_log.md)."""
+    out = os.path.join(OUT, "replicate")
+    os.makedirs(out, exist_ok=True)
+    bank = np.load(os.path.join(pr.OUT, "train_bank.npz"), allow_pickle=True)["bank"].item()
+    _, _, V0 = split_data("val", model_banks(bank))
+    f_all = fit(np.concatenate([V0[m][1] for m in pr.RFDETR]), np.concatenate([V0[m][2] for m in pr.RFDETR]))
+    del V0
+    b1 = model_banks(bank, RFDETR_S1)
+    ci = lambda x: f"[{np.percentile(x, 2.5):+.4f}, {np.percentile(x, 97.5):+.4f}]"  # noqa: E731
+    lines = ["# H18-R: frozen seed-0 calibrator on the seed-1 RF-DETR models (research_log.md)", ""]
+    for split in ("test", "val"):
+        imgs, preds, D = split_data(split, b1)
+        arms = {"original": preds,
+                "fixed": {m: with_conf(preds[m], D[m][0], D[m][3]) for m in b1},
+                "H18": {m: with_conf(preds[m], D[m][0], f_all(D[m][1])) for m in b1}}
+        point, boot = compare(arms, imgs, split)
+        fam, d_fix, d_org, wins = summarise(point, boot, b1)
+        lines += [f"## {split}", "", "| model | original | fixed rule | H18 |", "|---|---|---|---|"]
+        lines += [f"| {m} | " + " | ".join(f"{point[a][m][0]:.3f}" for a in ("original", "fixed", "H18")) + " |"
+                  for m in b1]
+        lines += ["", "| family mean | mAP50-95 | rare AP50-95 | " + " | ".join(pr.CLASSES) + " |",
+                  "|---|---|---|" + "---|" * NC] + [f"| {a} | " + " | ".join(f"{x:.3f}" for x in fam[a]) + " |"
+                                                     for a in fam]
+        e_fix, e_org = fam["H18"][0] - fam["fixed"][0], fam["H18"][0] - fam["original"][0]
+        lines += ["", f"- H18 − fixed: {e_fix:+.4f} {ci(d_fix)}, P(>0) {(d_fix > 0).mean():.3f}",
+                  f"- H18 − original: {e_org:+.4f} {ci(d_org)}, P(>0) {(d_org > 0).mean():.3f}",
+                  f"- H18 beats the fixed rule on {wins}/4 models", ""]
+        if split == "test":
+            ok = [e_fix > 0 and (d_fix > 0).mean() >= 0.90, e_org > 0 and (d_org > 0).mean() >= 0.95, wins >= 3]
+            lines += [f"Conditions: {ok} → **H18-R {'replicates' if all(ok) else 'does not replicate'}**", ""]
+        del D, arms
+    open(os.path.join(out, "report.md"), "w").write("\n".join(lines) + "\n")
+    print("\n".join(lines))
 
 
 def main():
@@ -213,4 +263,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main_replicate() if sys.argv[1:] == ["replicate"] else main()
