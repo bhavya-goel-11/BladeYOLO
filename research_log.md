@@ -2541,6 +2541,25 @@ v72 trained the 4 seed-1 models without errors. The log has only the old harmles
   - What does transfer is only the statement "the learned calibrator is never worse than the fixed rule". On its own, that is not a contribution.
   - A scope check under the fail-fast rule (§30) follows.
 
+**Scope check** (`tools/h18w_scope.py` → `runs/analysis/proto_rescore/wtblade/scope.md`). Criterion fixed before looking: Spearman ρ(log labelled boxes of the class in the model's subset, fixed − original test AP50-95) < 0 with one-sided permutation P < 0.05, pooled over WTBD (4 seed-0 models) and WTBlade (4 models).
+
+- Pooled: 52 (model, class) points, ρ −0.285, P 0.022 → **scope found by the criterion.**
+
+| labelled boxes of the class | points | mean Δ AP50-95 | share > 0 |
+|---|---|---|---|
+| < 30 | 8 | **+0.037** | 0.88 |
+| 30–60 | 10 | −0.002 | 0.40 |
+| 60–120 | 20 | −0.007 | 0.50 |
+| 120–250 | 7 | +0.002 | 0.43 |
+| ≥ 250 | 7 | −0.012 | 0.14 |
+
+- **Honest strength: weak.**
+  - All 8 points below 30 boxes are WTBD (crack 1–8, thunderstrike 10–25, craze 24–29), because WTBlade's rarest class has 47 boxes per subset.
+  - Within WTBlade there is no slope (ρ +0.09); within WTBD ρ −0.39.
+  - So box count and dataset are confounded. The boundary rests on 8 points from 4 models and 3 classes.
+- **Reading:** a boundary condition, not a method. Exemplar rescoring pays only when a class has fewer than about 30 labelled boxes, i.e. when coverage limits ranking (G16-R). Above that it is neutral to harmful. This is consistent with G15 vs G15-R and with H18-W.
+- **What would confirm it:** a pre-registered test on WTBlade in the low-count regime. Take smaller WTBlade subsets so that some classes fall below 30 boxes, and predict a positive fixed − original gain for exactly those classes. That breaks the dataset confound. One short Kaggle run (small subsets train fast).
+
 ---
 
 ## 25. Engineering problems solved
