@@ -2507,6 +2507,40 @@ v72 trained the 4 seed-1 models without errors. The log has only the old harmles
 - *Replicates:* H18 is a cross-dataset method result. The paper's method claim is "a coverage-aware re-ranker learned on val transfers across seeds and datasets".
 - *Fails:* H18 is a WTBD-specific finding. The paper rests on the mechanism (G16/G16-R) and the fixed rule, with H18 reported as not transferring. No rescue runs (§30).
 
+### H18-W result (1 Nov; Kaggle run 31 Oct 12:05–18:13 UTC, `rfdetrm_*wtblade_group_f25`)
+
+**Run checks.**
+- All 4 models trained on their subsets (534/534/534/547 images, seed 0) and predicted all 332 test and 323 val frames. The only traceback is the old `rfdetr.__version__` cell.
+- RF-DETR's own val mAP50-95 plateaued at about 0.13 by epoch 10–20 on every subset. mAP75 stayed at 0.06–0.08, so localisation is the limit, as on WTBD.
+- Commands: `tools/rfdetr_v1.py import --dataset wtblade`, then `tools/rerank_h18.py wtblade` → `runs/analysis/rerank_h18/wtblade/report.md` (log `runs/analysis/rerank_h18/wtblade.log`). The calibrator was fitted on 384,212 val detections.
+
+**Test** (177 scenes, 2,000 paired bootstrap replicates):
+
+| model | original | fixed rule | H18 |
+|---|---|---|---|
+| class-matched | 0.132 | 0.126 | 0.134 |
+| rand1 | 0.139 | 0.129 | 0.140 |
+| rand2 | 0.131 | 0.130 | 0.133 |
+| rand3 | 0.128 | 0.115 | 0.129 |
+| **family mean** | **0.132** | **0.125** | **0.134** |
+
+1. H18 − fixed: +0.0090 [+0.0032, +0.0125], P 0.996 ✓
+2. H18 − original: +0.0018 [−0.0009, +0.0045], P **0.907** (bar 0.95) ✗
+3. H18 beats the fixed rule on 4/4 models ✓
+
+→ **H18-W does not replicate.**
+
+- **The decisive number is the fixed rule, not H18.** G15-R's prototype rescoring *lowers* WTBlade test mAP50-95: fixed − original −0.0072 [−0.0124, +0.0001], P(>0) 0.028, on 4/4 models. It also lowers rare AP (burn, oil: 0.085 → 0.076) and peeling (0.233 → 0.202).
+- **H18 only recovers what the fixed rule loses.** It ends up at the original detector's level. So on WTBlade, H18's "gain over the fixed rule" means it learned to ignore a harmful signal, not that the coverage signal helps.
+- **Val cross-fit agrees:**
+  - fixed − original −0.016, P(>0) 0.013;
+  - H18 − original −0.010, P(>0) 0.039;
+  - H18 − fixed +0.006.
+- **Verdict:**
+  - Per the pre-registered consequence, H18 is a WTBD-specific finding and the method claim is dropped. On WTBlade, neither the fixed rule (G15-R) nor H18 helps RF-DETR.
+  - What does transfer is only the statement "the learned calibrator is never worse than the fixed rule". On its own, that is not a contribution.
+  - A scope check under the fail-fast rule (§30) follows.
+
 ---
 
 ## 25. Engineering problems solved
