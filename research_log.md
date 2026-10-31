@@ -2405,6 +2405,21 @@ A class without labelled boxes gets z2 = z3 = 0 and a missing-indicator.
   - Honest strength: robust on test (4/4 models, every class, robust to halving the fitting data), but not reproduced within val.
   - Before a paper claim it needs an independent check: RF-DETR seed 1 on the same subsets, or a second dataset (WTBlade). It runs only on Kaggle, and is pre-registered separately.
 
+### H18-R: replication on new RF-DETR models (Kaggle). Pre-registered before any run (31 Oct)
+
+**Runs.** RF-DETR Medium, **seed 1**, on the same 4 subsets with the same recipe (`rfdetrm_s1_*`).
+
+**Frozen transfer.** The H18 calibrator is the one already fitted on the seed-0 models' val predictions, refitted deterministically from the same data. It is applied unchanged to the seed-1 models' test predictions, with no refitting on seed 1. The fixed rule is applied as in G15-R.
+
+**H18-R replicates** if, on the 4 seed-1 models (test, paired scene bootstrap, family mean), all of these hold:
+1. H18 − fixed rule, all-class mAP50-95 > 0 with P(>0) ≥ 0.90;
+2. H18 − original, all-class > 0 with P ≥ 0.95;
+3. H18 beats the fixed rule on ≥ 3 of 4 models.
+
+Also reported: the same comparison on seed-1 val (the calibrator was never fitted on these models), and the V1 comparison of seed 1 against ViT-B.
+
+**If it replicates:** H18 is the method result; WTBlade follows as the cross-dataset check. **If not:** H18 is reported as a single-seed finding, and the fixed rule plus the mechanism is the result.
+
 ---
 
 ## 25. Engineering problems solved
