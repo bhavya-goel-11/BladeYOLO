@@ -2379,6 +2379,32 @@ A class without labelled boxes gets z2 = z3 = 0 and a missing-indicator.
 
 **If it fails:** one scope check (which condition failed, and why), then the fixed rule plus the mechanism stands as the result, and work moves to the box-extent direction.
 
+**Result (31 Oct): H18 passes on test. The val cross-fit sanity check disagrees.** Tool `tools/rerank_h18.py` (tests `tests/test_rerank_h18.py`, 3 pass) → `runs/analysis/rerank_h18/report.md`. The calibrator was fitted on 186,654 val detections.
+
+| test, family mean | mAP50-95 | rare AP50-95 |
+|---|---|---|
+| original | 0.189 | 0.064 |
+| fixed rule | 0.200 | 0.111 |
+| **H18** | **0.214** | **0.113** |
+
+- **Per model (original → fixed → H18):**
+  - class-matched 0.189 → 0.209 → 0.213;
+  - rand1 0.205 → 0.217 → 0.235;
+  - rand2 0.215 → 0.223 → 0.239;
+  - rand3 0.147 → 0.153 → 0.168.
+- **The four conditions:**
+  1. H18 − fixed rule, all-class: +0.013 [+0.003, +0.021], P 0.987 ✓
+  2. Rare, H18 − original: +0.048 [+0.016, +0.110] ✓
+  3. Every class gains against the original: craze +0.010, corrosion +0.009, surface_injure +0.001, thunderstrike +0.045, crack +0.052, hide_craze +0.031 ✓
+  4. H18 beats the fixed rule on 4/4 models ✓
+- H18 − original, all-class: +0.025 [+0.012, +0.070].
+- **Val cross-fit (sanity check only, as pre-registered):** H18 0.262, fixed rule 0.270, original 0.257. That is H18 − fixed −0.009 [−0.023, +0.008], with H18 ahead on 1/4 models; surface_injure −0.034, thunderstrike −0.004.
+- **Robustness check** (`tools/rerank_h18_halfval.py`, run after the result and reported whatever it showed): calibrators fitted on either val half alone still beat the fixed rule on test, +0.0117 and +0.0116 (full val +0.0132). So the test gain does not depend on fitting on all of val. The val disagreement is a property of the val halves: when a calibrator is fitted on one scene fold and scored on the other, it does not beat the fixed rule. That shift between scene folds is not explained.
+- **Verdict:**
+  - By the pre-registered rule, **H18 passes**.
+  - Honest strength: robust on test (4/4 models, every class, robust to halving the fitting data), but not reproduced within val.
+  - Before a paper claim it needs an independent check: RF-DETR seed 1 on the same subsets, or a second dataset (WTBlade). It runs only on Kaggle, and is pre-registered separately.
+
 ---
 
 ## 25. Engineering problems solved
