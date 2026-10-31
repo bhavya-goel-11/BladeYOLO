@@ -2420,6 +2420,48 @@ Also reported: the same comparison on seed-1 val (the calibrator was never fitte
 
 **If it replicates:** H18 is the method result; WTBlade follows as the cross-dataset check. **If not:** H18 is reported as a single-seed finding, and the fixed rule plus the mechanism is the result.
 
+### H18-R result (31 Oct; Kaggle v72, `rfdetrm_s1_*`)
+
+v72 trained the 4 seed-1 models without errors. The log has only the old harmless `rfdetr.__version__` traceback, and `v1_options.json` shows seed 1 for all 4. Commands: `tools/rfdetr_v1.py import --run <run dir>`, then `tools/rfdetr_v1.py score --seed1` (→ `runs/analysis/v1/report_s1.md`) and `tools/rerank_h18.py replicate` (→ `runs/analysis/rerank_h18/replicate/report.md`).
+
+**V1 on seed 1 (RF-DETR s1 vs ViT-B s0, test mAP50-95):**
+
+| subset | RF-DETR s1 | ViT-B | diff [95% CI] | P(≤0) |
+|---|---|---|---|---|
+| class-matched | 0.221 | 0.099 | +0.122 [+0.057, +0.227] | 0.000 |
+| rand1 | 0.188 | 0.112 | +0.076 [+0.019, +0.199] | 0.004 |
+| rand2 | 0.220 | 0.135 | +0.085 [+0.028, +0.205] | 0.003 |
+| rand3 | 0.169 | 0.118 | +0.051 [−0.055, +0.120] | 0.172 |
+
+- Mean +0.083 [+0.045, +0.150], P 0.000, 4/4 positive. This replicates seed 0's mean of +0.073.
+- Seed noise for the same subset is about ±0.03 (seed 0 → seed 1: class-matched 0.189 → 0.221, rand3 0.147 → 0.169).
+- Seed 0's rand3 thunderstrike collapse (0.004) does not recur (0.062). It was at least partly seed noise on 13 boxes in 3 scenes.
+
+**H18-R (frozen seed-0 calibrator, seed-1 models, test):**
+
+| model | original | fixed rule | H18 |
+|---|---|---|---|
+| class-matched | 0.221 | 0.234 | 0.235 |
+| rand1 | 0.188 | 0.207 | 0.217 |
+| rand2 | 0.220 | 0.231 | 0.240 |
+| rand3 | 0.169 | 0.175 | 0.185 |
+| **family mean** | **0.200** | **0.212** | **0.219** |
+
+1. H18 − fixed: +0.0078 [−0.0027, +0.0214], P(>0) **0.937** (bar 0.90) ✓
+2. H18 − original: +0.0197 [+0.0075, +0.0449], P **1.000** (bar 0.95) ✓
+3. H18 beats the fixed rule on **4/4** models ✓
+
+→ **H18-R replicates.**
+
+- **Per class vs original:** every class gains (craze 0.070→0.077, corrosion 0.183→0.189, surface_injure 0.432→0.438, thunderstrike 0.082→0.110, crack 0.030→0.077, hide_craze 0.401→0.425).
+- **Per class vs fixed rule:** H18 gains on the frequent classes (surface_injure +0.021, hide_craze +0.020) and on crack (+0.013). It loses on thunderstrike (0.130 → 0.110). Rare AP is about equal (H18 0.094, fixed 0.097). So on seed 1, H18's margin over the fixed rule comes from not hurting the frequent classes, not from extra rare-class gain.
+- **Effect size:** the gain over the fixed rule shrinks from +0.013 (seed 0) to +0.008 (seed 1). Its seed-1 CI includes 0, so it passes only on the pre-registered P ≥ 0.90 bar.
+- **Seed-1 val** (reported, not a condition): H18 − fixed +0.012 [−0.005, +0.025], P 0.931, 4/4. H18 − original +0.012, P 0.996. These are new model outputs on the images the calibrator was fitted on, so they are not fully independent. Even so, the seed-0 cross-fit disagreement (−0.009) does not recur.
+- **Verdict:**
+  - By the pre-registered rule, H18 replicates across training seeds.
+  - Honest size: about +0.01 over the fixed rule and +0.02 over raw RF-DETR, consistent in sign across 8 models.
+  - The test set is still the same 58 scenes, so the remaining open question is cross-dataset transfer. Per the pre-registration, **WTBlade-group is next** (RF-DETR 25% runs plus a pre-registered H18 transfer).
+
 ---
 
 ## 25. Engineering problems solved
