@@ -2351,6 +2351,34 @@ G15-R's rescoring is therefore **not a contribution in itself**. What we did not
 
 Any method claim must rest on that mechanism, plus a learned or adaptive version that beats the fixed rule, not on rescoring as such.
 
+### H18: a learned coverage-aware re-ranker on RF-DETR (CPU). Pre-registered before computing (31 Oct)
+
+**Idea.** G15-R pulls every class equally (fixed α 0.5): rare classes gain, frequent ones lose a little. H18 learns how far to trust the coverage signal, per class and per proximity level. It is a small calibrator over detection-level features, fitted on val, the split already used for model selection, the way temperature scaling is. Test stays untouched.
+
+**Features** (fixed now, per detection; prototype quantities exactly as in G15, DINOv3 ViT-B at 640 px, the model's own subset bank):
+- z1 = logit(RF-DETR confidence);
+- z2 = log p(detected class) from the prototype softmax (K 3, τ 0.05);
+- z3 = top-3 mean cosine to the detected class's labelled boxes;
+- z4 = log(1 + labelled boxes of the class in the subset);
+- interactions z1·z3 and z2·z4;
+- one-hot class (6).
+
+A class without labelled boxes gets z2 = z3 = 0 and a missing-indicator.
+
+**Target.** The fraction of IoU thresholds 0.50:0.95 at which the detection is a true positive, under greedy matching in RF-DETR's original confidence order (the AP50-95 notion of correct).
+
+**Model.** Logistic regression with fractional targets (two weighted rows per detection), L2 with C = 1, standardised features. One calibrator pooled over the 4 models' val predictions, applied to each model's test predictions; the new confidence is the predicted probability. No other knobs.
+
+**Scoring.** Test, paired scene bootstrap, 1,000 replicates, family = mean over the 4 models. Arms: original, fixed rule (G15-R), H18. Val is reported with 2-fold scene cross-fitting, as a sanity check only.
+
+**H18 passes** if all of these hold:
+1. all-class mAP50-95, H18 − fixed rule ≥ +0.01 with P(>0) ≥ 0.95;
+2. rare (thunderstrike, crack) AP50-95, H18 − original ≥ +0.03;
+3. no class loses more than 0.01 AP50-95 against the original (family mean);
+4. H18 > fixed rule in all-class mAP50-95 on ≥ 3 of 4 models.
+
+**If it fails:** one scope check (which condition failed, and why), then the fixed rule plus the mechanism stands as the result, and work moves to the box-extent direction.
+
 ---
 
 ## 25. Engineering problems solved
