@@ -2462,6 +2462,51 @@ v72 trained the 4 seed-1 models without errors. The log has only the old harmles
   - Honest size: about +0.01 over the fixed rule and +0.02 over raw RF-DETR, consistent in sign across 8 models.
   - The test set is still the same 58 scenes, so the remaining open question is cross-dataset transfer. Per the pre-registration, **WTBlade-group is next** (RF-DETR 25% runs plus a pre-registered H18 transfer).
 
+### H18-W: cross-dataset replication on WTBlade-group. Pre-registered before any run (31 Oct)
+
+**Why WTBlade-group.**
+- It is leak-free (§H4 test bed) and comes from a different source with different classes: burn, crack, deformity, dirt, oil, peeling, rust.
+- Its test split has 332 frames in 177 scene groups, three times WTBD-group's 58. So it tests whether the H18 gain survives scene sampling, which no WTBD seed can.
+
+**Subsets** (`tools/wtblade_subsets.py` → `tools/splits/wtblade_group_train_f25{,_rand1,_rand2,_rand3}.txt`, summary `runs/analysis/wtblade/subsets_f25.txt`):
+- Budget: 25% of the 2,136 training frames, i.e. 534 images. Scenes come from `external/WTBlade-group/groups.csv` (522 train scenes).
+- They are drawn exactly like the WTBD subsets: one class-matched draw (best of 1,000 random scene orders) and 3 plain random draws (rng 0).
+- Scenes that would overshoot the budget by > 5% are skipped. This excludes one 899-image video scene: 42% of train, holding dirt 1,185 and rust 1,065 of all train boxes. So no subset contains it, and the class-matched draw cannot match rust's full-set share (56 rust boxes vs 1,249 in train).
+
+| subset | scenes | images | burn | crack | deformity | dirt | oil | peeling | rust |
+|---|---|---|---|---|---|---|---|---|---|
+| class-matched | 174 | 534 | 47 | 95 | 121 | 446 | 66 | 436 | 56 |
+| rand1 | 211 | 534 | 67 | 129 | 157 | 344 | 74 | 481 | 70 |
+| rand2 | 323 | 534 | 86 | 240 | 222 | 380 | 84 | 71 | 116 |
+| rand3 | 227 | 547 | 66 | 134 | 157 | 336 | 57 | 463 | 69 |
+
+**Runs (Kaggle).** RF-DETR Medium, seed 0, with the V1 recipe unchanged (100 epochs, batch 4 × accum 4) on the 4 subsets: `rfdetrm_wtblade_group_f25{,_rand1,_rand2,_rand3}`. Test and val predictions at conf 0.001 come from `tools/rfdetr_v1.py predict`. They are imported with `import --dataset wtblade` into `runs/analysis/bootstrap/wtblade_f25/{test,val}`.
+
+**Frozen from WTBD; nothing tuned on WTBlade.**
+- Fixed rule: α 0.5, k 3, τ 0.05, DINOv3 ViT-B box embeddings, prototype bank = the model's own labelled subset.
+- H18 recipe: the same 8 feature families (z1 logit conf, z2 log p_proto, z3 top-3 cos, z4 log(1+n), z1·z3, z2·z4, missing-class indicator, class one-hot, now 7 classes), the fractional AP50-95 TP target and logistic C = 1.
+- Rare classes are defined by the same rule as WTBD: the two classes with the fewest full-train boxes, burn (141) and oil (149).
+
+**Primary test, H18-W.**
+- The class one-hot ties a calibrator to its label set, so the WTBD calibrator cannot be applied to WTBlade. What transfers is the recipe.
+- The H18 calibrator is fitted once on the 4 WTBlade models' val predictions (val, 323 frames) and applied unchanged to WTBlade test.
+- Paired scene bootstrap over the 177 test groups from `groups.csv`, 2,000 replicates, family mean over the 4 models.
+
+**H18-W replicates** if all three of these hold (the H18-R bars):
+1. H18 − fixed rule, all-class mAP50-95 > 0 with P(>0) ≥ 0.90;
+2. H18 − original, all-class > 0 with P ≥ 0.95;
+3. H18 beats the fixed rule on ≥ 3 of 4 models.
+
+**Reported, not gating:**
+- the fixed rule vs original on WTBlade (does G15-R's rescoring gain transfer?);
+- rare (burn, oil) and per-class AP;
+- val 2-fold scene cross-fit as on WTBD;
+- the absolute RF-DETR 25% scores against the 100% ViT-B reference `bladeyolo2b_wtblade_group` (0.172 test mAP50-95).
+
+**Consequences.**
+- *Replicates:* H18 is a cross-dataset method result. The paper's method claim is "a coverage-aware re-ranker learned on val transfers across seeds and datasets".
+- *Fails:* H18 is a WTBD-specific finding. The paper rests on the mechanism (G16/G16-R) and the fixed rule, with H18 reported as not transferring. No rescue runs (§30).
+
 ---
 
 ## 25. Engineering problems solved

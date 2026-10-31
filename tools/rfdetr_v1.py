@@ -14,6 +14,7 @@ Kaggle, per subset:
   python tools/rfdetr_v1.py predict --run runs/detect/BladeYOLO_WindSurface/rfdetrm_rand1_wtbd_group_f25 --data <WTBD-group>
 Local:
   python tools/rfdetr_v1.py import --run runs/detect/BladeYOLO_WindSurface/rfdetrm_rand1_wtbd_group_f25
+  (WTBlade-group runs: add --dataset wtblade)
 """
 
 import argparse
@@ -31,6 +32,8 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 DATA = os.path.join(ROOT, "external", "WTBD-group")
 CACHE = {"test": os.path.join(ROOT, "runs", "analysis", "bootstrap", "seeds_f25", "preds"),
          "val": os.path.join(ROOT, "runs", "analysis", "bootstrap", "v1_val_preds")}
+WTBLADE = os.path.join(ROOT, "external", "WTBlade-group")  # H18-W, cross-dataset replication
+WTBLADE_CACHE = {s: os.path.join(ROOT, "runs", "analysis", "bootstrap", "wtblade_f25", s) for s in ("test", "val")}
 SIZES = {"nano": "RFDETRNano", "small": "RFDETRSmall", "medium": "RFDETRMedium", "base": "RFDETRBase",
          "large": "RFDETRLarge"}
 BEST = ["checkpoint_best_total.pth", "checkpoint_best_ema.pth", "checkpoint_best_regular.pth"]
@@ -207,6 +210,7 @@ def main():
     a.add_argument("--splits", nargs="+", default=["test", "val"])
     a = sp.add_parser("import")
     a.add_argument("--run", required=True)
+    a.add_argument("--dataset", default="wtbd", choices=["wtbd", "wtblade"])
     a = sp.add_parser("score")
     a.add_argument("--seed1", action="store_true", help="score the seed-1 runs (rfdetrm_s1_*) -> report_s1.md")
     args = ap.parse_args()
@@ -217,7 +221,7 @@ def main():
     elif args.cmd == "predict":
         predict(args.run, args.data, args.size, args.splits)
     elif args.cmd == "import":
-        import_preds(args.run)
+        import_preds(args.run) if args.dataset == "wtbd" else import_preds(args.run, WTBLADE, WTBLADE_CACHE)
     else:
         score_v1(pairs=PAIRS_S1, tag="_s1") if args.seed1 else score_v1()
 
