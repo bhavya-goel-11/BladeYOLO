@@ -2961,6 +2961,30 @@ The labels are complete; a naive `cat | awk` count under-reads them because file
 
 **Consequence:** a detector on WTBs2025 fails mainly through tiny-object localisation, and its unlabelled co-occurring defects count as false positives. It can still serve as a replication point for G22-type questions on the large-box classes (oil, lightning, erosion). It cannot discriminate between hypotheses about ranking. Not prepared further until a question needs it.
 
+### H20: is subset luck annotation-convention match? Pre-registered before computing (2 Nov)
+
+**Idea.** H7 found subset quality real (test–val ρ 0.65) but invisible to every appearance and class-count statistic. A property H7 never measured is *how* a subset's labellers cut defects into boxes. Earlier phases found WTBD scores sensitive to box granularity: craze merged vs split (§9, §11), and 13–16% extent disagreement (§14). A detector learns the box convention of its subset. If that convention differs from the held-out labels' convention, correct detections are scored as errors.
+
+**Statistics,** per subset S, per class c, over S's labelled boxes against a reference set's boxes of c:
+- **G1 (primary):** 1-D Wasserstein distance between log box areas (px² at 640), averaged over the 6 classes. This is a granularity proxy: merged boxes are large, split ones small.
+- **G2:** the same for log aspect ratio (w/h).
+- **G3:** the same for the number of c-boxes per image containing c (split vs merged directly).
+- Classes absent from S are skipped.
+
+**References:** the test boxes (explanatory, uses test labels) and the val boxes (usable in practice, since val labels exist).
+
+**Data:** the 16 H7 subsets with their test and val mAP50-95 (`runs/analysis/subset_properties/table.csv`).
+
+**H20 passes** (G1) if all hold:
+- (a) Spearman ρ(G1 vs test, test mAP50-95) ≤ −0.6 with two-sided permutation p < 0.05 (20,000 permutations);
+- (b) ρ(G1 vs val, val mAP50-95) ≤ −0.4;
+- (c) within the 8 random draws, ρ(G1 vs test, test) ≤ −0.5;
+- (d) the practical version, ρ(G1 vs val, test mAP50-95), ≤ −0.4.
+
+G2 and G3 are reported only.
+
+**If it passes:** a pre-registered convention-matched subset selector on Kaggle (choose scenes whose box convention matches val), against random and cover. **If it fails:** one scope check, then closed.
+
 ---
 
 ## 25. Engineering problems solved
