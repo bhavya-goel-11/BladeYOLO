@@ -2828,6 +2828,70 @@ Not run. Taken together, label-free post-hoc rescoring (G20, G21) and exemplar r
 
 This accounts for H18 / H18-W / H19-W from the error side.
 
+### Novelty audit of the surviving findings (2 Nov; web literature check, not exhaustive)
+
+**Item 2, the instance-level proximity law (G16): partly prior art.**
+- Its premise is the core-set assumption of active learning (Sener & Savarese 2018; instance-level core-set for detection, e.g. IDEAL-M3D 2025).
+- Its design (the same test example tracked across random training subsets) is the datamodels design (Ilyas et al., ICML 2022), though only in classification.
+- Nearest-neighbour distance to the labelled set as a per-sample accuracy estimator: OCCAM (arXiv 2406.04508), also classification.
+- Found nothing that holds a test *object* fixed across training subsets in detection. Even so, the law alone is a detection instance of a known premise, not a paper.
+
+**Item 1, fine-tuning moves the role of coverage from recall to ranking (G16 → G16-R): open.** Nearest work:
+- LP-FT (Kumar et al., ICLR 2022): fine-tuning distorts pretrained features; classification, OOD;
+- Attention-RPN (Fan et al., CVPR 2020): novel objects get low-scored good boxes;
+- frozen-backbone prototype FSOD (arXiv 2606.23069, 2026);
+- F-VLM: fine-tuning helps base classes, not novel ones.
+
+None states that end-to-end fine-tuning decouples *whether* a defect is found from its proximity to labelled exemplars while keeping the dependence in its *score*, or uses that to predict when exemplar rescoring pays off.
+
+**The weakness of item 1 as it stands:**
+- WTBD only, with 4 subsets and one seed; the "flatter" test passed at P 0.957, just over the bar.
+- The contrast was RF-DETR against BladeYOLO-v2 ViT-B, which differ in architecture and head as well as in fine-tuning.
+- G22 below fixes both.
+
+**Third dataset, from the local sources** (audit `runs/analysis/datasets/report.md`): **WTBs2025** (*Sci. Data* 13:1310, 2026) is the only candidate with enough independent scenes.
+- 3,403 scenes from 4,145 unique images; 9 official classes.
+- WindSurface has 81 scenes. Beijing and its check export share WTBD test photos.
+- Caveats:
+  - Small boxes: median 14–43 px at 640; pinholes 2 px, localized damage 6.5 px.
+  - 782 of its images duplicate WTBlade images (1,371 same-scene), and must be removed from its test split for independence.
+  - 114 GAN lightning images.
+  - It ships no split.
+
+It is prepared and pre-registered separately (G23) once G22 stage B has decided whether item 1 survives.
+
+### G22: does fine-tuning move coverage from recall to ranking? Controlled replication (CPU + Kaggle). Pre-registered before computing (2 Nov)
+
+**Claim under test (item 1).** With a frozen backbone, whether a test defect is found at all depends on its proximity to the labelled same-class defects. End-to-end fine-tuning removes that dependence for being found and keeps it for the score.
+
+**Definitions** (G16/G16-R unchanged):
+- x = max cosine, in frozen DINOv3 ViT-B box-embedding space, between the test box and the model's training-subset boxes of its class;
+- y = highest same-class confidence at IoU ≥ 0.5 (0 if none);
+- detected = y ≥ 0.05;
+- y ~ x + log(1 + n) with test-box and subset fixed effects;
+- cluster bootstrap over test scenes, 1,000 replicates.
+
+**The control.** RF-DETR-M with `freeze_encoder=True`: the DINOv2 encoder is frozen; projector and decoder train. Recipe, subsets and seed are otherwise identical to the fine-tuned runs (100 epochs, batch 4 × accum 4, seed 0). Fine-tuning is then the only difference, which removes G16-R's architecture confound.
+
+**Stage A (CPU, now, cached predictions):** WTBlade test, 8 fine-tuned RF-DETR models (f25 class-matched and rand1–3; f08 the same).
+- **A1:** class-aware confidence slope > 0 with P(>0) ≥ 0.95, on f25 alone and on f25 + f08 pooled.
+- **Reported:**
+  - the binarised slope;
+  - candidate recall (any same-class box at IoU ≥ 0.5, conf ≥ 0.001), so a ceiling effect of 300 queries can be judged.
+
+**Stage B (Kaggle):** frozen-encoder RF-DETR on the 4 WTBD f25 subsets of G16-R and the 4 WTBlade f25 subsets (8 runs, `rfdetrmfz_*`). Per dataset, paired with the fine-tuned models on the same subsets and the same scene draws.
+- **B1:** frozen binarised slope > 0 with P ≥ 0.95. Coverage governs recall without fine-tuning.
+- **B2:** binarised slope, fine-tuned − frozen < 0 with P ≥ 0.95. Fine-tuning flattens it.
+- **B3:** fine-tuned class-aware confidence slope > 0 with P ≥ 0.95. On WTBD this is G16-R's +0.478, recomputed; on WTBlade it is A1.
+
+**Item 1 replicates** if B1–B3 hold on **both** datasets. If they hold on one dataset only, it is a dataset-specific observation and not a claim.
+
+**Reported, not decisive:**
+- The G15-R fixed-rule rescoring gain (all-class mAP50-95) on frozen vs fine-tuned models. Item 1 predicts a larger gain on the fine-tuned models, because only they find far-from-labelled defects to re-rank.
+- The detection rate and mAP of the frozen models.
+
+**Fail:** one scope check, then item 1 is dropped as a claim. The paper would then rest on the diagnostic decomposition alone.
+
 ---
 
 ## 25. Engineering problems solved
