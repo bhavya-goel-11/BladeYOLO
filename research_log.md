@@ -2985,6 +2985,30 @@ G2 and G3 are reported only.
 
 **If it passes:** a pre-registered convention-matched subset selector on Kaggle (choose scenes whose box convention matches val), against random and cover. **If it fails:** one scope check, then closed.
 
+### H20 result: fails; annotation-convention distance does not explain subset luck; closed (2 Nov)
+
+`tools/h20_convention.py` → `runs/analysis/h20/report.md`. 16 H7 subsets.
+
+| statistic | reference | ρ vs test score (perm p) | ρ vs val score | ρ within 8 random draws |
+|---|---|---|---|---|
+| **G1 log-area W1 (primary)** | test | **−0.27 (0.30)** | −0.35 | −0.29 |
+| G1 | val | −0.26 (0.32) | −0.32 | −0.10 |
+| G2 log aspect | test / val | −0.45 (0.08) / −0.49 (0.05) | −0.25 / −0.35 | −0.12 / −0.12 |
+| G3 boxes per image | test / val | −0.41 (0.12) / −0.09 (0.75) | −0.43 / −0.21 | −0.31 / −0.02 |
+
+- Conditions (a), (c) and (d) fail; **H20 fails.**
+- All 12 correlations are negative, but they share the same 16 subsets, so that is not independent evidence.
+
+**Scope check** (`runs/analysis/h20/scope.py` → `scope.log`): per-class convention distance against per-class test AP, across the 16 ViT-B subsets.
+- **Craze**, the class where granularity was shown to matter: ρ +0.09 (area) and +0.11 (boxes per image).
+- **Other classes are mixed:**
+  - surface_injure boxes per image −0.54 (p 0.04), but thunderstrike +0.56 (p 0.03), in the opposite direction;
+  - hide_craze area −0.45;
+  - crack within the random draws −0.86, which is 8 points with no support from the full set (−0.17).
+- No consistent per-class mechanism.
+
+**Closed.** Subset luck is not visible in appearance (H7), class counts (H7), coverage (G16) or box convention (H20).
+
 ---
 
 ## 25. Engineering problems solved
