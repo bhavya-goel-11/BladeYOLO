@@ -2918,6 +2918,49 @@ It is prepared and pre-registered separately (G23) once G22 stage B has decided 
 - `tests/test_rfdetr_freeze.py` passes (encoder 0/223 parameters trainable, all 286 others trainable).
 - "Frozen" means frozen at RF-DETR's COCO-pretrained encoder weights.
 
+### Per-class check of the "diagnostic predicts rescoring payoff" candidate: no relation (2 Nov; exploratory, post hoc)
+
+`runs/analysis/g22/perclass.py` → `perclass.log`. The per-class G15-R gains had already been seen (G15-R, H18-W, H19-W), so this is a consistency check, not a test. RF-DETR 25% on WTBD (6 classes) and WTBlade (7), plus WTBlade 8% (7).
+
+Spearman correlation of each class's fixed-rule gain with:
+
+| predictor | 13 classes | 20 rows |
+|---|---|---|
+| standardised detected-vs-proximity slope | −0.15 | −0.11 |
+| near − far tercile detection gap | −0.16 | −0.18 |
+| ranked-low share (error anatomy) | +0.01 | +0.11 |
+| no-box share | −0.04 | +0.08 |
+
+All p > 0.4.
+
+- **Counterexample:** WTBD craze has the highest ranked-low share (0.63) and still loses under rescoring (−0.008). The gains are concentrated in thunderstrike (+0.052) and crack (+0.041).
+- Per-class AP over about 50 boxes is noisy, so this cannot rule a relation out, but it gives the candidate no support.
+- **The dataset-level match** (WTBD flat recall dependence with rescoring gain; WTBlade steep with no gain) **stays two points without a class-level mechanism.** Not a claim; G23's predictor role is dropped. Fail-fast: no scope at this level.
+
+### WTBs2025 audit for G23: weak as a test bed (2 Nov)
+
+The labels are complete; a naive `cat | awk` count under-reads them because files lack final newlines. Recount, one folder per class:
+- coating detachment 3,495 boxes; erosion 4,526; lightning 354; localized damage 1,254; oil 563; paint cracks 503; pinholes 892; protective film 632; stains 298.
+
+**Each folder labels only its own class.** Oil carries 11 paint-crack boxes and protective film 9 oil boxes. Any other defect type in a photo is unlabelled, and only 18 files appear in two folders.
+
+**Boxes are mostly below one RF-DETR patch.** Median short side at 640 px:
+
+| class | median short side | share ≥ 16 px |
+|---|---|---|
+| pinholes | 1.5 px | 0.05 |
+| localized damage | 5 px | 0.06 |
+| coating detachment | 9 px | 0.28 |
+| protective film damage | 10.5 px | 0.32 |
+| paint cracks, stains | 13.5 px | 0.42–0.43 |
+| erosion | 17 px | 0.51 |
+| oil | 27.5 px | 0.90 |
+| lightning | 36 px | 0.88 |
+
+7,024 of 7,544 images are 640×640, so no higher resolution exists.
+
+**Consequence:** a detector on WTBs2025 fails mainly through tiny-object localisation, and its unlabelled co-occurring defects count as false positives. It can still serve as a replication point for G22-type questions on the large-box classes (oil, lightning, erosion). It cannot discriminate between hypotheses about ranking. Not prepared further until a question needs it.
+
 ---
 
 ## 25. Engineering problems solved
