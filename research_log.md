@@ -2732,6 +2732,27 @@ No scope.
 
 **Reading:** the premise is false. Score mass from overlapping queries does not separate RF-DETR's ranked-low true boxes from its false positives: false positives pile up just as much (on defect-like texture and on the true defects' surroundings). **G20 discarded** (§30). The ranking signal, if one exists, has to come from outside the detector's own query set.
 
+### G21: flip agreement as a ranking signal (CPU inference). Pre-registered before any flipped prediction (1 Nov)
+
+**Idea.** G20 showed that RF-DETR's own query set carries no ranking signal. An outside view of the same image might. Texture-triggered false positives depend on the exact pixels, while real defects should survive a left-right mirror. A box ranks high only if *both* views score it:
+- *agreement* (G21's arm): s' = √(s · s_f), where s_f is the score of the same-class box from the mirrored image (mapped back) with the highest IoU ≥ 0.5, and 0 if none.
+- *tta-mean* (the prior-art baseline): standard score-averaging test-time augmentation, s' = (s + s_f)/2.
+- Boxes are unchanged in both arms.
+
+**Models.** Only checkpoints still available are used (every Kaggle download returns the latest version, so the f25 WTBlade and the other WTBD checkpoints are gone):
+- WTBlade-group 8%: 4 subsets;
+- WTBD-group 25%: class-matched and rand3.
+Flipped predictions are made locally in `.venv-rfdetr` (`tools/g21_flip.py predict`); original predictions are the Kaggle ones.
+
+**G21 passes** if, on **both** datasets' test splits, agreement − original family mean mAP50-95 > 0 with paired scene bootstrap P(>0) ≥ 0.95 (2,000 replicates), and agreement is better on all models but at most one.
+
+**Contribution test (beyond standard TTA):** agreement − tta-mean > 0 with P ≥ 0.90 on both datasets.
+- If G21 passes but this does not, the gain is ordinary TTA: a recipe note, not a contribution.
+
+**Reported:** val (direction), tta-mean − original.
+
+**Fail:** one scope check, then discard (§30).
+
 ---
 
 ## 25. Engineering problems solved
