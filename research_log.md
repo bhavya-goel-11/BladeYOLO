@@ -2713,6 +2713,25 @@ Candidate recall = hit + ranked low. YOLO-family runs keep fewer boxes after NMS
 - *Pass:* a prior-art check, then replication on the seed-1 WTBD models, and a write-up as a training-free DETR re-scorer.
 - *Fail:* one scope check, then discard (§30).
 
+### G20 result: fails on both datasets; discarded (1 Nov)
+
+`runs/analysis/g20/report.md` (log `g20.log`). Val picked the smallest λ (0.25) on both datasets, and val mAP fell monotonically with λ.
+
+| test | original | consensus (λ 0.25) | Δ [95% CI], P(>0) | models better |
+|---|---|---|---|---|
+| WTBD 25% | 0.189 | 0.144 | −0.046 [−0.068, −0.002], 0.022 | 0/4 |
+| WTBlade 25% | 0.132 | 0.112 | −0.021 [−0.027, −0.014], 0.000 | 0/4 |
+| WTBlade 8% (reported) | 0.092 | 0.085 | −0.008 [−0.012, −0.003], 0.004 | 0/4 |
+
+Every class loses on WTBD (crack 0.056 → 0.008).
+
+**Scope check** (`runs/analysis/g20/scope.py` → `scope.log`, val only). The obvious flaw is that under AP matching the duplicates of a true box are false positives, and the rule raised them too. So the check boosted only the top-scoring box of each overlap cluster:
+- WTBD val: −0.011 at λ 0.25, falling to −0.089 at λ 2;
+- WTBlade val: −0.005, falling to −0.053.
+No scope.
+
+**Reading:** the premise is false. Score mass from overlapping queries does not separate RF-DETR's ranked-low true boxes from its false positives: false positives pile up just as much (on defect-like texture and on the true defects' surroundings). **G20 discarded** (§30). The ranking signal, if one exists, has to come from outside the detector's own query set.
+
 ---
 
 ## 25. Engineering problems solved
