@@ -2655,6 +2655,42 @@ Bold = low points (1 ≤ n < 30): **10 low, 18 high, 0 with n = 0.** The low set
 - This points back to coverage (G16): what limits RF-DETR at 25% is too few labelled examples of the rare classes, not where the box edges go. On WTBlade, the H18-W/H19-W rescoring did not fix rare-class recognition.
 - Caveat: WTBlade has no group-split copy audit, so the ceiling comparison is WTBD-only.
 
+### Error anatomy: at 25% labels, RF-DETR's right boxes are among its outputs and scored low (1 Nov)
+
+`tools/error_anatomy.py` → `runs/analysis/extent/anatomy.md`. Per test box: is a same-class box at IoU ≥ 0.5 among the outputs (conf ≥ 0.001), and how is it scored? Outcomes:
+- *hit*: such a box with conf ≥ 0.1;
+- *ranked low*: one exists only below 0.1;
+- *other cls*: only other-class boxes at IoU ≥ 0.5;
+- *no box*: nothing at IoU ≥ 0.5.
+
+Candidate recall = hit + ranked low. YOLO-family runs keep fewer boxes after NMS (~50–80 per image) than RF-DETR (~300), so recall within each image's top-50 is also given.
+
+| dataset | detector | hit | ranked low | other cls | no box | candidate recall | in top-50 |
+|---|---|---|---|---|---|---|---|
+| WTBD | **RF-DETR-M 25%** (4 subsets) | 0.55 | **0.37** | 0.04 | 0.04 | **0.92** | 0.81 |
+| WTBD | ViT-B 25% (4 subsets) | 0.41 | 0.26 | 0.15 | 0.18 | 0.67 | 0.66 |
+| WTBD | BladeYOLO-v2 100% (2 seeds) | 0.63 | 0.17 | 0.08 | 0.12 | 0.80 | 0.80 |
+| WTBlade | **RF-DETR-M 25%** (4 subsets) | 0.55 | 0.28 | 0.03 | 0.14 | **0.83** | 0.72 |
+| WTBlade | RF-DETR-M 8% (4 subsets) | 0.43 | 0.33 | 0.07 | 0.16 | 0.77 | 0.62 |
+| WTBlade | ViT-B 100% | 0.58 | 0.27 | 0.06 | 0.09 | 0.85 | 0.81 |
+
+**Findings.**
+1. **RF-DETR at 25% already proposes the right box for most defects.**
+   - WTBD: candidate recall 0.92, above BladeYOLO-v2 trained on 100% (0.80), even within the top-50 boxes (0.81 vs 0.80).
+   - WTBlade: 0.83 at 25%, the level of ViT-B trained on 100% (0.85).
+   - Thunderstrike on WTBD: 1.00 candidate recall, but 62% ranked low.
+2. **Its low-label deficit is ranking.**
+   - On WTBD, 37% of test defects have a correct box scored below 0.1 (median score 0.025).
+   - Extent is at the annotator ceiling (previous entry), and "no box" is 4%.
+   - The true class is usually the top or second class at that place (median rank 1–2). WTBD's rare classes are the exception: thunderstrike rank 4, crack rank 3, confused with craze, surface_injure and hide_craze.
+   - So the loss is mostly true boxes scored below other images' false positives, not wrong classes.
+3. **Explains the H18 dataset split.**
+   - WTBD's rare-class errors are re-rankable confusions: the right class is present at rank 3–4.
+   - On WTBlade, rare-class misses split between ranked-low and no box. Crack is 44% no box even for ViT-B at 100% (42%); WTBlade crack also has the lowest copy agreement (81.5%, §13). No re-ranker can recover a box that was never proposed.
+4. **Fewer labels mostly add ranked-low and no-box cases** (WTBlade 25% → 8%: hit 0.55 → 0.43, ranked low 0.28 → 0.33, no box 0.14 → 0.16).
+
+**Consolidated reading** (with G16-R and the extent ceiling): in a fine-tuned foundation detector, label scarcity shows up as *scoring*, not as *finding* or *boxing*. That is the opposite of the YOLO-family picture (§21: extent- and proposal-limited). The next method question is therefore: which label-free signal separates ranked-low true boxes from false positives?
+
 ---
 
 ## 25. Engineering problems solved
