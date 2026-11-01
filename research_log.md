@@ -3009,6 +3009,56 @@ G2 and G3 are reported only.
 
 **Closed.** Subset luck is not visible in appearance (H7), class counts (H7), coverage (G16) or box convention (H20).
 
+### From diagnoses to fixes: what is already done, and the crossed test (2 Nov)
+
+| diagnosis | the fix it implies | status |
+|---|---|---|
+| WTBD rare classes: right box ranked low | exemplar rescoring | done: G15-R +0.011, H18 +0.025 on WTBD, nothing on WTBlade; the method is prior art |
+| WTBlade crack: small compact cracks missed at any label budget | more pixels per defect | **G24 below** |
+| flip TTA hurts DETR through many-to-one matching | one-to-one matching | done (G21 scope): halves the loss, no gain |
+| subset luck | none (H7, G16, H20 all negative) | — |
+
+No single fix is new. What can be new is a **double dissociation**: the diagnosis predicts which fix works where. Ranking regime: rescoring helps WTBD but not WTBlade, which is already measured. Localisation regime: resolution should help WTBlade more than WTBD.
+
+### G24: input resolution as the localisation-regime fix (Kaggle). Pre-registered before any run (2 Nov)
+
+**Runs:** RF-DETR-M at resolution **768** (default 576; tokens × 1.78), otherwise the V1 recipe:
+- 100 epochs, seed 0;
+- batch 2 × accum 8 (effective 16, as 4 × 4), to fit memory;
+- on the same subsets as existing 576 runs: WTBD f25 (class-matched, rand1–3; `rfdetrmr768_*_wtbd_group_f25`) and WTBlade f08 (`rfdetrmr768_*_wtblade_group_f08`).
+
+`tools/rfdetr_v1.py train --resolution 768`; predictions use the recorded resolution. `tests/test_rfdetr_resolution.py` passes.
+
+**Prediction from the diagnosis** (WTBlade's deficit is localisation of small compact cracks; WTBD's is ranking):
+
+| | condition |
+|---|---|
+| **R1** | WTBlade f08 test mAP50-95, 768 − 576 > 0 with paired scene bootstrap P ≥ 0.95 (2,000 replicates), better on ≥ 3/4 models |
+| **R2** | WTBlade crack no-box rate (error anatomy) lower at 768 than 576 on ≥ 3/4 models |
+| **R3** | relative gain (Δ / 576 mAP) larger on WTBlade than on WTBD, bootstrap P ≥ 0.90 |
+
+- **Double dissociation confirmed** if R1–R3 hold. Together with the rescoring results, the diagnosis then picks the working fix on each dataset.
+- **Confound, stated now:** WTBD images are 1024 px natively, so 768 gives WTBD real extra detail, while WTBlade (640 native) is upsampled. This works *against* R3.
+- **Reported:** per-class Δ; WTBD crack/thunderstrike confusion; G15-R rescoring on the 768 models.
+
+**Fail:** one scope check, then the resolution arm is closed and the dissociation is not claimed.
+
+### G22-O: proximity in the detector's own feature space (CPU). Pre-registered before computing (2 Nov)
+
+**Caveat being addressed:** G16-R and G22 measure proximity in frozen DINOv3 ViT-B space, not in the space the detector uses.
+
+**Method:**
+- For each RF-DETR model with a local checkpoint, a forward hook on its backbone projector output (stride 16, the decoder's input) gives a box embedding: the mean of the tokens whose centres lie in the box, L2-normalised.
+- Embedded: test boxes, and the model's own training-subset boxes.
+- x_own = max cosine to the subset's same-class boxes. Otherwise the G22 estimator is unchanged.
+
+**Models:**
+- WTBD f25 class-matched and rand3 (the other checkpoints are no longer downloadable);
+- WTBlade f08, all 4;
+- later, the stage-B frozen models.
+
+**Readout** (descriptive, no decision depends on it): own-space vs DINOv3-space slopes (confidence, detected) on the same models. The dataset contrast of G22 stage A (WTBD detected slope ≈ 0; WTBlade > 0) **holds in own space** if WTBD's detected-slope interval includes 0 and WTBlade's is > 0 with P ≥ 0.95.
+
 ---
 
 ## 25. Engineering problems solved

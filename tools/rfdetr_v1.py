@@ -73,21 +73,36 @@ def model_class(size):
     return getattr(rfdetr, SIZES[size])
 
 
-def train(dataset, out, size, epochs, batch, accum, seed, freeze_encoder=False):
+def train(dataset, out, size, epochs, batch, accum, seed, freeze_encoder=False, resolution=None):
     if any(os.path.exists(os.path.join(out, b)) for b in BEST):
         print(f"{out} already has a best checkpoint; not retraining")
         return
     os.makedirs(out, exist_ok=True)
     opts = dict(dataset=os.path.abspath(dataset), size=size, epochs=epochs, batch_size=batch, grad_accum_steps=accum,
-                seed=seed, freeze_encoder=freeze_encoder)
+                seed=seed, freeze_encoder=freeze_encoder, resolution=resolution)
     json.dump(opts, open(os.path.join(out, "v1_options.json"), "w"), indent=2)
     # periodic checkpoints only at the end: four runs of 10-epoch checkpoints filled Kaggle's disk (v69)
     # G22 control: freeze_encoder keeps the DINOv2 encoder frozen (projector and decoder still train)
-    model_class(size)(**({"freeze_encoder": True} if freeze_encoder else {})).train(dataset_dir=os.path.abspath(dataset), output_dir=os.path.abspath(out), epochs=epochs,
+    model_class(size)(**model_kwargs(freeze_encoder, resolution)).train(dataset_dir=os.path.abspath(dataset), output_dir=os.path.abspath(out), epochs=epochs,
                               batch_size=batch, grad_accum_steps=accum, seed=seed, checkpoint_interval=epochs)
     for f in os.listdir(out):
         if f.endswith((".ckpt", ".pth")) and f != best_checkpoint(out).split(os.sep)[-1]:
             os.remove(os.path.join(out, f))
+
+
+def model_kwargs(freeze_encoder=False, resolution=None):
+    """G22 control (frozen DINOv2 encoder) and G24 (input resolution, divisible by patch 16 x 2 windows = 32)."""
+    kw = {"freeze_encoder": True} if freeze_encoder else {}
+    if resolution:
+        assert resolution % 32 == 0, resolution
+        kw["resolution"] = resolution
+    return kw
+
+
+def run_resolution(run):
+    """The training resolution recorded in v1_options.json (None = the model default, 576 for Medium)."""
+    p = os.path.join(run, "v1_options.json")
+    return json.load(open(p)).get("resolution") if os.path.exists(p) else None
 
 
 def best_checkpoint(run):
@@ -106,7 +121,8 @@ def predict(run, data, size, splits):
     from PIL import Image
 
     names = yaml.safe_load(open(os.path.join(data, "data.yaml")))["names"]
-    model = model_class(size)(pretrain_weights=best_checkpoint(run), num_classes=len(names))
+    model = model_class(size)(pretrain_weights=best_checkpoint(run), num_classes=len(names),
+                              **model_kwargs(resolution=run_resolution(run)))
     for split in splits:
         d = os.path.join(data, split, "images")
         out, dropped = {}, 0
@@ -210,6 +226,7 @@ def main():
     a.add_argument("--accum", type=int, default=4)
     a.add_argument("--seed", type=int, default=0)
     a.add_argument("--freeze-encoder", action="store_true", help="G22 control: frozen DINOv2 encoder")
+    a.add_argument("--resolution", type=int, default=None, help="G24: input resolution (default: model's, 576)")
     a = sp.add_parser("predict")
     a.add_argument("--run", required=True)
     a.add_argument("--data", required=True)
@@ -224,7 +241,7 @@ def main():
     if args.cmd == "prepare":
         prepare(args.data, args.subset, args.out)
     elif args.cmd == "train":
-        train(args.dataset, args.out, args.size, args.epochs, args.batch, args.accum, args.seed, args.freeze_encoder)
+        train(args.dataset, args.out, args.size, args.epochs, args.batch, args.accum, args.seed, args.freeze_encoder, args.resolution)
     elif args.cmd == "predict":
         predict(args.run, args.data, args.size, args.splits)
     elif args.cmd == "import":
