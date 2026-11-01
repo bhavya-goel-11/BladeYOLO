@@ -2592,6 +2592,28 @@ Bold = low points (1 ≤ n < 30): **10 low, 18 high, 0 with n = 0.** The low set
 - *Confirmed:* the boundary is a property of label count, not of WTBD. The paper gets a mechanism-backed usage rule: exemplar rescoring pays only below ~30 labelled boxes per class (coverage-limited ranking, G16-R), and the count-gated rule is the practical form.
 - *Not confirmed:* the boundary was a WTBD artefact; the rescoring line is closed. Next direction: box extent (mAP75 stuck at 0.06–0.08 on both datasets), starting with a prior-art check. No rescue runs (§30).
 
+### H19-W result (1 Nov; Kaggle run 06:34–09:14 UTC, `rfdetrm_*wtblade_group_f08`)
+
+**Run checks.** All 4 models trained for 100 epochs (1,100 steps) on 171/171/176/172 images, about 40 min each. They predicted all 332 test and 323 val frames. The only traceback is the old `rfdetr.__version__` cell. Imported to `runs/analysis/bootstrap/wtblade_f08/`; scored with `tools/h19w_lowcount.py` → `runs/analysis/proto_rescore/wtblade/h19w_f08.md` (+ `.json`, `.log`). Original all-class test mAP50-95 at 8%: 0.093 / 0.102 / 0.084 / 0.088 (mean 0.092, vs 0.132 at 25%).
+
+| statistic | point | 95% CI | P(>0) |
+|---|---|---|---|
+| mean Δ, 10 low points | −0.0019 | [−0.0126, +0.0071] | 0.286 |
+| mean Δ, 18 high points | −0.0076 | [−0.0122, +0.0001] | 0.026 |
+| low − high | +0.0056 | [−0.0102, +0.0149] | 0.764 |
+| fixed rule − original, all-class | −0.0056 | [−0.0094, +0.0003] | 0.031 |
+| count-gated rule − original, all-class | −0.0007 | [−0.0045, +0.0025] | 0.286 |
+
+1. low > 0, P ≥ 0.95: ✗ (−0.0019, P 0.286)
+2. low − high > 0, P ≥ 0.95: ✗ (P 0.764)
+3. ≥ 7/10 low points positive: ✗ (5/10)
+
+→ **H19-W does not confirm the boundary.** Within WTBlade, ρ(log n, Δ) = −0.07: no count slope. Below 30 boxes the gain is a coin flip (burn 8 boxes +0.034, oil 15 boxes −0.022). The WTBD < 30 gains were a WTBD property, not a label-count law.
+
+- Descriptive only (not a rescue): rescoring hurts peeling at every count (−0.022 to −0.058 on all 4 models); without peeling the low mean is +0.0035. A class-specific failure, not a count effect.
+- The count-gated rule is not a usable recipe: −0.0007 on WTBlade f08.
+- **Verdict (pre-registered consequence):** the rescoring line (G15-R fixed rule, H18, the boundary) is closed as a contribution. What stands from it is WTBD-only: G15-R/H18 on WTBD, and G16/G16-R as a mechanism description there. Next direction: box extent (mAP75 stuck at 0.06–0.08 on both datasets), starting with a prior-art check.
+
 ---
 
 ## 25. Engineering problems solved
