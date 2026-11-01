@@ -2691,6 +2691,28 @@ Candidate recall = hit + ranked low. YOLO-family runs keep fewer boxes after NMS
 
 **Consolidated reading** (with G16-R and the extent ceiling): in a fine-tuned foundation detector, label scarcity shows up as *scoring*, not as *finding* or *boxing*. That is the opposite of the YOLO-family picture (§21: extent- and proposal-limited). The next method question is therefore: which label-free signal separates ranked-low true boxes from false positives?
 
+### G20: query-consensus rescoring (CPU, cached predictions). Pre-registered before computing (1 Nov)
+
+**Idea.** From the anatomy: RF-DETR proposes the right box but scores it low. One-to-one matching trains a DETR to give one query per object a high score and push its duplicates down. At low labels the "winner" itself is under-confident, but the duplicates still pile up on real defects, while background false positives tend to be isolated. The score mass of the other queries at the same place is a label-free objectness signal, with no exemplars, prototypes or classes involved (unlike G15-R/H18):
+
+  s'_p = s_p + λ · Σ_{q ≠ p, IoU(p, q) ≥ 0.5} s_q   (q of any class; boxes unchanged)
+
+**Prior art to check if it passes:** box/score voting (Gidaris & Komodakis 2015), weighted box fusion (single-model use), Softer-NMS variance voting. Those fuse *boxes* after NMS in NMS-based detectors; scoring a DETR's own suppressed duplicates as evidence is the possibly new part.
+
+**Protocol** (`tools/g20_consensus.py`, committed with this entry):
+- λ ∈ {0.25, 0.5, 1, 2} is chosen per dataset on val (family mean mAP50-95 of the 4 RF-DETR 25% models; WTBD val `v1_val_preds`, WTBlade `wtblade_f25/val`) and applied once to test.
+- Paired scene bootstrap, 2,000 replicates.
+
+**G20 passes** only if it holds on **both** WTBD-group and WTBlade-group test (the H18-W lesson):
+- consensus − original family mean mAP50-95 > 0 with P(>0) ≥ 0.95;
+- better on ≥ 3 of 4 models.
+
+**Reported, not gating:** WTBlade 8% models (with WTBlade's λ); per class; the val curve.
+
+**Consequences.**
+- *Pass:* a prior-art check, then replication on the seed-1 WTBD models, and a write-up as a training-free DETR re-scorer.
+- *Fail:* one scope check, then discard (§30).
+
 ---
 
 ## 25. Engineering problems solved
