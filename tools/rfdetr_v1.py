@@ -73,16 +73,17 @@ def model_class(size):
     return getattr(rfdetr, SIZES[size])
 
 
-def train(dataset, out, size, epochs, batch, accum, seed):
+def train(dataset, out, size, epochs, batch, accum, seed, freeze_encoder=False):
     if any(os.path.exists(os.path.join(out, b)) for b in BEST):
         print(f"{out} already has a best checkpoint; not retraining")
         return
     os.makedirs(out, exist_ok=True)
     opts = dict(dataset=os.path.abspath(dataset), size=size, epochs=epochs, batch_size=batch, grad_accum_steps=accum,
-                seed=seed)
+                seed=seed, freeze_encoder=freeze_encoder)
     json.dump(opts, open(os.path.join(out, "v1_options.json"), "w"), indent=2)
     # periodic checkpoints only at the end: four runs of 10-epoch checkpoints filled Kaggle's disk (v69)
-    model_class(size)().train(dataset_dir=os.path.abspath(dataset), output_dir=os.path.abspath(out), epochs=epochs,
+    # G22 control: freeze_encoder keeps the DINOv2 encoder frozen (projector and decoder still train)
+    model_class(size)(**({"freeze_encoder": True} if freeze_encoder else {})).train(dataset_dir=os.path.abspath(dataset), output_dir=os.path.abspath(out), epochs=epochs,
                               batch_size=batch, grad_accum_steps=accum, seed=seed, checkpoint_interval=epochs)
     for f in os.listdir(out):
         if f.endswith((".ckpt", ".pth")) and f != best_checkpoint(out).split(os.sep)[-1]:
@@ -208,6 +209,7 @@ def main():
     a.add_argument("--batch", type=int, default=4)
     a.add_argument("--accum", type=int, default=4)
     a.add_argument("--seed", type=int, default=0)
+    a.add_argument("--freeze-encoder", action="store_true", help="G22 control: frozen DINOv2 encoder")
     a = sp.add_parser("predict")
     a.add_argument("--run", required=True)
     a.add_argument("--data", required=True)
@@ -222,7 +224,7 @@ def main():
     if args.cmd == "prepare":
         prepare(args.data, args.subset, args.out)
     elif args.cmd == "train":
-        train(args.dataset, args.out, args.size, args.epochs, args.batch, args.accum, args.seed)
+        train(args.dataset, args.out, args.size, args.epochs, args.batch, args.accum, args.seed, args.freeze_encoder)
     elif args.cmd == "predict":
         predict(args.run, args.data, args.size, args.splits)
     elif args.cmd == "import":

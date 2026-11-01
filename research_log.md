@@ -2892,6 +2892,32 @@ It is prepared and pre-registered separately (G23) once G22 stage B has decided 
 
 **Fail:** one scope check, then item 1 is dropped as a claim. The paper would then rest on the diagnostic decomposition alone.
 
+### G22 stage A result: on WTBlade, fine-tuned RF-DETR's recall does depend on proximity (2 Nov)
+
+`tools/g22_coverage.py stageA` → `runs/analysis/g22/stageA.md`. 748 test boxes, 177 scenes.
+
+**Estimator check:** fixed effects absorbed by alternating demeaning (`check`) reproduce G16-R's dummy-variable OLS exactly, at +0.4775 and −0.0159.
+
+| WTBlade, fine-tuned RF-DETR | detected / candidate rate | class-aware conf slope | detected (≥ 0.05) slope | candidate (≥ 0.001) slope |
+|---|---|---|---|---|
+| f25 (4) | 0.636 / 0.829 | +1.308 [+0.918, +1.768], P 1.000 | **+1.772 [+1.050, +2.625], P 1.000** | +0.605, P 0.996 |
+| f25 + f08 (8) | 0.570 / 0.798 | +1.182 [+0.970, +1.378], P 1.000 | **+1.608 [+1.257, +2.059], P 1.000** | +0.763, P 1.000 |
+
+- **A1 holds:** the confidence slope is positive.
+- **But the claim's "fine-tuning removes the recall dependence" does not generalise.** On WTBD the fine-tuned detected slope was −0.016 [−0.886, +0.603]. On WTBlade it is +1.77 with P 1.000.
+- Stage B still decides the weaker form, B2 ("fine-tuning flattens it"), with the frozen-encoder control on both datasets. The control is now more informative, not less.
+
+**What this does line up with:**
+- WTBD: recall independent of proximity, so far-from-labelled defects are found but ranked low, and exemplar rescoring helps (G15-R, H18).
+- WTBlade: recall depends on proximity, so far defects are never found, and rescoring fails (H18-W, H19-W; crack 44–49% no box at any budget).
+
+**Candidate (not a claim; two datasets are two points):** the fine-tuned detector's recall-vs-coverage dependence, measured on a held-out split, predicts whether exemplar rescoring pays off on that dataset. The test is a third dataset with the prediction made before rescoring is run (G23, WTBs2025). Cosine scales differ between datasets, so G23 must use a scale-free statistic. Defined at its pre-registration.
+
+**Engineering:**
+- `tools/rfdetr_v1.py train --freeze-encoder`;
+- `tests/test_rfdetr_freeze.py` passes (encoder 0/223 parameters trainable, all 286 others trainable).
+- "Frozen" means frozen at RF-DETR's COCO-pretrained encoder weights.
+
 ---
 
 ## 25. Engineering problems solved
