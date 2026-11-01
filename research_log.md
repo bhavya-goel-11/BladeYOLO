@@ -3059,6 +3059,34 @@ No single fix is new. What can be new is a **double dissociation**: the diagnosi
 
 **Readout** (descriptive, no decision depends on it): own-space vs DINOv3-space slopes (confidence, detected) on the same models. The dataset contrast of G22 stage A (WTBD detected slope ≈ 0; WTBlade > 0) **holds in own space** if WTBD's detected-slope interval includes 0 and WTBlade's is > 0 with P ≥ 0.95.
 
+### G22-O result: in the detector's own feature space, recall depends on proximity on both datasets (2 Nov)
+
+`tools/g22_ownspace.py` → `runs/analysis/g22/ownspace.md` (logs `own_embed.log`, `own_score.log`). Token pooling unit-checked. Same models, boxes and scene draws for both spaces.
+
+| models | proximity space | ρ(own, DINOv3 proximity) | class-aware conf slope | detected (≥ 0.05) slope |
+|---|---|---|---|---|
+| WTBD f25 class-matched + rand3 | DINOv3 ViT-B | +0.36 | +0.758 [−0.187, +1.542], P 0.952 | −0.003 [−2.355, +1.014], P 0.519 |
+| | **own (projector)** | | +4.186 [+0.741, +8.623], P 0.990 | **+11.167 [+1.521, +16.268], P 0.985** |
+| WTBlade f08 (4) | DINOv3 ViT-B | +0.73 | +0.948, P 1.000 | +1.552 [+0.995, +1.996], P 1.000 |
+| | own | | +5.856, P 1.000 | +10.222 [+8.796, +11.816], P 1.000 |
+
+Own-space slopes are larger because own-space cosines span a narrower range; magnitudes are not comparable across spaces.
+
+**Readout (pre-registered): the dataset contrast does not hold in own space.** WTBD's detected-slope interval excludes 0.
+
+**Reading:**
+- The WTBD "found regardless of proximity" result (G16-R, G22) is a statement about proximity in *generic* foundation-feature space only.
+- In the space the fine-tuned detector actually uses, whether a defect is found depends on how close it is to labelled defects, on both datasets.
+- The two spaces agree much less on WTBD (ρ 0.36) than on WTBlade (0.73). One coherent reading: fine-tuning on WTBD re-organises the feature space away from DINOv3's neighbourhoods. It changes *which* neighbours matter rather than removing the dependence.
+
+**Caveat:**
+- Own-space proximity is partly circular. A box the detector cannot find probably also has non-defect-like features in its own space, so a positive own-space slope is expected to some degree by construction.
+- Only 2 WTBD models.
+
+**Consequence for item 1:** the claim can at most be "fine-tuning decouples recall from generic-feature coverage", not "from coverage".
+- G22 stage B (pre-registered in DINOv3 space) still decides that narrower form.
+- Its frozen-encoder models also get the own-space check once their checkpoints are downloaded.
+
 ---
 
 ## 25. Engineering problems solved
