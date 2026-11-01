@@ -2614,6 +2614,47 @@ Bold = low points (1 ≤ n < 30): **10 low, 18 high, 0 with n = 0.** The low set
 - The count-gated rule is not a usable recipe: −0.0007 on WTBlade f08.
 - **Verdict (pre-registered consequence):** the rescoring line (G15-R fixed rule, H18, the boundary) is closed as a contribution. What stands from it is WTBD-only: G15-R/H18 on WTBD, and G16/G16-R as a mechanism description there. Next direction: box extent (mAP75 stuck at 0.06–0.08 on both datasets), starting with a prior-art check.
 
+### Box-extent direction: prior-art check and ceiling diagnostic (1 Nov). Discarded before any run
+
+**Prior art.**
+- Box uncertainty: KL-Loss with variance voting (He et al., CVPR 2019) models each box side as a Gaussian. Variance voting needs NMS, which RF-DETR does not have.
+- Repeated labels: "Drawing the Same Bounding Box Twice?" (Tschirschwitz et al., 2023) estimates ground truth from repeated box labels; earlier work fuses annotators with weighted box fusion (WBF); a medical-detection paper re-weights the loss by expert agreement. Inaccurate-box training: OA-MIL (ECCV 2022).
+- Wind turbines: oriented boxes for blade defects (EUSIPCO 2024, Heriot-Watt), and the DTU re-annotations, which note the one-box-or-several ambiguity.
+- Our own earlier attempts: SAM 2.1 refinement was negative (§21); split-tolerant targets helped corrosion only (§23).
+- The one open niche was WTBD's *accidental* repeated labels (independently annotated augmented copies, §14) as an extent signal. The diagnostic below checks whether extent is worth attacking at all.
+
+**Diagnostic** (`tools/extent_ceiling.py` → `runs/analysis/extent/ceiling.md`). Two IoU distributions on WTBD:
+- *annotators:* the best same-class IoU of a label projected into its independently labelled copy (same-view, axis-aligned pairs, exact transform from the §14 audit cache);
+- *models:* the best same-class IoU of a prediction with conf ≥ 0.1, per WTBD-group test box.
+
+| source | boxes | IoU ≥ 0.5 | of those, ≥ 0.75 | median IoU of those | IoU ≥ 0.75 |
+|---|---|---|---|---|---|
+| annotators, all copies | 2,965 | 0.87 | 0.70 | 0.83 | 0.61 |
+| annotators, test copies | 392 | 0.91 | 0.75 | 0.84 | 0.68 |
+| **RF-DETR-M 25%** (4 subsets) | 940 | **0.55** | **0.67** | **0.83** | 0.37 |
+| ViT-B 25% (4 subsets) | 940 | 0.41 | 0.45 | 0.73 | 0.19 |
+| BladeYOLO-v2 100% | 235 | 0.63 | 0.47 | 0.74 | 0.29 |
+
+**Finding: RF-DETR is at the annotator ceiling for extent.**
+- Once RF-DETR finds a defect, its box agrees with the label as tightly as a second annotator's box does: 0.67 vs 0.70 reach IoU ≥ 0.75, median IoU 0.83 vs 0.83.
+- Its whole strict-IoU gap comes from finding the defect at all (IoU ≥ 0.5: 0.55 vs 0.87).
+- The YOLO-family detectors (ViT-B, and BladeYOLO-v2 even at 100%) *were* extent-limited (0.45–0.47). The "extent bottleneck" of §21 was a property of those detectors, and RF-DETR removed it.
+- So better box refinement can buy RF-DETR at most a few points of IoU ≥ 0.75 among found defects. The extent direction is discarded without spending a run (§30).
+
+**Where RF-DETR fails instead** (test boxes of the weak classes, 4 subsets, conf ≥ 0.1):
+
+| class | boxes | hit (IoU ≥ 0.5, same class) | located but another class | missed (no same-class overlap) | merged / shifted / part |
+|---|---|---|---|---|---|
+| crack | 132 | 0.17 | **0.30** | **0.42** | 0.11 |
+| thunderstrike | 52 | 0.38 | **0.54** | 0.00 | 0.08 |
+| craze | 156 | 0.33 | 0.14 | 0.13 | 0.39 (merged 0.20) |
+
+- The remaining failures are **recognition of the rare classes**. Crack and thunderstrike have 1–39 labelled boxes per subset: they are either missed or found with the wrong class.
+- Class-agnostic ≈ class-aware held for the YOLO family (§21); it does not hold for RF-DETR's rare classes.
+- Craze is the only class with a granularity component (20% merged).
+- This points back to coverage (G16): what limits RF-DETR at 25% is too few labelled examples of the rare classes, not where the box edges go. On WTBlade, the H18-W/H19-W rescoring did not fix rare-class recognition.
+- Caveat: WTBlade has no group-split copy audit, so the ceiling comparison is WTBD-only.
+
 ---
 
 ## 25. Engineering problems solved
