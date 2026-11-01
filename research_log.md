@@ -2560,6 +2560,38 @@ v72 trained the 4 seed-1 models without errors. The log has only the old harmles
 - **Reading:** a boundary condition, not a method. Exemplar rescoring pays only when a class has fewer than about 30 labelled boxes, i.e. when coverage limits ranking (G16-R). Above that it is neutral to harmful. This is consistent with G15 vs G15-R and with H18-W.
 - **What would confirm it:** a pre-registered test on WTBlade in the low-count regime. Take smaller WTBlade subsets so that some classes fall below 30 boxes, and predict a positive fixed − original gain for exactly those classes. That breaks the dataset confound. One short Kaggle run (small subsets train fast).
 
+### H19-W: the low-count boundary within WTBlade-group. Pre-registered before any run (1 Nov)
+
+**Question.** The H18-W scope check found prototype rescoring (G15-R fixed rule) helps only classes with < 30 labelled boxes, but every such point was WTBD, so box count and dataset were confounded. H19-W puts WTBlade classes below 30 boxes and asks whether the gain appears for exactly those classes, within one dataset, with the predictions fixed now.
+
+**Subsets** (`tools/wtblade_subsets.py --fraction 0.08 --prefix wtblade_group_train_f08` → `tools/splits/wtblade_group_train_f08{,_rand1,_rand2,_rand3}.txt`, summary `runs/analysis/wtblade/subsets_f08.txt`). Same drawing rule as H18-W (one class-matched draw, best of 1,000; 3 random draws, rng 0; > 5% overshoot skipped), budget 8% = 171 images. 8% was picked before any training as the fraction that splits WTBlade's (model, class) points roughly 1 : 2 into below and above 30 boxes (6% puts almost everything low, 10% almost everything high).
+
+| subset | scenes | images | burn | crack | deformity | dirt | oil | peeling | rust |
+|---|---|---|---|---|---|---|---|---|---|
+| class-matched | 92 | 171 | **8** | 63 | 45 | 128 | **15** | 63 | **23** |
+| rand1 | 115 | 171 | **26** | 75 | 90 | 112 | 34 | 44 | 31 |
+| rand2 | 89 | 176 | **15** | 57 | 71 | 121 | **26** | **23** | 50 |
+| rand3 | 110 | 172 | 34 | 55 | 66 | 149 | **23** | **27** | **21** |
+
+Bold = low points (1 ≤ n < 30): **10 low, 18 high, 0 with n = 0.** The low set is not only the globally rare classes: it includes peeling and rust, which are common in full train.
+
+**Runs (Kaggle).** RF-DETR Medium, seed 0, V1 recipe unchanged (100 epochs, batch 4 × accum 4): `rfdetrm_wtblade_group_f08{,_rand1,_rand2,_rand3}`, test + val predictions at conf 0.001, imported with `rfdetr_v1.py import --dataset wtblade` (cache `runs/analysis/bootstrap/wtblade_f08/`).
+
+**Frozen; nothing tuned.** Fixed rule α 0.5, k 3, τ 0.05, DINOv3 ViT-B box embeddings, bank = the model's own 8% subset. The threshold 30 comes from the H18-W scope table and is not moved.
+
+**Scoring** (`tools/h19w_lowcount.py`, committed with this entry; dry run on the f25 models reproduces H18-W: fixed − original −0.0072, ρ +0.088, no low points). Δ = fixed − original test AP50-95 per (model, class); paired scene bootstrap over the 177 test groups, 2,000 replicates.
+
+**H19-W confirms the boundary** if all three hold:
+1. mean Δ over the 10 low points > 0 with P(>0) ≥ 0.95;
+2. mean Δ(low) − mean Δ(high) > 0 with P ≥ 0.95;
+3. Δ > 0 on ≥ 70% of low points (≥ 7 of 10).
+
+**Reported, not gating:** the count-gated rule (rescore only classes with n < 30, original elsewhere) vs original on all-class mAP50-95, here and retro-actively on WTBD f25 and WTBlade f25 (where it is the identity); Spearman ρ(log n, Δ) within f08; absolute f08 scores vs f25.
+
+**Consequences.**
+- *Confirmed:* the boundary is a property of label count, not of WTBD. The paper gets a mechanism-backed usage rule: exemplar rescoring pays only below ~30 labelled boxes per class (coverage-limited ranking, G16-R), and the count-gated rule is the practical form.
+- *Not confirmed:* the boundary was a WTBD artefact; the rescoring line is closed. Next direction: box extent (mAP75 stuck at 0.06–0.08 on both datasets), starting with a prior-art check. No rescue runs (§30).
+
 ---
 
 ## 25. Engineering problems solved

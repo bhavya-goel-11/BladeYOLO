@@ -14,7 +14,7 @@ Kaggle, per subset:
   python tools/rfdetr_v1.py predict --run runs/detect/BladeYOLO_WindSurface/rfdetrm_rand1_wtbd_group_f25 --data <WTBD-group>
 Local:
   python tools/rfdetr_v1.py import --run runs/detect/BladeYOLO_WindSurface/rfdetrm_rand1_wtbd_group_f25
-  (WTBlade-group runs: add --dataset wtblade)
+  (WTBlade-group runs: add --dataset wtblade; the cache follows the run name's fraction, f25 or f08)
 """
 
 import argparse
@@ -33,7 +33,12 @@ DATA = os.path.join(ROOT, "external", "WTBD-group")
 CACHE = {"test": os.path.join(ROOT, "runs", "analysis", "bootstrap", "seeds_f25", "preds"),
          "val": os.path.join(ROOT, "runs", "analysis", "bootstrap", "v1_val_preds")}
 WTBLADE = os.path.join(ROOT, "external", "WTBlade-group")  # H18-W, cross-dataset replication
-WTBLADE_CACHE = {s: os.path.join(ROOT, "runs", "analysis", "bootstrap", "wtblade_f25", s) for s in ("test", "val")}
+
+
+def wtblade_cache(run):
+    """H18-W runs (*_f25) -> wtblade_f25/, H19-W runs (*_f08) -> wtblade_f08/."""
+    frac = os.path.basename(os.path.normpath(run)).rsplit("_", 1)[-1]
+    return {s: os.path.join(ROOT, "runs", "analysis", "bootstrap", f"wtblade_{frac}", s) for s in ("test", "val")}
 SIZES = {"nano": "RFDETRNano", "small": "RFDETRSmall", "medium": "RFDETRMedium", "base": "RFDETRBase",
          "large": "RFDETRLarge"}
 BEST = ["checkpoint_best_total.pth", "checkpoint_best_ema.pth", "checkpoint_best_regular.pth"]
@@ -221,7 +226,7 @@ def main():
     elif args.cmd == "predict":
         predict(args.run, args.data, args.size, args.splits)
     elif args.cmd == "import":
-        import_preds(args.run) if args.dataset == "wtbd" else import_preds(args.run, WTBLADE, WTBLADE_CACHE)
+        import_preds(args.run) if args.dataset == "wtbd" else import_preds(args.run, WTBLADE, wtblade_cache(args.run))
     else:
         score_v1(pairs=PAIRS_S1, tag="_s1") if args.seed1 else score_v1()
 

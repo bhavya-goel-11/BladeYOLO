@@ -48,19 +48,20 @@ RFDETR = {"rfdetrm_wtbd_group_f25": "", **{f"rfdetrm_rand{k}_wtbd_group_f25": f"
 RFDETR_VAL_PREDS = os.path.join(ROOT, "runs", "analysis", "bootstrap", "v1_val_preds")
 
 
-def use_wtblade():
-    """Point the module at WTBlade-group (H18-W): its 7 classes, groups.csv scenes, 25% subsets and RF-DETR runs.
-    Rare = the two classes with the fewest full-train boxes (burn 141, oil 149), the rule that gave WTBD's [3, 4]."""
+def use_wtblade(frac="f25"):
+    """Point the module at WTBlade-group: its 7 classes, groups.csv scenes, the `frac` subsets (f25 = H18-W, f08 = H19-W)
+    and their RF-DETR runs. Rare = the two classes with the fewest full-train boxes (burn 141, oil 149), the rule that
+    gave WTBD's [3, 4]. OUT (train bank over all train images, test/val feature maps) is shared across fractions."""
     global DATA, PREDS, GROUPS, OUT, CLASSES, RARE, NC, PREFIX, RFDETR, RFDETR_VAL_PREDS
     DATA = os.path.join(ROOT, "external", "WTBlade-group")
-    cache = os.path.join(ROOT, "runs", "analysis", "bootstrap", "wtblade_f25")
+    cache = os.path.join(ROOT, "runs", "analysis", "bootstrap", f"wtblade_{frac}")
     PREDS = {s: os.path.join(cache, s) for s in ("test", "val")}
     RFDETR_VAL_PREDS = PREDS["val"]
     GROUPS = {s: os.path.join(DATA, "groups.csv") for s in ("test", "val")}
     OUT = os.path.join(ROOT, "runs", "analysis", "proto_rescore", "wtblade")
     CLASSES = ["burn", "crack", "deformity", "dirt", "oil", "peeling", "rust"]
-    RARE, NC, PREFIX = [0, 4], 7, "wtblade_group_train_f25"
-    RFDETR = {"rfdetrm_wtblade_group_f25": "", **{f"rfdetrm_rand{k}_wtblade_group_f25": f"_rand{k}" for k in (1, 2, 3)}}
+    RARE, NC, PREFIX = [0, 4], 7, f"wtblade_group_train_{frac}"
+    RFDETR = {f"rfdetrm_wtblade_group_{frac}": "", **{f"rfdetrm_rand{k}_wtblade_group_{frac}": f"_rand{k}" for k in (1, 2, 3)}}
 
 
 def subset_names(suf):

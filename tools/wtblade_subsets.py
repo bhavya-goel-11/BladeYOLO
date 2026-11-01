@@ -6,7 +6,7 @@ Scenes are the WTBlade-group groups (external/WTBlade-group/groups.csv), so no s
 
 Usage:
     python tools/wtblade_subsets.py
-Writes tools/splits/wtblade_group_train_f25.txt, ..._rand<k>.txt and runs/analysis/wtblade/subsets_f25.txt (summary).
+Writes tools/splits/<prefix>.txt, <prefix>_rand<k>.txt and runs/analysis/wtblade/subsets_<fNN>.txt (summary); H18-W used --fraction 0.25 (f25), H19-W --fraction 0.08 --prefix wtblade_group_train_f08.
 """
 
 import argparse
@@ -94,7 +94,7 @@ def main():
                      + ", ".join(f"{n} {int(c)}" for n, c in zip(names, boxes[idx].sum(0))))
     out = os.path.join(ROOT, "runs", "analysis", "wtblade")
     os.makedirs(out, exist_ok=True)
-    open(os.path.join(out, "subsets_f25.txt"), "w").write("\n".join(lines) + "\n")
+    open(os.path.join(out, f"subsets_{args.prefix.rsplit('_', 1)[-1]}.txt"), "w").write("\n".join(lines) + "\n")
     print("\n".join(lines))
 
 
