@@ -2796,6 +2796,38 @@ Val agrees in direction on both datasets. Standard tta-mean also loses (WTBD −
 
 Not run. Taken together, label-free post-hoc rescoring (G20, G21) and exemplar rescoring (G15-R, H18) are closed. What remains of the low-label deficit needs a training-time or data-side change.
 
+### WTBlade crack misses do not depend on the label budget (2 Nov; diagnostic, cached predictions)
+
+`runs/analysis/extent/crack_nobox.py` → `crack_nobox.log`; `crack_nearmiss.py` → `crack_nearmiss.log`. All WTBlade test images are 640×640 (Roboflow export), so native-resolution inference has nothing to offer.
+
+| detector | crack boxes without a same-class IoU ≥ 0.5 box |
+|---|---|
+| RF-DETR 8% (4 subsets) | 0.47 |
+| RF-DETR 25% (4 subsets) | 0.49 |
+| ViT-B 100% | 0.43 |
+
+**The crack miss rate is essentially flat from 8% to 100% of labels.** Unlike WTBD's rare-class deficit, which is ranking, this one is not fixed by more labels or by any rescoring.
+
+- **Geometry: compact, not thin.** Aspect ratio is 1.4.
+  - Short side: found 52 px [36–72], missed 39 px [28–51].
+  - Miss rate is 1.00 below 16 px (5% of cracks), 0.65 below 32 px (30%), 0.56 below 64 px, and 0.22 above.
+- **What the misses are (RF-DETR 25%; 8% is the same):**
+  - 34% have no crack box nearby (IoU < 0.1);
+  - 25% have IoU 0.1–0.3;
+  - 41% are near-misses at IoU 0.3–0.5;
+  - only 10% are covered by another class at IoU ≥ 0.5.
+- **The near-misses are offsets, not granularity:**
+  - shifted 44%, larger box 29%, part 17%, merged with a neighbouring crack 11%;
+  - median predicted/label area 1.2.
+  - This differs from WTBD, where RF-DETR's extent matches the annotator ceiling and the misses are class confusion.
+  - WTBlade has no independent re-annotations (its "same-surface" pairs are Roboflow copies with transformed labels), so whether the offsets are label noise cannot be tested here.
+
+**Reading:** the low-label deficit has two forms, separable by diagnostics alone:
+- **WTBD rare classes:** ranking (the box is there, scored low). Exemplar rescoring helps here (G15-R, H18).
+- **WTBlade crack:** localisation of small compact cracks plus possible label offset. It is insensitive to the label budget, so it is a ceiling of the data or annotation rather than of the training recipe.
+
+This accounts for H18 / H18-W / H19-W from the error side.
+
 ---
 
 ## 25. Engineering problems solved
