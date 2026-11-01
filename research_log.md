@@ -2753,6 +2753,33 @@ Flipped predictions are made locally in `.venv-rfdetr` (`tools/g21_flip.py predi
 
 **Fail:** one scope check, then discard (§30).
 
+### G21 result: fails on both datasets; plain flip TTA also hurts RF-DETR; discarded (2 Nov)
+
+`runs/analysis/g21/report.md` (logs `predict.log`, `score.log`). Test, family mean mAP50-95:
+
+| test | original | tta-mean | agreement | agreement − original [95% CI], P(>0), better | agreement − tta-mean, P(>0) |
+|---|---|---|---|---|---|
+| WTBD 25% (2) | 0.168 | 0.143 | 0.139 | −0.029 [−0.076, −0.019], 0.000, 0/2 | −0.004, 0.067 |
+| WTBlade 8% (4) | 0.092 | 0.087 | 0.086 | −0.006 [−0.013, −0.002], 0.005, 1/4 | −0.000, 0.296 |
+
+Val agrees in direction on both datasets. Standard tta-mean also loses (WTBD −0.025, WTBlade −0.0055, 0/6 models better), and agreement adds nothing beyond it.
+
+**Sanity check** (`runs/analysis/g21/sanity.py` → `sanity.log`): the unflip is correct. Every original box with s ≥ 0.2 finds a same-class mirrored twin, with median IoU 0.95 on WTBD and 0.92 on WTBlade. The twin's score is about half of s, which is regression to the mean from conditioning on high s; below s 0.05 the ratio is ≥ 1.
+
+**Scope check** (`scope.py` → `scope.log`; `scope_1to1.py` → `scope_1to1.log`, post hoc):
+- **The mirrored view alone is as good as the original.** Flip-only − original: WTBD test −0.016 and +0.017; WTBlade test −0.008 to +0.011; val within ±0.008. So fusion is losing despite two equally good views.
+- **Why: many-to-one matching undoes DETR's duplicate suppression.** With max-IoU matching, an original box that duplicates a true box borrows its twin's high flipped score. It then climbs the ranking and counts as a false positive. Greedy one-to-one matching (original boxes in score order, each flipped box used at most once) recovers about half the loss:
+  - tta-mean − original: WTBD −0.025 → −0.013, WTBlade −0.0055 → −0.0016;
+  - it still never beats the original on either dataset (val or test);
+  - agreement stays below tta-mean (WTBD test 0.142 vs 0.155).
+- No scope.
+
+**Reading:**
+- Requiring agreement between views is not a ranking signal for RF-DETR at low labels.
+- A more general recipe note: naive box-matched score-averaging TTA hurts an NMS-free set-prediction detector, because cross-view matching reintroduces the duplicates that one-to-one training suppressed. One-to-one matching halves the damage but does not turn it into a gain.
+- With G20, this closes "rescore RF-DETR's own outputs" from inside the query set (G20) and from a second view of the same image (G21). The ranking deficit found in the error anatomy (37% of WTBD defects ranked < 0.1) is not fixable by label-free post-hoc rescoring of this kind.
+- **G21 discarded** (§30).
+
 ---
 
 ## 25. Engineering problems solved
