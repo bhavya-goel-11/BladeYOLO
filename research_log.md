@@ -2780,6 +2780,22 @@ Val agrees in direction on both datasets. Standard tta-mean also loses (WTBD −
 - With G20, this closes "rescore RF-DETR's own outputs" from inside the query set (G20) and from a second view of the same image (G21). The ranking deficit found in the error anatomy (37% of WTBD defects ranked < 0.1) is not fixable by label-free post-hoc rescoring of this kind.
 - **G21 discarded** (§30).
 
+### Crop re-classifier on RF-DETR candidates: discarded before any run (2 Nov)
+
+**Proposal** (after G21): re-rank and re-label RF-DETR's top-k boxes with a classifier on frozen DINOv3 features of each box, trained only on the labelled crops.
+
+**Already covered:**
+- G15-R re-ranks with DINOv3 ViT-B box embeddings against the labelled boxes, using the fixed rule.
+- H18 is the learned version over the same features.
+- Together they give WTBD test +0.025 mAP50-95, but the result does not hold on WTBlade (H18-W, H19-W).
+
+**What the proposal would add, and why each is moot:**
+- **Re-labelling:** RF-DETR already emits a box per class hypothesis (the true class has median rank 1–2 in the error anatomy), so changing a box's class reduces to re-scoring an existing box.
+- **A trained head instead of kNN prototypes:** this is H18's change, and the one that failed on WTBlade.
+- **The WTBlade gap is not mainly ranking:** crack is 44% no box, even for ViT-B at 100%, so no re-scoring can reach it.
+
+Not run. Taken together, label-free post-hoc rescoring (G20, G21) and exemplar rescoring (G15-R, H18) are closed. What remains of the low-label deficit needs a training-time or data-side change.
+
 ---
 
 ## 25. Engineering problems solved
