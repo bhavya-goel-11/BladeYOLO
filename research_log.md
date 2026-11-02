@@ -3146,6 +3146,35 @@ On WTBlade, fine-tuning raises mAP without raising recall: the gain is in scores
 
 **Item 1 dropped as a claim.** It stays a WTBD observation, now with a clean control, and a caveat from G22-O: it only holds for generic-feature proximity.
 
+### G25: official-protocol benchmark against BladeYOLO, with the leakage reported beside it (decided 2 Nov)
+
+**Direction.** Stay on wind-turbine blades. Report our strongest detector on the **official (published) protocols** for direct comparison with BladeYOLO (IEEE TGRS 2026) and the other published numbers. Report the leak-free results and every audit finding beside them. The leak-free columns are the honest caveat on all official numbers, ours included.
+
+**Protocols** (each dataset's own published split, unchanged; `tools/rfdetr_v1.py prepare-official`, tested on all three layouts, no train/valid name overlap):
+
+| dataset | split | published reference |
+|---|---|---|
+| WTBD-official | authors' seeded random split, train 745 / val 159 / test 161 | no detection baselines in the dataset paper. Ours on this split: BladeYOLO-v2 0.840 / 0.493, YOLO12-L 0.704 / 0.388 (§12) |
+| Wind Surface Defect | public copy, train 2,856 / val 714 (the 4:1 protocol of [57] and BladeYOLO). Val is the test set; 10% of train (seed 0) is carved out for checkpoint selection, so the test set is never used for selection | BladeYOLO 86.5 / 57.4 mAP50 / mAP50-95 (paper Table V) |
+| WTBlade-Defect | Roboflow split, train 9,010 / valid 1,097 / test 553 | BladeYOLO 85.8 / 74.6 (Table I, 3 seeds). **Protocol mismatch:** the paper re-split 5,326 images 9:1 (4,766 / 560) and published no image list, so its exact split cannot be rebuilt |
+
+**Runs** (Kaggle):
+- RF-DETR-M at **640 px**, the paper's input size for all methods (RF-DETR's default is 576), seed 0;
+- 100 epochs on WTBD-official, plus a 768-px run (G24: resolution helps WTBD's 1024-px originals);
+- 60 epochs on Wind Surface;
+- 25 epochs on WTBlade-Defect (about 3 Roboflow copies per frame, so about 75 passes per source frame).
+
+The paper trained BladeYOLO for 300 epochs with SGD at 640.
+
+**Scored** with both the scene-bootstrap evaluator and the RF-DETR/COCO evaluator, for comparability with published figures. Per-class AP50 is reported.
+
+**Reported with it:**
+- the leak-free result of the same detector family on the same data (WTBD-group, WTBlade-group);
+- the measured leakage of each official split (§4, §11);
+- the audit findings: granularity, label agreement, the frozen-vs-fine-tuned control, inert modules, error anatomy.
+
+**Not a hypothesis test.** It is a benchmark entry under the community's protocol. No claim of generalisation is made from the official numbers.
+
 ---
 
 ## 25. Engineering problems solved

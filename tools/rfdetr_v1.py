@@ -67,6 +67,40 @@ def prepare(data, subset, out):
                         names=list(names)), open(os.path.join(out, "data.yaml"), "w"), sort_keys=False)
 
 
+def prepare_official(data, out, carve=0.0, seed=0):
+    """Official (published, leaky) protocol: copy the dataset's own split unchanged. Folders train/ + val|valid/ +
+    test/ map to train/valid/test. A dataset without test/ (Wind Surface Defect: train/val, the paper's 4:1 protocol)
+    keeps val/ as test/, and `carve` > 0 moves that fraction of train/ (random, seeded) to valid/ for checkpoint
+    selection, so the reported test set is never used for selection."""
+    import random
+
+    names = yaml.safe_load(open(os.path.join(data, "data.yaml")))["names"]
+    names = list(names.values()) if isinstance(names, dict) else list(names)
+    has = {d: os.path.isdir(os.path.join(data, d, "images")) for d in ("train", "val", "valid", "test")}
+    val_src = "valid" if has["valid"] else "val"
+    train = sorted(os.listdir(os.path.join(data, "train", "images")))
+    if has["test"]:
+        plan = {"train": [("train", f) for f in train], "valid": [(val_src, f) for f in sorted(os.listdir(os.path.join(data, val_src, "images")))],
+                "test": [("test", f) for f in sorted(os.listdir(os.path.join(data, "test", "images")))]}
+    else:
+        assert carve > 0, "no test/ split: pass --carve to hold out a validation set from train/"
+        rng = random.Random(seed)
+        held = set(rng.sample(train, round(carve * len(train))))
+        plan = {"train": [("train", f) for f in train if f not in held], "valid": [("train", f) for f in sorted(held)],
+                "test": [(val_src, f) for f in sorted(os.listdir(os.path.join(data, val_src, "images")))]}
+    for dst, items in plan.items():
+        for d in ("images", "labels"):
+            os.makedirs(os.path.join(out, dst, d), exist_ok=True)
+        for src, f in items:
+            shutil.copy2(os.path.join(data, src, "images", f), os.path.join(out, dst, "images", f))
+            lab = os.path.join(data, src, "labels", os.path.splitext(f)[0] + ".txt")
+            if os.path.exists(lab):
+                shutil.copy2(lab, os.path.join(out, dst, "labels", os.path.basename(lab)))
+        print(f"{dst}: {len(items)} images", flush=True)
+    yaml.safe_dump(dict(path=".", train="train/images", val="valid/images", test="test/images", nc=len(names),
+                        names=names), open(os.path.join(out, "data.yaml"), "w"), sort_keys=False)
+
+
 def model_class(size):
     import rfdetr
 
@@ -217,6 +251,10 @@ def main():
     a.add_argument("--data", required=True)
     a.add_argument("--subset", required=True)
     a.add_argument("--out", required=True)
+    a = sp.add_parser("prepare-official")
+    a.add_argument("--data", required=True)
+    a.add_argument("--out", required=True)
+    a.add_argument("--carve", type=float, default=0.0, help="fraction of train/ held out as valid/ when there is no test/")
     a = sp.add_parser("train")
     a.add_argument("--dataset", required=True)
     a.add_argument("--out", required=True)
@@ -240,6 +278,8 @@ def main():
     args = ap.parse_args()
     if args.cmd == "prepare":
         prepare(args.data, args.subset, args.out)
+    elif args.cmd == "prepare-official":
+        prepare_official(args.data, args.out, args.carve)
     elif args.cmd == "train":
         train(args.dataset, args.out, args.size, args.epochs, args.batch, args.accum, args.seed, args.freeze_encoder, args.resolution)
     elif args.cmd == "predict":
