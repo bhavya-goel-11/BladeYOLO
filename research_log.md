@@ -3175,6 +3175,36 @@ The paper trained BladeYOLO for 300 epochs with SGD at 640.
 
 **Not a hypothesis test.** It is a benchmark entry under the community's protocol. No claim of generalisation is made from the official numbers.
 
+### G25 result: RF-DETR-M on the official protocols (3 Nov)
+
+Kaggle, 2 Nov, three sessions; root zips `runs.zip`, `runs (1).zip`, `runs (2).zip` → `runs/analysis/v1/kaggle_out_g25`. All `v1_options.json` match the plan.
+
+`tools/g25_official.py` → `runs/analysis/g25/report.md`. COCO 101-point evaluator; image-level bootstrap 95% CI.
+
+| official protocol | RF-DETR-M, this work: mAP50 / mAP50-95 | published or earlier, same protocol |
+|---|---|---|
+| WTBD-official (test 161) | **90.5 [86.3, 94.4] / 60.2 [55.5, 65.3]** at 768; 87.3 / 60.1 at 640 | BladeYOLO-v2 84.0 / 49.3, YOLO12-L 70.4 / 38.8 (ours, Ultralytics, §12); the dataset paper has no detection baselines |
+| Wind Surface Defect (val 714 = test) | 81.8 [78.0, 85.4] / 51.4 [48.3, 55.0] | **BladeYOLO paper 86.5 / 57.4**; our best leaky reproduction 78.2 / 46.9 |
+| WTBlade-Defect (Roboflow test 553) | **87.4** [84.4, 90.9] / 52.5 [49.6, 56.2] | BladeYOLO paper 85.8 / **74.6**, its YOLOv12-L 83.3 / 71.9, on its own 9:1 re-split of 5,326 images |
+
+**Per class AP50:**
+- WTBD at 768: crack 99.8, craze 94.9, thunderstrike 93.1, surface_injure 90.6, hide_craze 85.7, corrosion 79.2.
+- Wind Surface: dirt 92.2, surface_eye 90.7, hide_craze 86.8, thunderstrike 69.7, corrosion 69.5.
+- WTBlade-Defect: burn 92.4, rust 92.3, oil 91.7, deformity 84.6, peeling 84.2, crack 83.5, dirt 83.3.
+
+**RF-DETR's own validation mAP agrees** (91.1 / 63.2, 83.0 / 52.5, 89.1 / 52.4).
+
+**Reading:**
+- **WTBD-official:** best result on this protocol by +10.9 mAP50-95 over our BladeYOLO-v2. These are the first detection numbers on WTBD's published split from a foundation detector. Resolution 768 adds +3.2 mAP50 (crack +7.4, hide_craze +7.3), consistent with G24.
+- **Wind Surface:** below the BladeYOLO paper (−4.7 / −6.0) and above our own reproduction of it. Our public copy has 3,570 images against the paper's 3,790, so the splits are not identical.
+- **WTBlade-Defect:** mAP50 above the paper (+1.6). mAP50-95 is 22 points below.
+  - The protocols differ (10,660-image Roboflow split vs the paper's unpublished 5,326-image re-split).
+  - The paper's ratio mAP50-95 / mAP50 = 0.87 (YOLOv12-L 0.86) is far above every leak-free blade result we have measured (0.42–0.47). It fits near-duplicate Roboflow copies falling on both sides of a random split. This is a hypothesis; the paper's split is not available to test it.
+- **Two runs ended while still improving:** Wind Surface's best validation epoch was 58 of 60, WTBlade-Defect's 24 of 25 (paper: 300 epochs). Their official numbers are lower bounds for this detector.
+- **Evaluators differ:** ours is COCO 101-point; the paper's is presumably Ultralytics. They differed by 1–3 points on WTBD in §12.
+
+**Still missing for the "leakage beside it" columns:** the same detector, at full data, on the leak-free splits (WTBD-group, WTBlade-group). Existing RF-DETR leak-free runs use 25% or 8% of the labels only.
+
 ---
 
 ## 25. Engineering problems solved
