@@ -3087,6 +3087,65 @@ Own-space slopes are larger because own-space cosines span a narrower range; mag
 - G22 stage B (pre-registered in DINOv3 space) still decides that narrower form.
 - Its frozen-encoder models also get the own-space check once their checkpoints are downloaded.
 
+### G24 result: resolution does not fix WTBlade's localisation deficit; it helps WTBD instead; dissociation not confirmed (2 Nov)
+
+Kaggle, 1 Nov:
+- WTBlade f08 at 768 on account 1 (`kaggle_out_acc1`), about 67 min per run;
+- WTBD f25 at 768 on account 2, notebook v41 (`kaggle_out_acc2`).
+
+All `v1_options.json` record resolution 768, batch 2 × accum 8. `tools/g24_resolution.py` → `runs/analysis/g24/report.md`.
+
+| test, family mean of 4 | 576 | 768 | Δ [95% CI], P(>0) | better | relative |
+|---|---|---|---|---|---|
+| WTBlade f08 | 0.0920 | 0.0907 | −0.0012 [−0.0091, +0.0056], 0.312 | 1/4 | −1.3% |
+| WTBD f25 | 0.1890 | 0.1993 | **+0.0103 [−0.0022, +0.0378], 0.958** | 3/4 | +5.4% |
+
+- **R1 ✗, R2 ✗** (WTBlade crack no-box lower on 1/4 models), **R3 ✗** (P(WTBlade > WTBD) 0.066).
+- **WTBlade per class:** crack +0.008, every other class −0.002 to −0.007.
+- **WTBD:** every class gains (hide_craze +0.032, crack +0.010).
+
+**Scope check** (`runs/analysis/g24/scope.py` → `scope.log`): WTBlade crack no-box rate by size, 576 → 768.
+- short side < 32 px: 0.58 → 0.60;
+- 32–64 px: 0.46 → 0.54;
+- ≥ 64 px: 0.33 → 0.28.
+
+Upsampling a 640-px source does not help even the small cracks. No scope.
+
+**Reading:**
+- WTBlade's crack deficit is not fixed by labels (8% → 100%, earlier) or by resolution. It is a ceiling of the data or annotation.
+- Resolution helps where real pixels exist (WTBD, 1024-px originals): the confound stated at pre-registration, and the larger effect.
+- **The "diagnosis picks the fix" double dissociation is not confirmed.** The localisation-regime fix fails on the localisation-regime dataset. G24 closed.
+
+### G22 stage B result: the frozen-encoder control confirms the effect on WTBD, not on WTBlade; item 1 does not replicate (2 Nov)
+
+Kaggle, account 2, notebook v40 (downloaded from the web UI as `runs_v40.zip` → `runs/analysis/v1/kaggle_out_v40`). All 8 `rfdetrmfz_*` runs record `freeze_encoder: true`. `tools/g22_coverage.py stageB` → `runs/analysis/g22/stageB.md`.
+
+| | fine-tuned detected slope | frozen detected slope | fine-tuned − frozen | B1 / B2 / B3 |
+|---|---|---|---|---|
+| WTBD (235 boxes, 58 scenes) | −0.016 [−0.886, +0.603] | **+0.898 [+0.040, +1.796], P 0.977** | **−0.914 [−1.934, −0.267], P(<0) 0.993** | ✓ ✓ ✓ |
+| WTBlade (748 boxes, 177 scenes) | +1.772, P 1.000 | +2.050, P 1.000 | −0.278 [−1.030, +0.686], P(<0) 0.745 | ✓ ✗ ✓ |
+
+**Item 1 does not replicate** (pre-registered: B1–B3 on both datasets).
+
+- **On WTBD the controlled design reproduces G16-R without its architecture confound.** Freezing only the encoder restores recall's dependence on DINOv3 proximity.
+- **On WTBlade it does not.**
+
+**Reported numbers** (`stageB_map.py` → `stageB_map.log`):
+
+| | detection rate (≥ 0.05), fine-tuned / frozen | test mAP50-95, fine-tuned / frozen |
+|---|---|---|
+| WTBD | 0.641 / 0.528 | 0.189 / 0.123 |
+| WTBlade | 0.636 / 0.626 | 0.132 / 0.087 |
+
+On WTBlade, fine-tuning raises mAP without raising recall: the gain is in scores and boxes.
+
+**Scope check** (`stageB_scope.py` → `stageB_scope.log`, post hoc): where fine-tuning's added recall falls, by within-class proximity tercile.
+- WTBD: far +0.13, mid +0.13, near +0.09; far − near +0.04, P 0.72. Not concentrated on far-from-labelled defects.
+- WTBlade: +0.01 in every tercile.
+- No scope for a reformulation.
+
+**Item 1 dropped as a claim.** It stays a WTBD observation, now with a clean control, and a caveat from G22-O: it only holds for generic-feature proximity.
+
 ---
 
 ## 25. Engineering problems solved
