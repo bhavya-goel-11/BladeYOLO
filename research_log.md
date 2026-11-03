@@ -3249,6 +3249,23 @@ Scored with `tools/g25_official.py g26` → `runs/analysis/g26/report.md` (same 
 - **Pre-registered selection rule:** it formally selects Large (validation mAP50-95 0.634 > 0.620). Running Large on Wind Surface and WTBlade-Defect costs about twice the GPU time for an effect that does not survive the test split. This is noted as a decision point, not taken silently; dropping a run cannot inflate any reported number.
 - **Best official numbers so far (single seed):** WTBD-official 90.4 / 61.2 (M 768 cosine); Wind Surface 81.0 / 53.3 (cosine) or 81.8 / 51.4 (constant), depending on the metric. WTBlade-Defect, session 3 (A100, bf16 AMP rather than Kaggle's fp16), is still running.
 
+### G26 result, session 3: WTBlade-Defect follows the same pattern (4 Nov)
+
+Run on the user's A100 (NGC container, torch 2.7.1+cu128, numpy < 2, bf16 AMP; Kaggle runs used fp16 on T4/P100), not on Kaggle. Zip `rfdetrm640cos_wtblade_defect_official.zip` → `runs/analysis/v1/kaggle_out_g26/wtblade`, then deleted. `v1_options.json` matches the plan (Medium, 640, 40 epochs, cosine, 4 × 4); the LR anneals 1e-4 → 5e-5 → ~0.
+
+| run | val mAP50 / mAP50-95 (best epoch) | **test** mAP50 / mAP50-95 [95% CI] |
+|---|---|---|
+| M 640, 25 ep, constant (G25) | 89.1 / 52.4 (24 of 25) | 87.4 [84.4, 90.9] / 52.5 [49.6, 56.2] |
+| **M 640, 40 ep, cosine** | 89.4 / 55.7 (39 of 40) | **87.2** [83.9, 90.6] / **55.1** [52.0, 59.1] |
+| BladeYOLO paper (own 9:1 re-split of 5,326 images) | | 85.8 / 74.6 |
+
+Per class AP50 (cosine): rust 93.8, burn 92.2, oil 89.5, deformity 87.2, crack 83.2, dirt 82.9, peeling 81.9.
+
+**G26 summary over the three protocols:** the annealed schedule adds +1.0, +1.9 and +2.6 mAP50-95 (WTBD-official, Wind Surface, WTBlade-Defect) and −0.1, −0.8, −0.2 mAP50. The direction is consistent; each single change lies within its interval. Against BladeYOLO's paper, a generic detector with a standard recipe:
+- is ahead at mAP50 on WTBlade-Defect (+1.4);
+- is behind on Wind Surface (−5.5 / −4.1);
+- is 19.5 points behind at mAP50-95 on WTBlade-Defect, a protocol the paper's unpublished re-split makes non-comparable (its mAP50-95 / mAP50 ratio 0.87 vs ours 0.63).
+
 ---
 
 ## 25. Engineering problems solved
