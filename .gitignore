@@ -44,3 +44,6 @@ venv/
 Thumbs.db
 .vscode/
 .idea/
+
+# Paper figures are generated, small, and versioned
+!paper/figures/*.pdf

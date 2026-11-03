@@ -3266,6 +3266,65 @@ Per class AP50 (cosine): rust 93.8, burn 92.2, oil 89.5, deformity 87.2, crack 8
 - is behind on Wind Surface (−5.5 / −4.1);
 - is 19.5 points behind at mAP50-95 on WTBlade-Defect, a protocol the paper's unpublished re-split makes non-comparable (its mAP50-95 / mAP50 ratio 0.87 vs ours 0.63).
 
+### Paper preparation, local analyses: evaluator check, leaked vs no-twin test images, and what the G26 tuning bought (4 Nov; CPU, cached predictions, post hoc)
+
+GPU work stops here (user, 4 Nov); the paper is written from the runs that exist. Two local analyses on the official-protocol predictions. Both are **post hoc** (not pre-registered); they are reported as measurements.
+
+**Tool:** `tools/official_leak_eval.py` → `runs/analysis/paper/official.{md,json}`; `... paired` → `paired.{md,json}`. Tests: `tests/test_official_leak_eval.py`:
+- the numpy matcher is identical to Ultralytics 8.4's `DetectionValidator.match_predictions` on 200 random cases;
+- the weighted bootstrap (image multiplicities over a once-sorted detection list) equals scoring the resampled multiset (≤ 2e-3).
+
+**1. Evaluator: settled, the AP formula does not matter.** On identical predictions, Ultralytics-style (`ap_per_class`) and our COCO-style AP agree within 0.4 points on every run and subset (e.g. RF-DETR-M 768 cosine on WTBD-official: 90.7 / 61.4 vs 90.4 / 61.2).
+- The 1–2.5-point gap between §12's logged Ultralytics `val` numbers (BladeYOLO-v2 84.0 / 49.3) and the same models' cached predictions (81.6 / 48.0) comes from `val`'s own inference path (rectangular letterbox batches), not from the metric.
+- So the RF-DETR official numbers are directly comparable to Ultralytics-reported figures: the paper's 86.5 / 57.4 (Wind Surface) and 85.8 / 74.6 (WTBlade-Defect) gaps are not an evaluator artefact.
+
+**2. Leak flags per official test image** (a twin among the images the run actually trained on):
+
+| protocol | criterion | leaked | no twin | other |
+|---|---|---|---|---|
+| WTBD-official | same scene (DINOv2 + ORB/RANSAC, `runs/analysis/wtbd_leak/test_leak.csv`) | 125 / 161 (78%) | 36 | |
+| Wind Surface | pixel twin: corr ≥ 0.99 at 48 px over the 8 flips/rotations, against the 2,570 trained images (carve excluded) (`tools/ws_pixel_twins.py`) | 600 / 714 (84%) | 114 | (flips only, as in §4: 532; with rotations 611 against all train) |
+| WTBlade-Defect | same scene group (`runs/analysis/wtblade/split_groups.csv`) | 499 / 542 grouped (92%) | 43 | 360 are Roboflow copies of a train frame; 11 WTBD-matching images ungrouped, left out |
+
+The Wind Surface "no twin" images have no near-identical copy in train, but most still come from drone photos that have other tiles in train (§4), so it is the cleanest subset available, not a leak-free one.
+
+**3. Score by subset** (coco evaluator, image bootstrap 95% CI; full tables with per-class AP and the ultra column in `official.md`):
+
+| protocol, run | all | leaked | no twin |
+|---|---|---|---|
+| WTBD-official, RF-DETR-M 768 cosine | 90.4 / 61.2 | 91.5 / 63.9 | 81.6 [69.1, 93.2] / 49.9 [40.4, 61.1] |
+| WTBD-official, BladeYOLO-v2 | 81.5 / 48.1 | 82.6 / 48.9 | 81.5 / 47.8 |
+| Wind Surface, RF-DETR-M cosine | 81.0 / 53.3 | 83.3 / 55.1 | **59.2 [49.0, 68.1] / 37.6 [29.9, 45.4]** |
+| WTBlade-Defect, RF-DETR-M cosine | 87.2 / 55.1 | 90.8 / 59.4 | **50.4 [38.5, 64.0] / 17.2 [13.5, 23.4]** |
+| WTBlade-Defect, copies of a train frame (360) | | **98.2 / 69.8** | |
+| WTBlade-Defect, same scene, not a copy (139) | | 65.7 / 30.1 | |
+
+- **WTBlade-Defect:** a test image that is a Roboflow copy of a training frame scores 98.2 mAP50; one without a same-scene train image scores 50.4. The official number is mostly the copies. The copies' mAP50-95 / mAP50 ratio is 0.71 (no twin 0.34). This supports the hypothesis that the paper's 0.87 ratio on its own random re-split reflects copies across the split (still not testable without its split).
+- **Wind Surface:** −24 mAP50 / −18 mAP50-95 from leaked to no-twin. Thunderstrike AP50 on no-twin images is 3 (12 boxes); corrosion 42.
+- **WTBD-official:** the no-twin subset has 1 box each of craze, thunderstrike and crack, so its mean is unstable (as in §11). Only corrosion falls clearly (AP50 97 leaked → 54 no twin).
+
+**4. What the G26 tuning bought: memorisation** (paired image bootstrap, cosine/longer − G25 recipe, percent points; interaction = Δ leaked − Δ no twin, subsets resampled independently):
+
+| protocol | Δ mAP50-95, all | leaked | no twin | interaction [95% CI], P(>0) |
+|---|---|---|---|---|
+| WTBD-official (cosine − constant, M 768) | +1.0 [−1.2, +3.0] | +1.8 [−0.1, +4.0] | **−8.1 [−13.4, +0.2]** | +9.9 [+1.1, +15.8], 0.993 |
+| Wind Surface (100 ep cosine − 60 ep constant) | **+1.8 [+0.5, +3.1]** | +2.3 [+0.9, +3.8] | −1.5 [−4.2, +1.4] | +3.8 [+0.7, +7.0], 0.988 |
+| WTBlade-Defect (40 ep cosine − 25 ep constant) | **+2.6 [+1.1, +3.9]** | +3.5 [+2.0, +5.0]; copies +5.4 [+3.6, +7.0] | **−4.0 [−7.2, +0.1]** | +7.4 [+3.0, +11.1], 1.000 |
+
+- Paired, the G26 gains on the whole official test are real on Wind Surface and WTBlade-Defect (the unpaired G26 intervals hid that).
+- **On every protocol the gain sits on the leaked images, and the same change lowers the score on the images without a twin.** The interaction excludes zero on all three. Annealing and longer training tighten boxes on what the model has effectively seen; on new images they do not help and probably hurt.
+- Confound: on Wind Surface and WTBlade-Defect the recipe also trained longer (60→100, 25→40 epochs); on WTBD only the schedule changed, and the pattern is the same.
+- **Consequence:** tuning a recipe against a leaky benchmark's numbers selects for memorisation, measurably, in a single tuning step. This is the strongest single finding for the paper's argument, and it applies to our own G26 numbers. The G26 rows stay in the paper, labelled as what they are.
+
+**Other paired comparisons (WTBD-official):**
+- RF-DETR-M 768 cosine − BladeYOLO-v2: +13.2 [+8.2, +17.4] mAP50-95 on all images, but +2.1 [−5.3, +19.8] on the 36 no-twin images. The foundation detector's lead on the official split is not established on unseen images.
+- BladeYOLO-v2 − YOLO12-L: +10.3 overall and +12.6 [−0.6, +15.6] (P 0.965) on no-twin images. That ordering survives, consistent with the leak-free result (§12).
+
+**Paper materials** (from this point on, the write-up):
+- `paper/README.md`: framing (benchmark audit with a strong baseline, not a module paper), outline mapped to evidence, abstract draft, limitations, and the two optional GPU runs (RF-DETR full-label leak-free twins);
+- `paper/tables.md`: T1–T10 with sources;
+- `paper/figures/` from `tools/paper_figures.py`.
+
 ---
 
 ## 25. Engineering problems solved
