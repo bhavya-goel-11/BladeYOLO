@@ -3227,6 +3227,28 @@ Kaggle, 2 Nov, three sessions; root zips `runs.zip`, `runs (1).zip`, `runs (2).z
 
 **Reporting rule:** the final recipe is then trained on the leak-free splits (WTBD-group, WTBlade-group, 100% labels), so each official number has a same-recipe leak-free twin. No tuning on the leak-free splits.
 
+### G26 result, sessions 1–2: the annealed schedule adds about +1–2 mAP50-95 and nothing at mAP50; Large does not help on test (3 Nov)
+
+Kaggle, 3 Nov: session 1 (WTBD-official, Medium 768 cosine, then Large 704 cosine) and session 2 (Wind Surface, Medium 640, 100 epochs, cosine). Root zips extracted to `runs/analysis/v1/kaggle_out_g26/{wtbd,ws}`, then deleted. All `v1_options.json` match the plan. The logged LR now anneals (1e-4 → 5e-5 at mid-run → ~0).
+
+Scored with `tools/g25_official.py g26` → `runs/analysis/g26/report.md` (same evaluator and bootstrap as G25).
+
+| protocol | run | val mAP50 / mAP50-95 (best epoch) | **test** mAP50 / mAP50-95 [95% CI] |
+|---|---|---|---|
+| WTBD-official | M 768, constant LR (G25) | 90.8 / 62.4 (38) | 90.5 / 60.2 |
+| | **M 768, cosine** | 92.5 / 62.0 (48) | **90.4** [85.8, 94.7] / **61.2** [56.4, 66.2] |
+| | L 704, cosine | 90.3 / **63.4** (89) | 88.9 [84.8, 93.3] / 59.5 [54.6, 65.3] |
+| Wind Surface | M 640, 60 ep, constant (G25) | 83.0 / 52.5 (58) | 81.8 / 51.4 |
+| | **M 640, 100 ep, cosine** | 82.1 / 54.4 (93) | **81.0** [77.0, 84.9] / **53.3** [50.0, 57.0] |
+| | BladeYOLO paper | | 86.5 / 57.4 |
+
+**Reading:**
+- **The schedule fix is worth +1.0 (WTBD) to +1.9 (Wind Surface) mAP50-95 and nothing at mAP50** (−0.1, −0.8). Every change lies inside the bootstrap intervals. Annealing tightens boxes; it does not find more defects.
+- **Wind Surface: the gap to the paper is not a training-length or schedule problem.** It stays at −5.5 mAP50 / −4.1 mAP50-95. My extrapolation from the 60-epoch curve (test ≈ 83–85 / 54) overestimated mAP50. The weak classes are unchanged: corrosion 66.7, thunderstrike 68.7 AP50.
+- **Large vs Medium:** Large wins on validation mAP50-95 (+1.4) and loses on test (−1.7 mAP50-95, −1.5 mAP50). The two splits disagree in sign by margins inside the intervals: no evidence that Large helps. Thunderstrike (99.1) and crack (99.7) improve, while corrosion, surface_injure and hide_craze fall.
+- **Pre-registered selection rule:** it formally selects Large (validation mAP50-95 0.634 > 0.620). Running Large on Wind Surface and WTBlade-Defect costs about twice the GPU time for an effect that does not survive the test split. This is noted as a decision point, not taken silently; dropping a run cannot inflate any reported number.
+- **Best official numbers so far (single seed):** WTBD-official 90.4 / 61.2 (M 768 cosine); Wind Surface 81.0 / 53.3 (cosine) or 81.8 / 51.4 (constant), depending on the metric. WTBlade-Defect, session 3 (A100, bf16 AMP rather than Kaggle's fp16), is still running.
+
 ---
 
 ## 25. Engineering problems solved

@@ -7,7 +7,9 @@ evaluator, next to the numbers BladeYOLO (IEEE TGRS 2026) and our earlier runs r
 
 Image-level bootstrap (official splits have no scene groups; 1,000 replicates) for intervals. Predictions are the
 Kaggle ones (conf 0.001, 640-input pixels, keyed by file name).
-  .venv/bin/python tools/g25_official.py -> runs/analysis/g25/report.md
+  .venv/bin/python tools/g25_official.py       -> runs/analysis/g25/report.md
+  .venv/bin/python tools/g25_official.py g26   -> runs/analysis/g26/report.md (G25 runs + the G26 tuned-recipe runs
+                                                   that exist locally; missing ones are listed as pending)
 """
 
 import csv
@@ -24,6 +26,9 @@ import bootstrap_ci as bc  # noqa: E402
 
 RUNS = os.path.join(ROOT, "runs", "detect", "BladeYOLO_WindSurface")
 OUT = os.path.join(ROOT, "runs", "analysis", "g25")
+G26 = {"WTBD-official": ["rfdetrm768cos_wtbd_official", "rfdetrl704cos_wtbd_official"],
+       "Wind Surface Defect": ["rfdetrm640cos_windsurface_official"],
+       "WTBlade-Defect": ["rfdetrm640cos_wtblade_defect_official"]}
 N_BOOT = 1000
 SETS = [  # name, data dir, test folder, runs, published references (mAP50, mAP50-95; percent)
     ("WTBD-official", os.path.join(ROOT, "external", "WTBD-official"), "test",
@@ -50,13 +55,18 @@ def last_val(run):
     return float(best["val/mAP_50"]), float(best["val/mAP_50_95"]), int(best["epoch"])
 
 
-def main():
-    os.makedirs(OUT, exist_ok=True)
-    lines = ["# G25: RF-DETR-M on the official (published, leaky) protocols (research_log.md)", "",
+def main(g26=False):
+    out = os.path.join(ROOT, "runs", "analysis", "g26") if g26 else OUT
+    os.makedirs(out, exist_ok=True)
+    title = "G26: tuned RF-DETR recipe" if g26 else "G25: RF-DETR-M"
+    lines = [f"# {title} on the official (published, leaky) protocols (research_log.md)", "",
              "COCO 101-point AP (tools/bootstrap_ci.py), predictions at conf 0.001; image-level bootstrap 95% CI "
              f"({N_BOOT} replicates). Published numbers are copied from the papers / earlier sections, not re-run.", ""]
     res = {}
     for name, data, split, runs, refs in SETS:
+        if g26:
+            pending = [r for r in G26[name] if not os.path.exists(os.path.join(RUNS, r, "preds_test.json"))]
+            runs = runs + [r for r in G26[name] if r not in pending]
         names = names_of(data)
         imgs = bc.load_yolo_split(data, split)
         files = sorted(imgs)
@@ -80,13 +90,15 @@ def main():
                          f"[{100 * np.percentile(bs[:, 1], 2.5):.1f}, {100 * np.percentile(bs[:, 1], 97.5):.1f}] | "
                          f"this work (RF-DETR's own val: {100 * v50:.1f} / {100 * v5095:.1f} at epoch {ep}) |")
         lines += [f"| {r} | {a:.1f} | {b:.1f} | published / earlier |" for r, a, b in refs]
+        if g26 and pending:
+            lines.append(f"| {', '.join(pending)} | pending | pending | not imported yet |")
         lines += ["", "| class | " + " | ".join(runs) + " |", "|---|" + "---|" * len(runs)]
         lines += [f"| {c} | " + " | ".join(f"{100 * res[r]['pc50'][c]:.1f}" for r in runs) + " |" for c in names]
         lines.append("")
-    json.dump(res, open(os.path.join(OUT, "report.json"), "w"), indent=1)
-    open(os.path.join(OUT, "report.md"), "w").write("\n".join(lines) + "\n")
+    json.dump(res, open(os.path.join(out, "report.json"), "w"), indent=1)
+    open(os.path.join(out, "report.md"), "w").write("\n".join(lines) + "\n")
     print("\n".join(lines))
 
 
 if __name__ == "__main__":
-    main()
+    main(g26=sys.argv[1:] == ["g26"])
