@@ -3205,6 +3205,28 @@ Kaggle, 2 Nov, three sessions; root zips `runs.zip`, `runs (1).zip`, `runs (2).z
 
 **Still missing for the "leakage beside it" columns:** the same detector, at full data, on the leak-free splits (WTBD-group, WTBlade-group). Existing RF-DETR leak-free runs use 25% or 8% of the labels only.
 
+### G26: a tuned RF-DETR recipe for all three official benchmarks. Pre-registered before any run (3 Nov)
+
+**Goal (user, 3 Nov):** match or beat BladeYOLO on every official protocol, even though the leaky protocols partly reward memorisation; the leak and the leak-free twins are reported beside every number.
+
+**Finding that motivates it: no RF-DETR run so far ever decayed its learning rate.** RF-DETR 1.11.2's default schedule is a 10× step after `lr_drop = 100` epochs (`current_step < lr_drop * steps_per_epoch`), so runs of ≤ 100 epochs train at a constant 1e-4 throughout. The logged `train/lr` of the Wind Surface run is 1e-4 at every epoch. This applies to every RF-DETR run in §31–G25; the comparisons between them stay like for like, but the late-training gain of an annealed rate was never used.
+
+**Code:** `rfdetr_v1.py train --lr-schedule {step,cosine} --lr-drop N` (function `schedule_kwargs`, recorded in `v1_options.json`); `predict` now reads the model size from `v1_options.json` (Large runs). `tests/test_rfdetr_schedule.py` (RF-DETR's own `_build_managed_scheduler`): default constant through epoch 99; `--lr-drop 75` drops at 75; cosine 1.00 → 0.50 → 0.000. The resolution and freeze tests still pass.
+
+**Measured Kaggle speed (single GPU, from the event files):** Medium at 640: WTBD-official 1.2 min/epoch, Wind Surface 4.2, WTBlade-Defect 14.6; Medium at 768 on WTBD 1.8.
+
+**Recipe changes, one session per protocol (12 h limit):**
+
+| protocol | G25 recipe | G26 recipe |
+|---|---|---|
+| WTBD-official | M, 768, 100 ep, constant LR | (a) M, 768, 100 ep, cosine; (b) **Large**, 704 (native), 100 ep, cosine |
+| Wind Surface | M, 640, 60 ep, constant | M, 640, 100 ep, cosine (≈ 7 h) |
+| WTBlade-Defect | M, 640, 25 ep, constant | M, 640, 40 ep, cosine (≈ 9.7 h) |
+
+**Selection rule:** model selection on validation only (WTBD: official val; Wind Surface: the seeded 10% carved from train; WTBlade-Defect: Roboflow valid). If Large beats Medium on WTBD validation mAP50-95, Large is used for the other two in a later round; the test set is scored once per run, never for selection.
+
+**Reporting rule:** the final recipe is then trained on the leak-free splits (WTBD-group, WTBlade-group, 100% labels), so each official number has a same-recipe leak-free twin. No tuning on the leak-free splits.
+
 ---
 
 ## 25. Engineering problems solved

@@ -107,18 +107,20 @@ def model_class(size):
     return getattr(rfdetr, SIZES[size])
 
 
-def train(dataset, out, size, epochs, batch, accum, seed, freeze_encoder=False, resolution=None):
+def train(dataset, out, size, epochs, batch, accum, seed, freeze_encoder=False, resolution=None, lr_schedule=None,
+          lr_drop=None):
     if any(os.path.exists(os.path.join(out, b)) for b in BEST):
         print(f"{out} already has a best checkpoint; not retraining")
         return
     os.makedirs(out, exist_ok=True)
     opts = dict(dataset=os.path.abspath(dataset), size=size, epochs=epochs, batch_size=batch, grad_accum_steps=accum,
-                seed=seed, freeze_encoder=freeze_encoder, resolution=resolution)
+                seed=seed, freeze_encoder=freeze_encoder, resolution=resolution, lr_schedule=lr_schedule, lr_drop=lr_drop)
     json.dump(opts, open(os.path.join(out, "v1_options.json"), "w"), indent=2)
     # periodic checkpoints only at the end: four runs of 10-epoch checkpoints filled Kaggle's disk (v69)
     # G22 control: freeze_encoder keeps the DINOv2 encoder frozen (projector and decoder still train)
     model_class(size)(**model_kwargs(freeze_encoder, resolution)).train(dataset_dir=os.path.abspath(dataset), output_dir=os.path.abspath(out), epochs=epochs,
-                              batch_size=batch, grad_accum_steps=accum, seed=seed, checkpoint_interval=epochs)
+                              batch_size=batch, grad_accum_steps=accum, seed=seed, checkpoint_interval=epochs,
+                              **schedule_kwargs(lr_schedule, lr_drop, epochs))
     for f in os.listdir(out):
         if f.endswith((".ckpt", ".pth")) and f != best_checkpoint(out).split(os.sep)[-1]:
             os.remove(os.path.join(out, f))
@@ -131,6 +133,18 @@ def model_kwargs(freeze_encoder=False, resolution=None):
         assert resolution % 32 == 0, resolution
         kw["resolution"] = resolution
     return kw
+
+
+def schedule_kwargs(lr_schedule=None, lr_drop=None, epochs=100):
+    """G26: RF-DETR's default is a 10x step decay after lr_drop = 100 epochs, which a run of <= 100 epochs never
+    reaches (constant LR throughout, every run before G26). 'cosine' anneals to 0 over the run; lr_drop moves the step."""
+    if lr_schedule in (None, "step") and lr_drop is None:
+        return {}
+    if lr_schedule == "cosine":
+        assert lr_drop is None, "lr_drop applies to the step schedule only"
+        return {"lr_scheduler": "cosine"}
+    assert lr_schedule in (None, "step") and 0 < lr_drop < epochs, (lr_schedule, lr_drop, epochs)
+    return {"lr_scheduler": "step", "lr_scheduler_kwargs": {"lr_drop": lr_drop}}
 
 
 def run_resolution(run):
@@ -152,6 +166,8 @@ def to_rows(xyxy, conf, cls, scale):
 
 
 def predict(run, data, size, splits):
+    opts = os.path.join(run, "v1_options.json")
+    size = json.load(open(opts)).get("size", size) if os.path.exists(opts) else size  # G26: Large runs
     from PIL import Image
 
     names = yaml.safe_load(open(os.path.join(data, "data.yaml")))["names"]
@@ -265,6 +281,8 @@ def main():
     a.add_argument("--seed", type=int, default=0)
     a.add_argument("--freeze-encoder", action="store_true", help="G22 control: frozen DINOv2 encoder")
     a.add_argument("--resolution", type=int, default=None, help="G24: input resolution (default: model's, 576)")
+    a.add_argument("--lr-schedule", choices=["step", "cosine"], default=None, help="G26 (default: RF-DETR's step)")
+    a.add_argument("--lr-drop", type=int, default=None, help="G26: epoch of the 10x step decay (default 100)")
     a = sp.add_parser("predict")
     a.add_argument("--run", required=True)
     a.add_argument("--data", required=True)
@@ -281,7 +299,8 @@ def main():
     elif args.cmd == "prepare-official":
         prepare_official(args.data, args.out, args.carve)
     elif args.cmd == "train":
-        train(args.dataset, args.out, args.size, args.epochs, args.batch, args.accum, args.seed, args.freeze_encoder, args.resolution)
+        train(args.dataset, args.out, args.size, args.epochs, args.batch, args.accum, args.seed, args.freeze_encoder, args.resolution,
+              args.lr_schedule, args.lr_drop)
     elif args.cmd == "predict":
         predict(args.run, args.data, args.size, args.splits)
     elif args.cmd == "import":
