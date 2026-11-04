@@ -8,6 +8,7 @@ WTBD*/
 external/
 *.v*i.yolov*/
 view-pool/
+g27-pool-*/
 datasets/
 data/
 *.zip

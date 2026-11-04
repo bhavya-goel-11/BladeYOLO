@@ -133,24 +133,16 @@ their 9:1 WTBlade split before submission; if they send it, the 0.87-ratio hypot
   the Phase 6 audit (§2–§3). The "modules add nothing" claim is for our components.
 - **One wind farm per dataset; small test sets** (58 and 177 test scenes).
 
-## 5. Optional before submission (GPU; not run, by decision of 4 Nov)
+## 5. GPU runs before submission: G27 (pre-registered 4 Nov; `research_log.md`, G27)
 
-1. **RF-DETR-M, full labels, on WTBD-group and WTBlade-group, with the G26 recipe.** This gives the same-detector
-   leak-free twin of every official number, and is about 3 h on Kaggle. It would turn the "−0.29 inflation" row
-   into an RF-DETR row too.
-2. A second seed of the three official G26 runs, to put a seed interval on T2a.
+G27 supersedes the two optional runs listed here earlier. Its arm A0 *is* the RF-DETR-M full-label leak-free twin
+(WTBD-group, WTBlade-group, G26 recipe), and its other arms test the improvement directions the paper reports:
+copy-paste (recipe), in-domain self-supervised encoder adaptation (D1), and multi-dataset stage 1 with partitioned
+class slots (D2), each from a leak-checked extra-data pool. Phase B then trains the selected recipe once on the three
+official protocols. Kaggle commands: `research_log.md`, "G27 Kaggle commands".
 
-Kaggle commands (same form as G26):
-```
-!python tools/rfdetr_v1.py prepare-official --data <WTBD-group data dir> --out /kaggle/working/wtbd_group_rf
-!python tools/rfdetr_v1.py train --dataset /kaggle/working/wtbd_group_rf --out runs/detect/BladeYOLO_WindSurface/rfdetrm768cos_wtbd_group_full --size medium --resolution 768 --epochs 100 --batch 4 --accum 4 --lr-schedule cosine
-!python tools/rfdetr_v1.py prepare-official --data <WTBlade-group data dir> --out /kaggle/working/wtblade_group_rf
-!python tools/rfdetr_v1.py train --dataset /kaggle/working/wtblade_group_rf --out runs/detect/BladeYOLO_WindSurface/rfdetrm640cos_wtblade_group_full --size medium --resolution 640 --epochs 100 --batch 4 --accum 4 --lr-schedule cosine
-```
-`<... data dir>` is the folder holding `data.yaml` with `train/ val/ test/` (the group splits keep their own
-validation and test sets unchanged). WTBlade-group has one frame per source frame, about a third of the Roboflow
-copies, so 100 epochs there roughly matches the official run's 40 epochs in passes per frame. Then run `predict`,
-and score both runs with the scene bootstrap.
+If G27 finds nothing, the paper still gets A0 and its section on what was tried; if it finds a recipe, the paper gets
+"one recipe, best on both protocol families" with the leak breakdown beside the official numbers.
 
 ## 6. Regenerating the paper numbers
 

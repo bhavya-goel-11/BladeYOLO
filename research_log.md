@@ -3325,6 +3325,195 @@ The Wind Surface "no twin" images have no near-identical copy in train, but most
 - `paper/tables.md`: T1–T10 with sources;
 - `paper/figures/` from `tools/paper_figures.py`.
 
+### G27: one RF-DETR recipe for leak-free and official protocols, with two training-time additions. Pre-registered before any G27 run (4 Nov)
+
+**Goal (user, 4 Nov):** the paper says that the field reports leaked benchmarks, that a generic detector (RF-DETR) matches the published models on them, and what leak-free scores look like. It should also show how we tried to improve those scores, ideally with one recipe that beats the other architectures on both the leak-free and the official protocols, even by a small margin.
+
+**Why these additions, and not modules.** The leak-free diagnostics say where RF-DETR loses points:
+- extent is at the annotator ceiling;
+- candidate recall is already 0.83–0.92;
+- the loss is the scoring of rare classes (error anatomy, 1 Nov);
+- label-free and exemplar post-hoc rescoring are closed (G15-R, H18, G20, G21).
+
+What is left must change what the model learns from. The encoder has never seen blade imagery: DINOv3 was frozen in every BladeYOLO run, and RF-DETR starts from generic DINOv2 → COCO.
+
+**Components:**
+- **CP, recipe component** (`tools/g27_paste.py`): H10's matched copy-paste, generalised. In each protocol's training set, every class below the median class count gets min(median − n, n) extra boxes. These are real boxes of that class from the same training set, at most 2 per new image, centred on a SAM 2.1 blade pixel. Plans are committed (`tools/splits/g27_cp_<protocol>.csv`):
+
+  | protocol | new images | boxes added |
+  |---|---|---|
+  | WTBD-group | 45 | 89 (thunderstrike +66, crack +23) |
+  | WTBD-official | 50 | 95 |
+  | Wind Surface | 316 | 630 (surface_eye +305, thunderstrike +325) |
+  | WTBlade-group | 168 | 332 (burn +141, deformity +42, oil +149) |
+  | WTBlade-Defect | 973 | planned by the same rule (phase B only; plan committed when done) |
+
+  Visual check: some pastes land off the blade where SAM's largest mask includes sky, and box-level pastes carry their source background (as in H10). Kept as H10 ran it; the A1 − A0 comparison measures it.
+- **D1, in-domain self-supervised encoder adaptation** (`tools/g27_ssl.py`):
+  - Masked feature distillation (data2vec-style) on RF-DETR-M's own DINOv2-S encoder, starting from the COCO checkpoint.
+  - An EMA teacher sees the crop. The student sees it with 50% of its 16-px patches replaced by the encoder's mask token (block masking), and regresses the teacher's mean layer-normalised stage-3/6/9/12 features at the masked patches.
+  - 8,000 steps × 16 crops at 576, lr 5e-5 cosine (500 warm-up steps), EMA 0.999 → 0.9999.
+  - The teacher encoder is written back into the COCO checkpoint; projector, decoder and heads stay COCO's.
+  - The pool's labels are unused.
+- **D2, multi-dataset supervised stage 1 with partitioned class slots** (`tools/g27_slots.py`, `rfdetr_v1.py train --slot-mask`):
+  - RF-DETR-M trained on the pool with every dataset's official classes in its own block of slots (34 slots).
+  - Same-named classes are not merged, because conventions differ (§10).
+  - Each image's classification loss is restricted to its own block. Logits outside it are filled with −1e4 before the criterion, so matching and every loss see p = 0 there (Zhou et al., CVPR 2022).
+  - 12 epochs, cosine, 576, 4 × 4, seed 0, COCO init.
+  - The final EMA weights (`last_ema.pth`, no selection) initialise the fine-tunes; the head is re-initialised to the target classes.
+- **D1 and D2 use the same pool images:** images only for D1, images plus labels for D2.
+
+**Pools** (`tools/g27_pool.py`; the twin rule is in its docstring):
+- **Pool L, for the leak-free protocols, is scene-level clean** against WTBD-group and WTBlade-group val + test:
+  - WTBD images only from WTBD-group train;
+  - WTBlade images only from scene groups of WTBlade-group train;
+  - all other sources minus anything matching a val/test image: same file, DINOv2 ≥ 0.90, ORB ≥ 25 inliers (evaluation-side top 30 with cosine ≥ 0.70, pool-side top 3 with cosine ≥ 0.80), pixel correlation ≥ 0.97 over 8 flips/rotations, and the closure of all of these.
+  - The exclusion thresholds sit below the audit's twin thresholds (DINOv2 0.93, pixel 0.99) on purpose (next bullet).
+- **Pool O, for the official protocols, is image-level clean** against their val/test (and the Wind Surface carve). It is built only if a component enters the recipe.
+- **How the rule got there (logged, not hidden):**
+  - The first all-protocol pool (DINOv2 + ORB only) kept 830 pixel twins, which the independent audit found.
+  - With pixel twins added, the audit's closest remaining pairs were still neighbouring video frames and re-exposed copies of evaluation scenes. Hence the scene rule and the pool-side ORB.
+  - With those, at exactly 0.93 / 0.99 the closest kept pairs still included a brightened WTBD crack copy (pixel 0.98) and re-tinted or neighbouring drone frames (cosine 0.92–0.93). Hence the margin, 0.90 / 0.97.
+  - Archived versions: `runs/analysis/g27/{g27_pool_v1_dino_orb_only.csv, g27_pool_v2_all_protocols_pixel.csv, archive/g27_pool_L_v3_093_099.csv}`.
+- **Final pool L** (`tools/splits/g27_pool_L.csv`, `runs/analysis/g27/pool_L.md`): **22,318 images, 45,281 boxes, 34 slots**.
+
+  | source | kept |
+  |---|---|
+  | WTBD | 692 |
+  | WTBlade | 6,303 |
+  | Wind Surface | 2,404 |
+  | Beijing | 7,771 |
+  | WTBs2025 | 5,148 |
+
+- **Audit** (`pool_L_audit.md`, contact sheets `pool_L_audit_{pixel,dino}.jpg`):
+  - max pixel correlation to any evaluation image 0.969, max DINOv2 cosine 0.900; no kept image at the audit's twin thresholds;
+  - by eye, the closest pairs are different views of similar blades from the same wind farms. A few crack close-ups may be the same physical defect from another flight, which cannot be settled without capture metadata. Hence the proximity check below.
+- **Export for Kaggle:** `tools/g27_pool.py export --pool L --out g27-pool-L` (1.3 GB, gitignored). Every label is in its own dataset's slot block (checked).
+
+**Phase A: leak-free protocols, 100% labels** (RF-DETR-M; WTBD-group at 768 for 100 epochs, WTBlade-group at 640 for 60 epochs; cosine, 4 × 4):
+
+| arm | recipe |
+|---|---|
+| A0 | G26 recipe, COCO init (the missing full-label leak-free RF-DETR twin, `paper/README.md` §5) |
+| A1 | A0 + CP |
+| A2 | A1 + D1 init |
+| A3 | A1 + D2 init |
+
+- **A-1 (seed 0, both datasets, all 4 arms; validation only).**
+  - R = the arm with the highest mean val mAP50-95 over the two datasets, among the arms that beat A0 on val on both datasets (point estimates, paired scene bootstrap reported). If none does, R = A0.
+  - This replaces a per-component rule written earlier the same day, before any run: if CP failed while a D passed, that rule asked for an "A0 + D" arm that is not run.
+  - Each component's own val contrast is reported: CP is A1 − A0, D1 is A2 − A1, D2 is A3 − A1.
+  - A combination (D2 stage 1 started from D1) is a later, separately registered step.
+  - Scorer, written before any run: `tools/g27_score.py` → `runs/analysis/g27/score.md`.
+- **A-2 (seed 1):** A0 and R on both datasets.
+- **Primary test claim (scene bootstrap, paired, mean of the two seeds):**
+  - R − A0 mAP50-95 > 0 on each dataset;
+  - the mean over the two datasets has P(> 0) ≥ 0.95.
+  - Secondary, reported: each component's seed-0 test effect, mAP50, per class, and the error anatomy (does D1/D2 move ranked-low defects to hits?).
+  - **Pool-proximity check (reported with the claim):** R − A0 on the test images split at the median of their highest DINOv2 cosine to any pool L image. If the gain sits only on the near half, it is reported as possible leakage through the pool, not as a method gain.
+- **Other architectures on the same leak-free tests:**
+  - WTBD-group: BladeYOLO-v2 (ViT-S), YOLO12-L, and the no-DINOv3 ablation (existing runs);
+  - WTBlade-group: BladeYOLO-v2 ViT-B (existing), plus one new YOLO12-L run (Ultralytics, the §12 recipe).
+  - "Beats the other architectures" means R's test mAP50-95 point estimate is above every one of them on both datasets, with the paired CI reported.
+
+**Phase B: official protocols, after A-2.**
+- R is trained once on WTBD-official, Wind Surface and WTBlade-Defect with the G26 per-protocol settings. D1/D2 use pool O if accepted, so official numbers never see an official evaluation image.
+- No selection on test.
+- Reported:
+  - beside the G26 RF-DETR rows, the BladeYOLO paper and our YOLO baselines;
+  - with the leaked / no-twin breakdown (`official_leak_eval.py`). G27 changes are judged on the no-twin subset as much as on the total, given that tuning on these splits rewarded memorisation (previous section).
+
+**Finding while building the pool: a small residual leak in our own leak-free splits** (`tools/split_pixel_audit.py`, `tools/split_rescore.py` → `runs/analysis/split_audit/`).
+- The pixel-twin test (48 px grey, 8 flips/rotations, ≥ 0.99), run between each split's held-out images and its own train, finds:
+
+  | split | test | val |
+  |---|---|---|
+  | WTBD-group | 6 / 161 | 6 / 159 |
+  | WTBlade-group | 1 / 332 | 1 / 323 |
+
+- All 6 WTBD-group test pairs are real copies by eye: re-exposed, darkened, tinted, or rotated 90°. WTBD ships photometrically augmented copies (§14), and DINOv2 + ORB grouping does not catch them.
+- **Effect** (`runs/analysis/split_audit/rescore.md`, every cached test prediction rescored without those images):
+  - WTBD-group, 116 runs: mAP50-95 −0.62 points on average (range −1.09 to +0.33); mAP50 −0.70 (−1.40 to +0.69);
+  - WTBlade-group, 20 runs: ±0.03.
+- So our leak-free numbers are inflated by under a point. This goes into the paper's limitations, with the pixel test recommended next to scene grouping when building splits.
+- The splits are not changed, so every earlier comparison stays like for like. G27 reports WTBD-group test both with and without the 6 images.
+
+**Not in scope:** new architectures; 25% labels (the pools include target training scenes); a transductive arm (test images in the D1 pool), which is listed as an optional leakage measurement only.
+
+**Tests (CPU, all pass):**
+- `tests/test_g27_ssl.py`: block masks exact; the mask wrapper only changes masked calls and is removed afterwards; a 3-step run writes a checkpoint RF-DETR loads, with the encoder changed and everything else COCO's.
+- `tests/test_g27_slots.py`, against RF-DETR's real `SetCriterion` (train mode, group DETR 13, aux + encoder layers): other blocks get exactly zero gradient and do not change the loss, while the image's own block trains.
+- `tests/test_g27_train.py`, end to end:
+  - stage 1 with the slot mask inside RF-DETR's training loop, keeping `last_ema.pth` (14 outputs);
+  - a 6-class fine-tune from it with a 7-output head;
+  - copy-paste into a prepared dataset (45 images, 89 boxes, refuses a second paste).
+
+  This surfaced one bug, now fixed. RF-DETR keeps a checkpoint head that is smaller than COCO's unless `num_classes` is explicit, so `train --init` now passes the dataset's class count.
+
+### G27 Kaggle commands (phase A)
+
+**Placeholders and timings.**
+- `<WTBD-group data dir>` and `<WTBlade-group data dir>` hold `data.yaml` with `train/ val/ test/`, as in G26.
+- `<g27-pool-L>` is the uploaded `g27-pool-L/` folder.
+- `<S1 output>` is session 1's output, attached as input.
+- Rough timings on a T4: SSL about 1 h; stage 1 about 6 h; WTBD-group run about 3 h; WTBlade-group run about 3.5 h.
+
+**Session 1, pretraining (D1 and D2 on pool L, about 7–8 h):**
+```
+!cp -r <g27-pool-L> /kaggle/working/pool_L
+!python tools/g27_ssl.py --images /kaggle/working/pool_L/train/images --out runs/ssl/g27_d1_L --steps 8000
+!python tools/rfdetr_v1.py train --dataset /kaggle/working/pool_L --out runs/detect/BladeYOLO_WindSurface/rfdetrm576_g27_stage1_L --size medium --epochs 12 --batch 4 --accum 4 --lr-schedule cosine --slot-mask /kaggle/working/pool_L/slots.json --keep last_ema.pth
+```
+Its outputs are `runs/ssl/g27_d1_L/rfdetrm_g27ssl.pth` (D1) and `runs/detect/BladeYOLO_WindSurface/rfdetrm576_g27_stage1_L/last_ema.pth` (D2).
+
+**Prepared datasets (in any session that needs them):**
+```
+!python tools/rfdetr_v1.py prepare-official --data <WTBD-group data dir> --out /kaggle/working/wtbd_group_rf
+!python tools/rfdetr_v1.py prepare-official --data <WTBD-group data dir> --out /kaggle/working/wtbd_group_cp
+!python tools/g27_paste.py paste --protocol wtbd_group --dataset /kaggle/working/wtbd_group_cp
+!python tools/rfdetr_v1.py prepare-official --data <WTBlade-group data dir> --out /kaggle/working/wtblade_group_rf
+!python tools/rfdetr_v1.py prepare-official --data <WTBlade-group data dir> --out /kaggle/working/wtblade_group_cp
+!python tools/g27_paste.py paste --protocol wtblade_group --dataset /kaggle/working/wtblade_group_cp
+```
+
+**Arms.** WTBD-group runs use `--resolution 768 --epochs 100`; WTBlade-group runs use `--resolution 640 --epochs 60`. Every run uses `--size medium --batch 4 --accum 4 --lr-schedule cosine`. Run names are fixed in `tools/g27_score.py`.
+```
+# A0
+!python tools/rfdetr_v1.py train --dataset /kaggle/working/wtbd_group_rf --out runs/detect/BladeYOLO_WindSurface/rfdetrm768cos_wtbd_group_full --size medium --resolution 768 --epochs 100 --batch 4 --accum 4 --lr-schedule cosine
+!python tools/rfdetr_v1.py train --dataset /kaggle/working/wtblade_group_rf --out runs/detect/BladeYOLO_WindSurface/rfdetrm640cos_wtblade_group_full --size medium --resolution 640 --epochs 60 --batch 4 --accum 4 --lr-schedule cosine
+# A1 (copy-paste)
+!python tools/rfdetr_v1.py train --dataset /kaggle/working/wtbd_group_cp --out runs/detect/BladeYOLO_WindSurface/rfdetrm768cos_cp_wtbd_group_full --size medium --resolution 768 --epochs 100 --batch 4 --accum 4 --lr-schedule cosine
+!python tools/rfdetr_v1.py train --dataset /kaggle/working/wtblade_group_cp --out runs/detect/BladeYOLO_WindSurface/rfdetrm640cos_cp_wtblade_group_full --size medium --resolution 640 --epochs 60 --batch 4 --accum 4 --lr-schedule cosine
+# A2 (copy-paste + D1)
+!python tools/rfdetr_v1.py train --dataset /kaggle/working/wtbd_group_cp --out runs/detect/BladeYOLO_WindSurface/rfdetrm768cos_cp_d1_wtbd_group_full --size medium --resolution 768 --epochs 100 --batch 4 --accum 4 --lr-schedule cosine --init <S1 output>/runs/ssl/g27_d1_L/rfdetrm_g27ssl.pth
+!python tools/rfdetr_v1.py train --dataset /kaggle/working/wtblade_group_cp --out runs/detect/BladeYOLO_WindSurface/rfdetrm640cos_cp_d1_wtblade_group_full --size medium --resolution 640 --epochs 60 --batch 4 --accum 4 --lr-schedule cosine --init <S1 output>/runs/ssl/g27_d1_L/rfdetrm_g27ssl.pth
+# A3 (copy-paste + D2)
+!python tools/rfdetr_v1.py train --dataset /kaggle/working/wtbd_group_cp --out runs/detect/BladeYOLO_WindSurface/rfdetrm768cos_cp_d2_wtbd_group_full --size medium --resolution 768 --epochs 100 --batch 4 --accum 4 --lr-schedule cosine --init <S1 output>/runs/detect/BladeYOLO_WindSurface/rfdetrm576_g27_stage1_L/last_ema.pth
+!python tools/rfdetr_v1.py train --dataset /kaggle/working/wtblade_group_cp --out runs/detect/BladeYOLO_WindSurface/rfdetrm640cos_cp_d2_wtblade_group_full --size medium --resolution 640 --epochs 60 --batch 4 --accum 4 --lr-schedule cosine --init <S1 output>/runs/detect/BladeYOLO_WindSurface/rfdetrm576_g27_stage1_L/last_ema.pth
+```
+
+**After each run, predict val and test:**
+```
+!python tools/rfdetr_v1.py predict --run runs/detect/BladeYOLO_WindSurface/<run name> --data <WTBD-group or WTBlade-group data dir>
+```
+
+**Baseline for the architecture comparison:** YOLO12-L on WTBlade-group, the §12 recipe, 50 epochs like the ViT-B base run:
+```
+!python train.py --data <WTBlade-group data dir>/data.yaml --model yolo12l.pt --box-loss ciou --name yolo12l_wtblade_group --epochs 50
+```
+
+**Suggested sessions (12 h limit; two accounts in parallel):**
+
+| session | runs |
+|---|---|
+| S1 | pretraining |
+| S2 | A0 and A1 on WTBD-group, then A0 on WTBlade-group |
+| S3 (after S1) | A2 and A3 on WTBD-group, then A1 on WTBlade-group |
+| S4 | A2 and A3 on WTBlade-group |
+| S5 | YOLO12-L on WTBlade-group, plus the seed-1 runs of A0 and R (`--seed 1`, names + `_s1`) once A-1 has picked R |
+
+Locally, pull the run folders and run `.venv/bin/python tools/g27_score.py`.
+
 ---
 
 ## 25. Engineering problems solved

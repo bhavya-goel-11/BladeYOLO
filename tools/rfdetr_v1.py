@@ -108,27 +108,41 @@ def model_class(size):
 
 
 def train(dataset, out, size, epochs, batch, accum, seed, freeze_encoder=False, resolution=None, lr_schedule=None,
-          lr_drop=None):
+          lr_drop=None, init=None, slot_mask=None, keep=()):
     if any(os.path.exists(os.path.join(out, b)) for b in BEST):
         print(f"{out} already has a best checkpoint; not retraining")
         return
     os.makedirs(out, exist_ok=True)
     opts = dict(dataset=os.path.abspath(dataset), size=size, epochs=epochs, batch_size=batch, grad_accum_steps=accum,
-                seed=seed, freeze_encoder=freeze_encoder, resolution=resolution, lr_schedule=lr_schedule, lr_drop=lr_drop)
+                seed=seed, freeze_encoder=freeze_encoder, resolution=resolution, lr_schedule=lr_schedule, lr_drop=lr_drop,
+                init=os.path.abspath(init) if init else None, slot_mask=os.path.abspath(slot_mask) if slot_mask else None,
+                keep=list(keep))
     json.dump(opts, open(os.path.join(out, "v1_options.json"), "w"), indent=2)
+    if slot_mask:  # G27 direction 2, stage 1: each image's loss only on its own dataset's slots
+        import g27_slots
+
+        g27_slots.install(slot_mask)
     # periodic checkpoints only at the end: four runs of 10-epoch checkpoints filled Kaggle's disk (v69)
     # G22 control: freeze_encoder keeps the DINOv2 encoder frozen (projector and decoder still train)
-    model_class(size)(**model_kwargs(freeze_encoder, resolution)).train(dataset_dir=os.path.abspath(dataset), output_dir=os.path.abspath(out), epochs=epochs,
+    # G27: init = an adapted RF-DETR checkpoint (direction 1 encoder, or the direction 2 stage-1 model) instead of COCO
+    kw = model_kwargs(freeze_encoder, resolution, init)
+    if init:  # RF-DETR keeps a smaller-than-COCO checkpoint head (the 34-slot stage 1) unless num_classes is explicit
+        names = yaml.safe_load(open(os.path.join(dataset, "data.yaml")))["names"]
+        kw["num_classes"] = len(names)
+    model_class(size)(**kw).train(dataset_dir=os.path.abspath(dataset), output_dir=os.path.abspath(out), epochs=epochs,
                               batch_size=batch, grad_accum_steps=accum, seed=seed, checkpoint_interval=epochs,
                               **schedule_kwargs(lr_schedule, lr_drop, epochs))
     for f in os.listdir(out):
-        if f.endswith((".ckpt", ".pth")) and f != best_checkpoint(out).split(os.sep)[-1]:
+        if f.endswith((".ckpt", ".pth")) and f != best_checkpoint(out).split(os.sep)[-1] and f not in keep:
             os.remove(os.path.join(out, f))
 
 
-def model_kwargs(freeze_encoder=False, resolution=None):
-    """G22 control (frozen DINOv2 encoder) and G24 (input resolution, divisible by patch 16 x 2 windows = 32)."""
+def model_kwargs(freeze_encoder=False, resolution=None, init=None):
+    """G22 control (frozen DINOv2 encoder), G24 (input resolution, divisible by patch 16 x 2 windows = 32), G27 init."""
     kw = {"freeze_encoder": True} if freeze_encoder else {}
+    if init:
+        assert os.path.exists(init), init
+        kw["pretrain_weights"] = os.path.abspath(init)
     if resolution:
         assert resolution % 32 == 0, resolution
         kw["resolution"] = resolution
@@ -283,6 +297,9 @@ def main():
     a.add_argument("--resolution", type=int, default=None, help="G24: input resolution (default: model's, 576)")
     a.add_argument("--lr-schedule", choices=["step", "cosine"], default=None, help="G26 (default: RF-DETR's step)")
     a.add_argument("--lr-drop", type=int, default=None, help="G26: epoch of the 10x step decay (default 100)")
+    a.add_argument("--init", default=None, help="G27: RF-DETR checkpoint to start from instead of COCO")
+    a.add_argument("--slot-mask", default=None, help="G27 stage 1: slots.json of a multi-dataset pool")
+    a.add_argument("--keep", nargs="*", default=[], help="checkpoint files to keep besides the best (e.g. last_ema.pth)")
     a = sp.add_parser("predict")
     a.add_argument("--run", required=True)
     a.add_argument("--data", required=True)
@@ -300,7 +317,7 @@ def main():
         prepare_official(args.data, args.out, args.carve)
     elif args.cmd == "train":
         train(args.dataset, args.out, args.size, args.epochs, args.batch, args.accum, args.seed, args.freeze_encoder, args.resolution,
-              args.lr_schedule, args.lr_drop)
+              args.lr_schedule, args.lr_drop, args.init, args.slot_mask, args.keep)
     elif args.cmd == "predict":
         predict(args.run, args.data, args.size, args.splits)
     elif args.cmd == "import":
