@@ -3346,7 +3346,7 @@ What is left must change what the model learns from. The encoder has never seen 
   | WTBD-official | 50 | 95 |
   | Wind Surface | 316 | 630 (surface_eye +305, thunderstrike +325) |
   | WTBlade-group | 168 | 332 (burn +141, deformity +42, oil +149) |
-  | WTBlade-Defect | 973 | planned by the same rule (phase B only; plan committed when done) |
+  | WTBlade-Defect | 973 | 1,941 (burn +911, deformity +202, oil +828; phase B only) |
 
   Visual check: some pastes land off the blade where SAM's largest mask includes sky, and box-level pastes carry their source background (as in H10). Kept as H10 ran it; the A1 − A0 comparison measures it.
 - **D1, in-domain self-supervised encoder adaptation** (`tools/g27_ssl.py`):
