@@ -3452,15 +3452,16 @@ What is left must change what the model learns from. The encoder has never seen 
 
 ### G27 Kaggle commands (phase A)
 
-**Placeholders and timings.**
-- `<WTBD-group data dir>` and `<WTBlade-group data dir>` hold `data.yaml` with `train/ val/ test/`, as in G26.
-- `<g27-pool-L>` is the uploaded `g27-pool-L/` folder.
-- `<S1 output>` is session 1's output, attached as input.
+**Inputs and timings.**
+- Private Kaggle datasets, uploaded with the Kaggle CLI on 6 Nov (`--dir-mode zip`; Kaggle unpacks each folder):
+  - `beegee11/g27-pool-l`: the `g27-pool-L/` export (`data.yaml`, `slots.json`, `train/ valid/ test/`, `g27_pool_L.csv`).
+  - `beegee11/blade-group-splits`: `WTBD-group/` and `WTBlade-group/`, copied unchanged from `external/` (each has `data.yaml` with `train/ val/ test/`).
+- `<S1 output>` is session 1's output, attached as input (the only placeholder left).
 - Rough timings on a T4: SSL about 1 h; stage 1 about 6 h; WTBD-group run about 3 h; WTBlade-group run about 3.5 h.
 
 **Session 1, pretraining (D1 and D2 on pool L, about 7–8 h):**
 ```
-!cp -r <g27-pool-L> /kaggle/working/pool_L
+!cp -r /kaggle/input/datasets/beegee11/g27-pool-l /kaggle/working/pool_L
 !python tools/g27_ssl.py --images /kaggle/working/pool_L/train/images --out runs/ssl/g27_d1_L --steps 8000
 !python tools/rfdetr_v1.py train --dataset /kaggle/working/pool_L --out runs/detect/BladeYOLO_WindSurface/rfdetrm576_g27_stage1_L --size medium --epochs 12 --batch 4 --accum 4 --lr-schedule cosine --slot-mask /kaggle/working/pool_L/slots.json --keep last_ema.pth
 ```
@@ -3468,11 +3469,11 @@ Its outputs are `runs/ssl/g27_d1_L/rfdetrm_g27ssl.pth` (D1) and `runs/detect/Bla
 
 **Prepared datasets (in any session that needs them):**
 ```
-!python tools/rfdetr_v1.py prepare-official --data <WTBD-group data dir> --out /kaggle/working/wtbd_group_rf
-!python tools/rfdetr_v1.py prepare-official --data <WTBD-group data dir> --out /kaggle/working/wtbd_group_cp
+!python tools/rfdetr_v1.py prepare-official --data /kaggle/input/datasets/beegee11/blade-group-splits/WTBD-group --out /kaggle/working/wtbd_group_rf
+!python tools/rfdetr_v1.py prepare-official --data /kaggle/input/datasets/beegee11/blade-group-splits/WTBD-group --out /kaggle/working/wtbd_group_cp
 !python tools/g27_paste.py paste --protocol wtbd_group --dataset /kaggle/working/wtbd_group_cp
-!python tools/rfdetr_v1.py prepare-official --data <WTBlade-group data dir> --out /kaggle/working/wtblade_group_rf
-!python tools/rfdetr_v1.py prepare-official --data <WTBlade-group data dir> --out /kaggle/working/wtblade_group_cp
+!python tools/rfdetr_v1.py prepare-official --data /kaggle/input/datasets/beegee11/blade-group-splits/WTBlade-group --out /kaggle/working/wtblade_group_rf
+!python tools/rfdetr_v1.py prepare-official --data /kaggle/input/datasets/beegee11/blade-group-splits/WTBlade-group --out /kaggle/working/wtblade_group_cp
 !python tools/g27_paste.py paste --protocol wtblade_group --dataset /kaggle/working/wtblade_group_cp
 ```
 
@@ -3494,12 +3495,12 @@ Its outputs are `runs/ssl/g27_d1_L/rfdetrm_g27ssl.pth` (D1) and `runs/detect/Bla
 
 **After each run, predict val and test:**
 ```
-!python tools/rfdetr_v1.py predict --run runs/detect/BladeYOLO_WindSurface/<run name> --data <WTBD-group or WTBlade-group data dir>
+!python tools/rfdetr_v1.py predict --run runs/detect/BladeYOLO_WindSurface/<run name> --data /kaggle/input/datasets/beegee11/blade-group-splits/<WTBD-group or WTBlade-group>
 ```
 
 **Baseline for the architecture comparison:** YOLO12-L on WTBlade-group, the §12 recipe, 50 epochs like the ViT-B base run:
 ```
-!python train.py --data <WTBlade-group data dir>/data.yaml --model yolo12l.pt --box-loss ciou --name yolo12l_wtblade_group --epochs 50
+!python train.py --data /kaggle/input/datasets/beegee11/blade-group-splits/WTBlade-group/data.yaml --model yolo12l.pt --box-loss ciou --name yolo12l_wtblade_group --epochs 50
 ```
 
 **Suggested sessions (12 h limit; two accounts in parallel):**
