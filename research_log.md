@@ -3462,10 +3462,10 @@ What is left must change what the model learns from. The encoder has never seen 
 
 **Session 1, pretraining (D1 and D2 on pool L, about 7–8 h):**
 ```
-!cp -r /kaggle/input/datasets/beegee11/g27-pool-l /kaggle/working/pool_L
-!python tools/g27_ssl.py --images /kaggle/working/pool_L/train/images --out runs/ssl/g27_d1_L --steps 8000
-!python tools/rfdetr_v1.py train --dataset /kaggle/working/pool_L --out runs/detect/BladeYOLO_WindSurface/rfdetrm576_g27_stage1_L --size medium --epochs 12 --batch 4 --accum 4 --lr-schedule cosine --slot-mask /kaggle/working/pool_L/slots.json --keep last_ema.pth
+!python tools/g27_ssl.py --images /kaggle/input/datasets/beegee11/g27-pool-l/train/images --out runs/ssl/g27_d1_L --steps 8000
+!python tools/rfdetr_v1.py train --dataset /kaggle/input/datasets/beegee11/g27-pool-l --out runs/detect/BladeYOLO_WindSurface/rfdetrm576_g27_stage1_L --size medium --epochs 12 --batch 4 --accum 4 --lr-schedule cosine --slot-mask /kaggle/input/datasets/beegee11/g27-pool-l/slots.json --keep last_ema.pth
 ```
+Both steps read the pool straight from the read-only input; RF-DETR writes nothing into its dataset folder. Copying the pool to `/kaggle/working` first (the original command, 46,567 files) is silent for minutes, and interrupting it does not stop the cell: IPython ends only the running `!` command and goes on, so the later steps would run on a partial pool. That happened in the first S1 attempt (6 Nov), which was restarted without the copy.
 Its outputs are `runs/ssl/g27_d1_L/rfdetrm_g27ssl.pth` (D1) and `runs/detect/BladeYOLO_WindSurface/rfdetrm576_g27_stage1_L/last_ema.pth` (D2).
 
 **Prepared datasets (in any session that needs them):**
