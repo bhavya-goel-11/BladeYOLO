@@ -3516,6 +3516,31 @@ Its outputs are `runs/ssl/g27_d1_L/rfdetrm_g27ssl.pth` (D1) and `runs/detect/Bla
 
 Locally, pull the run folders and run `.venv/bin/python tools/g27_score.py`.
 
+### G27 S1 result: both pretraining checkpoints are usable; D1 narrowed the last-stage features (7 Nov)
+
+Kaggle, 6–7 Nov, restarted without the pool copy. Both steps read `/kaggle/input/datasets/beegee11/g27-pool-l` (recorded in `options.json` and `v1_options.json`), so the interrupted partial copy was not used. The output arrived as `runs.zip` → `runs/ssl/g27_d1_L/`, `runs/detect/BladeYOLO_WindSurface/rfdetrm576_g27_stage1_L/`.
+
+**D1, SSL (8,000 steps, 72 min):** loss 3.25 → 0.18 (step 500) → 0.059 (2,000) → 0.039 (end). The curve flattens from step 3,000; there is no NaN or spike.
+
+**D2, stage 1 (12 epochs, about 6.5 h):**
+- Train loss falls every epoch, 10.29 → 7.25; no NaN.
+- Val (WTBD-group val + WTBlade-group val, all 34 slots competing at inference) mAP50-95 / mAP50: 0.128 / 0.288 (epoch 0), 0.183 / 0.385 (epoch 2), then flat at 0.17–0.18 / 0.39–0.41 to 0.180 / 0.398 at epoch 11.
+- `last_ema.pth` was kept as planned (it initialises A3). `checkpoint_best_total.pth` is also there and unused.
+
+**D1 collapse check** (post hoc, CPU; `runs/analysis/g27/d1_check.py` → `d1_check.md`). COCO encoder vs D1 teacher encoder on 96 held-out images (48 WTBD-group val + 48 WTBlade-group val, none in pool L), 576 px:
+
+| metric | COCO | D1 |
+|---|---|---|
+| SSL target variance, total | 133.4 | 131.1 |
+| SSL target variance per patch | 0.521 | 0.497 |
+| last-stage effective rank | 257 | 135 |
+| mean pairwise cosine of image-mean features | 0.72 | 0.90 |
+
+- Encoder weights moved 2.8% (relative L2).
+- The final loss is 8% of the target's per-patch variance, so the student predicts most of the masked targets.
+- **Reading:** no full collapse (the target keeps its variance), but the last stage became lower-dimensional and more alike across images (effective rank halved). This is the partial dimensional collapse that masked feature distillation is known for. It may or may not survive the end-to-end fine-tune, which updates the encoder at 1.5e-4.
+- **Decision: run as pre-registered.** A2 is judged only by A2 − A1. The check is not a gate, and changing D1 after seeing it would be a post-hoc change. If A2 fails, this check is the first suspect, and any D1 variant is registered separately.
+
 ---
 
 ## 25. Engineering problems solved
