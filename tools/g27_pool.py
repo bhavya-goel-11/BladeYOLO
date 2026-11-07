@@ -32,6 +32,13 @@ the same image set for direction 1 (images only) and direction 2 (images + label
       -> {train,valid,test}/{images,labels}, data.yaml (slot names "<dataset>:<class>"), slots.json, g27_pool_L.csv
          train = the kept pool; valid = test = WTBD-group val + WTBlade-group val in their slots (logging only)
 Upload the export folder as a Kaggle dataset (contains DTU-derived WTBlade frames, CC BY-NC: research use only).
+
+G28 (research_log.md, leave-one-dataset-out): pools XWTBD and XWTBL hold every source except the target dataset (WTBD,
+or WTBlade-Defect), with EVERY image of the target as an evaluation key of the twin rule above, so copies of the target
+inside the other datasets are removed too. Their export is class-agnostic (every box -> "defect") with a seeded 5% of
+the kept images held out as valid/ = test/ (training-domain validation: the target is never seen, not even for
+checkpoint selection).
+  .venv/bin/python tools/g27_pool.py build --pool XWTBD        (and audit / export --out g28-x-wtbd, likewise XWTBL)
 """
 
 import argparse
@@ -49,7 +56,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import matching  # noqa: E402
 
-POOLS = ("L", "O")
+POOLS = ("L", "O", "XWTBD", "XWTBL")
+TARGET = {"XWTBD": "wtbd", "XWTBL": "wtblade"}  # G28: the left-out dataset of each pool
+XVAL_FRAC, XVAL_SEED = 0.05, 0
 csv_path = lambda pool: os.path.join(ROOT, "tools", "splits", f"g27_pool_{pool}.csv")  # noqa: E731
 report_path = lambda pool: os.path.join(ROOT, "runs", "analysis", "g27", f"pool_{pool}.md")  # noqa: E731
 WTBLADE_GROUPS = os.path.join(ROOT, "runs", "analysis", "wtblade", "split_groups.csv")
@@ -108,6 +117,9 @@ def ws_carve(seed=0, frac=0.1):
 def eval_keys(pool):
     """(source, file name) of every evaluation image of the protocols the pool serves."""
     ls = lambda d: os.listdir(os.path.join(ROOT, d))  # noqa: E731
+    if pool in TARGET:  # G28: every image of the left-out dataset, all splits
+        root, splits = SOURCES[TARGET[pool]]
+        return {(TARGET[pool], f) for s in splits for f in ls(os.path.join(root, s, "images"))}
     if pool == "L":
         wtbd = ("external/WTBD-group/val/images", "external/WTBD-group/test/images")
         wtbl = ("external/WTBlade-group/val/images", "external/WTBlade-group/test/images")
@@ -236,7 +248,7 @@ def build(pool, workers=8):
 
 def report(recs, pool):
     sts = ["kept", "eval", "scene", "no_group", "twin_dino", "twin_orb", "twin_pixel", "closure", "no_boxes", "gan"]
-    lines = [f"# G27 extra-data pool {pool} (tools/g27_pool.py)", "",
+    lines = [f"# Extra-data pool {pool} (tools/g27_pool.py; L/O: G27, XWTBD/XWTBL: G28)", "",
              f"Twin rule: same file; DINOv2 cosine >= {TWIN_COS}; ORB/RANSAC >= {matching.MIN_INLIERS} inliers among each "
              f"evaluation image's {CAND_K} nearest pool images with cosine >= {CAND_COS} and each pool image's {POOL_K} nearest "
              f"evaluation images with cosine >= {POOL_COS}; pixel twin >= {PIXEL_TWIN} (48 px grey, 8 flips/rotations); closure at cosine >= {TWIN_COS} or pixel >= {PIXEL_TWIN}.", "",
@@ -308,6 +320,28 @@ def export(pool, out):
     print(f"train {len(kept)}, valid/test {nval} images, {len(flat)} slots -> {out}")
 
 
+def export_agnostic(pool, out):
+    """G28: class-agnostic export of an X pool; a seeded 5% of the kept images is valid/ = test/ (checkpoint selection
+    on the training domain only)."""
+    recs = list(csv.DictReader(open(csv_path(pool))))
+    kept = [r for r in recs if r["status"] == "kept"]
+    assert kept and not any(r["source"] == TARGET[pool] for r in kept), "the target dataset must not be in its X pool"
+    held = set(random.Random(XVAL_SEED).sample(range(len(kept)), round(XVAL_FRAC * len(kept))))
+    for s in ("train", "valid", "test"):
+        for d in ("images", "labels"):
+            os.makedirs(os.path.join(out, s, d), exist_ok=True)
+    for n, r in enumerate(kept):
+        rows = [["0"] + x[1:] for x in read_rows(r["path"])]
+        for s in (("valid", "test") if n in held else ("train",)):
+            write_item(os.path.join(ROOT, r["path"]), rows, 0, out, s, flat_name(r))
+        if n % 2000 == 0:
+            print(f"  {n}/{len(kept)}", flush=True)
+    yaml.safe_dump(dict(path=".", train="train/images", val="valid/images", test="test/images", nc=1, names=["defect"]),
+                   open(os.path.join(out, "data.yaml"), "w"), sort_keys=False)
+    shutil.copy2(csv_path(pool), os.path.join(out, os.path.basename(csv_path(pool))))
+    print(f"train {len(kept) - len(held)}, valid/test {len(held)} images, class-agnostic -> {out}")
+
+
 def gray48(p, s=48):
     import cv2
 
@@ -366,7 +400,7 @@ def audit(pool):
         carg[a:a + 4096] = s.argmax(1)
         cos[a:a + 4096] = s.max(1)
     out = os.path.dirname(report_path(pool))
-    lines = [f"# G27 pool {pool} audit: kept pool vs every evaluation image", "",
+    lines = [f"# Pool {pool} audit: kept pool vs every evaluation image", "",
              f"{len(kept)} kept images, {len(evp)} evaluation images.", "",
              "| measure | max | 99.9th pct | 99th pct | median | kept images >= twin threshold |", "|---|---|---|---|---|---|",
              f"| pixel corr, 48 px, 8 flips/rots (audit twin >= {AUDIT_PIX}; rule < {PIXEL_TWIN}) | {best.max():.3f} | "
@@ -399,7 +433,7 @@ def main():
     elif args.cmd == "audit":
         audit(args.pool)
     elif args.cmd == "export":
-        export(args.pool, args.out)
+        (export_agnostic if args.pool in TARGET else export)(args.pool, args.out)
     else:
         report(list(csv.DictReader(open(csv_path(args.pool)))), args.pool)
 

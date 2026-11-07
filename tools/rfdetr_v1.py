@@ -67,11 +67,12 @@ def prepare(data, subset, out):
                         names=list(names)), open(os.path.join(out, "data.yaml"), "w"), sort_keys=False)
 
 
-def prepare_official(data, out, carve=0.0, seed=0):
+def prepare_official(data, out, carve=0.0, seed=0, agnostic=False):
     """Official (published, leaky) protocol: copy the dataset's own split unchanged. Folders train/ + val|valid/ +
     test/ map to train/valid/test. A dataset without test/ (Wind Surface Defect: train/val, the paper's 4:1 protocol)
     keeps val/ as test/, and `carve` > 0 moves that fraction of train/ (random, seeded) to valid/ for checkpoint
-    selection, so the reported test set is never used for selection."""
+    selection, so the reported test set is never used for selection. `agnostic` (G28): every box becomes class 0,
+    "defect"."""
     import random
 
     names = yaml.safe_load(open(os.path.join(data, "data.yaml")))["names"]
@@ -95,8 +96,14 @@ def prepare_official(data, out, carve=0.0, seed=0):
             shutil.copy2(os.path.join(data, src, "images", f), os.path.join(out, dst, "images", f))
             lab = os.path.join(data, src, "labels", os.path.splitext(f)[0] + ".txt")
             if os.path.exists(lab):
-                shutil.copy2(lab, os.path.join(out, dst, "labels", os.path.basename(lab)))
+                dst_lab = os.path.join(out, dst, "labels", os.path.basename(lab))
+                if agnostic:
+                    rows = [l.split() for l in open(lab) if l.strip()]
+                    open(dst_lab, "w").write("".join(" ".join(["0"] + r[1:]) + "\n" for r in rows))
+                else:
+                    shutil.copy2(lab, dst_lab)
         print(f"{dst}: {len(items)} images", flush=True)
+    names = ["defect"] if agnostic else names
     yaml.safe_dump(dict(path=".", train="train/images", val="valid/images", test="test/images", nc=len(names),
                         names=names), open(os.path.join(out, "data.yaml"), "w"), sort_keys=False)
 
@@ -179,12 +186,12 @@ def to_rows(xyxy, conf, cls, scale):
     return np.c_[np.asarray(xyxy, float).reshape(-1, 4) * scale, np.asarray(conf, float), np.asarray(cls, float)].round(3)
 
 
-def predict(run, data, size, splits):
+def predict(run, data, size, splits, agnostic=False):
     opts = os.path.join(run, "v1_options.json")
     size = json.load(open(opts)).get("size", size) if os.path.exists(opts) else size  # G26: Large runs
     from PIL import Image
 
-    names = yaml.safe_load(open(os.path.join(data, "data.yaml")))["names"]
+    names = ["defect"] if agnostic else yaml.safe_load(open(os.path.join(data, "data.yaml")))["names"]  # G28: 1 class
     model = model_class(size)(pretrain_weights=best_checkpoint(run), num_classes=len(names),
                               **model_kwargs(resolution=run_resolution(run)))
     for split in splits:
@@ -285,6 +292,7 @@ def main():
     a.add_argument("--data", required=True)
     a.add_argument("--out", required=True)
     a.add_argument("--carve", type=float, default=0.0, help="fraction of train/ held out as valid/ when there is no test/")
+    a.add_argument("--agnostic", action="store_true", help="G28: every box becomes class 0 'defect'")
     a = sp.add_parser("train")
     a.add_argument("--dataset", required=True)
     a.add_argument("--out", required=True)
@@ -305,6 +313,7 @@ def main():
     a.add_argument("--data", required=True)
     a.add_argument("--size", default="medium", choices=SIZES)
     a.add_argument("--splits", nargs="+", default=["test", "val"])
+    a.add_argument("--agnostic", action="store_true", help="G28: the run is a 1-class 'defect' model")
     a = sp.add_parser("import")
     a.add_argument("--run", required=True)
     a.add_argument("--dataset", default="wtbd", choices=["wtbd", "wtblade"])
@@ -314,12 +323,12 @@ def main():
     if args.cmd == "prepare":
         prepare(args.data, args.subset, args.out)
     elif args.cmd == "prepare-official":
-        prepare_official(args.data, args.out, args.carve)
+        prepare_official(args.data, args.out, args.carve, agnostic=args.agnostic)
     elif args.cmd == "train":
         train(args.dataset, args.out, args.size, args.epochs, args.batch, args.accum, args.seed, args.freeze_encoder, args.resolution,
               args.lr_schedule, args.lr_drop, args.init, args.slot_mask, args.keep)
     elif args.cmd == "predict":
-        predict(args.run, args.data, args.size, args.splits)
+        predict(args.run, args.data, args.size, args.splits, args.agnostic)
     elif args.cmd == "import":
         import_preds(args.run) if args.dataset == "wtbd" else import_preds(args.run, WTBLADE, wtblade_cache(args.run))
     else:
