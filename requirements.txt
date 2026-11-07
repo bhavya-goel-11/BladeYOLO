@@ -7,4 +7,5 @@ kaggle
 safetensors
 diffusers
 peft
-transformersrfdetr[train]==1.11.2  # RF-DETR runs (tools/rfdetr_v1.py, G27); locally in .venv-rfdetr
+transformers
+rfdetr[train]==1.11.2  # RF-DETR runs (tools/rfdetr_v1.py, G27); locally in .venv-rfdetr
