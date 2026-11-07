@@ -3528,6 +3528,7 @@ Locally, pull the run folders and run `.venv/bin/python tools/g27_score.py`.
   - A2 gets D1 and A3 gets D2;
   - a rerun skips finished runs;
   - missing checkpoints stop s3 before any work.
+- **`a0s1` (added 7 Nov):** A-2's seed-1 A0 runs on both datasets (`rfdetrm768cos_wtbd_group_full_s1`, `rfdetrm640cos_wtblade_group_full_s1`, about 7 h). They run alongside S2–S4 because A0 is in A-2 whatever R turns out to be, and R is picked on seed-0 val only, so these runs cannot influence the choice. The seed-1 R runs still wait for A-1.
 
 ### G27 S1 result: both pretraining checkpoints are usable; D1 narrowed the last-stage features (7 Nov)
 

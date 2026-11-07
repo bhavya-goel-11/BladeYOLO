@@ -3,6 +3,7 @@
 #   !bash tools/g27_session.sh s2   # A0, A1 on WTBD-group; A0 on WTBlade-group
 #   !bash tools/g27_session.sh s3   # A2, A3 on WTBD-group; A1 on WTBlade-group (needs the S1 checkpoints)
 #   !bash tools/g27_session.sh s4   # A2, A3 on WTBlade-group (needs the S1 checkpoints)
+#   !bash tools/g27_session.sh a0s1 # A0 seed 1 on both datasets (A-2)
 # Inputs: wind-surface-defect and blade-group-splits; s3/s4 also beegee11/g27-s1 (or set D1=... D2=... before the line).
 # Every variable is set here, so nothing depends on notebook cell magics. Any failing step stops the session.
 # A run whose preds_test.json and preds_val.json already exist is skipped, so rerunning a timed-out session resumes it.
@@ -57,8 +58,16 @@ case "${1:-}" in
         arm wtblade_group_cp rfdetrm640cos_cp_d1_wtblade_group_full "$WTBL" 640 60 "$D1"  # A2
         arm wtblade_group_cp rfdetrm640cos_cp_d2_wtblade_group_full "$WTBL" 640 60 "$D2"  # A3
         ;;
+    a0s1)  # A-2's seed-1 A0 runs: A0 is in A-2 whatever R is, and R is picked on seed-0 val only
+        need "$WTBD/data.yaml" "$WTBL/data.yaml"
+        COMMON+=(--seed 1)
+        prep wtbd_group_rf "$WTBD"
+        prep wtblade_group_rf "$WTBL"
+        arm wtbd_group_rf rfdetrm768cos_wtbd_group_full_s1 "$WTBD" 768 100            # A0, seed 1
+        arm wtblade_group_rf rfdetrm640cos_wtblade_group_full_s1 "$WTBL" 640 60       # A0, seed 1
+        ;;
     *)
-        echo "usage: bash tools/g27_session.sh s2|s3|s4" >&2
+        echo "usage: bash tools/g27_session.sh s2|s3|s4|a0s1" >&2
         exit 2
         ;;
 esac
