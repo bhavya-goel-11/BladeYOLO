@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# G27 phase-A Kaggle sessions (research_log.md, "G27 Kaggle commands"), one line per notebook, from the repo root:
+#   !bash tools/g27_session.sh s2   # A0, A1 on WTBD-group; A0 on WTBlade-group
+#   !bash tools/g27_session.sh s3   # A2, A3 on WTBD-group; A1 on WTBlade-group (needs the S1 checkpoints)
+#   !bash tools/g27_session.sh s4   # A2, A3 on WTBlade-group (needs the S1 checkpoints)
+# Inputs: wind-surface-defect and blade-group-splits; s3/s4 also beegee11/g27-s1 (or set D1=... D2=... before the line).
+# Every variable is set here, so nothing depends on notebook cell magics. Any failing step stops the session.
+# A run whose preds_test.json and preds_val.json already exist is skipped, so rerunning a timed-out session resumes it.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+WTBD=${WTBD:-/kaggle/input/datasets/beegee11/wind-surface-defect/WTBD-group}
+WTBL=${WTBL:-/kaggle/input/datasets/beegee11/blade-group-splits}
+D1=${D1:-/kaggle/input/datasets/beegee11/g27-s1/rfdetrm_g27ssl.pth}
+D2=${D2:-/kaggle/input/datasets/beegee11/g27-s1/last_ema.pth}
+W=${WORK:-/kaggle/working}
+R=${G27_RUNS:-runs/detect/BladeYOLO_WindSurface}  # overridden only by tests
+COMMON=(--size medium --batch 4 --accum 4 --lr-schedule cosine)
+
+need() { for f in "$@"; do [ -e "$f" ] || { echo "missing input: $f" >&2; exit 1; }; done; }
+
+prep() {  # prep <folder> <data dir> [copy-paste protocol]: fresh prepared copy in $W
+    rm -rf "${W:?}/${1:?}"
+    python tools/rfdetr_v1.py prepare-official --data "$2" --out "$W/$1"
+    if [ -n "${3:-}" ]; then python tools/g27_paste.py paste --protocol "$3" --dataset "$W/$1"; fi
+}
+
+arm() {  # arm <prepared folder> <run name> <data dir> <resolution> <epochs> [init checkpoint]
+    if [ -f "$R/$2/preds_test.json" ] && [ -f "$R/$2/preds_val.json" ]; then echo "== $2: done, skipped"; return; fi
+    echo "== $2"
+    python tools/rfdetr_v1.py train --dataset "$W/$1" --out "$R/$2" "${COMMON[@]}" --resolution "$4" --epochs "$5" \
+        ${6:+--init "$6"}
+    python tools/rfdetr_v1.py predict --run "$R/$2" --data "$3"
+}
+
+case "${1:-}" in
+    s2)
+        need "$WTBD/data.yaml" "$WTBL/data.yaml"
+        prep wtbd_group_rf "$WTBD"
+        prep wtbd_group_cp "$WTBD" wtbd_group
+        prep wtblade_group_rf "$WTBL"
+        arm wtbd_group_rf rfdetrm768cos_wtbd_group_full "$WTBD" 768 100            # A0
+        arm wtbd_group_cp rfdetrm768cos_cp_wtbd_group_full "$WTBD" 768 100         # A1
+        arm wtblade_group_rf rfdetrm640cos_wtblade_group_full "$WTBL" 640 60       # A0
+        ;;
+    s3)
+        need "$WTBD/data.yaml" "$WTBL/data.yaml" "$D1" "$D2"
+        prep wtbd_group_cp "$WTBD" wtbd_group
+        prep wtblade_group_cp "$WTBL" wtblade_group
+        arm wtbd_group_cp rfdetrm768cos_cp_d1_wtbd_group_full "$WTBD" 768 100 "$D1"  # A2
+        arm wtbd_group_cp rfdetrm768cos_cp_d2_wtbd_group_full "$WTBD" 768 100 "$D2"  # A3
+        arm wtblade_group_cp rfdetrm640cos_cp_wtblade_group_full "$WTBL" 640 60      # A1
+        ;;
+    s4)
+        need "$WTBL/data.yaml" "$D1" "$D2"
+        prep wtblade_group_cp "$WTBL" wtblade_group
+        arm wtblade_group_cp rfdetrm640cos_cp_d1_wtblade_group_full "$WTBL" 640 60 "$D1"  # A2
+        arm wtblade_group_cp rfdetrm640cos_cp_d2_wtblade_group_full "$WTBL" 640 60 "$D2"  # A3
+        ;;
+    *)
+        echo "usage: bash tools/g27_session.sh s2|s3|s4" >&2
+        exit 2
+        ;;
+esac
+echo "== session $1 finished"

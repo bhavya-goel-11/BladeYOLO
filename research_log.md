@@ -3516,6 +3516,19 @@ Its outputs are `runs/ssl/g27_d1_L/rfdetrm_g27ssl.pth` (D1) and `runs/detect/Bla
 
 Locally, pull the run folders and run `.venv/bin/python tools/g27_score.py`.
 
+**From 7 Nov, S2–S4 run through `tools/g27_session.sh`** (one notebook line after the setup cell: `!bash tools/g27_session.sh s2`, `s3` or `s4`). It runs exactly the arms above.
+- **Why:** the first S2 attempt (7 Nov) set its paths as shell variables but ran the lines as separate `!` commands. Each line ran in a fresh shell with empty variables (`--data: expected one argument`, outputs under `/`), and the cell carried on past every failure. Nothing trained.
+- **What the script fixes:** every path is set inside it, with `set -euo pipefail`, so a failed step stops the session.
+- **Inputs are checked first.** For s3/s4 that includes the S1 checkpoints, from the private dataset `beegee11/g27-s1` by default, or from `D1=`/`D2=`.
+- **Each prepared folder is rebuilt from scratch,** because `g27_paste.py` refuses a folder that already has pastes.
+- **Resumable:** a run that already has both `preds_test.json` and `preds_val.json` is skipped, so rerunning a timed-out session continues it.
+- **Tested locally** with train/predict stubbed (`runs/tests/g27_session/`):
+  - real prepares and pastes: 45 / 168 images, as planned;
+  - all 8 run names match `tools/g27_score.py`;
+  - A2 gets D1 and A3 gets D2;
+  - a rerun skips finished runs;
+  - missing checkpoints stop s3 before any work.
+
 ### G27 S1 result: both pretraining checkpoints are usable; D1 narrowed the last-stage features (7 Nov)
 
 Kaggle, 6–7 Nov, restarted without the pool copy. Both steps read `/kaggle/input/datasets/beegee11/g27-pool-l` (recorded in `options.json` and `v1_options.json`), so the interrupted partial copy was not used. The output arrived as `runs.zip` → `runs/ssl/g27_d1_L/`, `runs/detect/BladeYOLO_WindSurface/rfdetrm576_g27_stage1_L/`.
