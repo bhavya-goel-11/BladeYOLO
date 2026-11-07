@@ -3555,6 +3555,48 @@ Kaggle, 6–7 Nov, restarted without the pool copy. Both steps read `/kaggle/inp
 - **Reading:** no full collapse (the target keeps its variance), but the last stage became lower-dimensional and more alike across images (effective rank halved). This is the partial dimensional collapse that masked feature distillation is known for. It may or may not survive the end-to-end fine-tune, which updates the encoder at 1.5e-4.
 - **Decision: run as pre-registered.** A2 is judged only by A2 − A1. The check is not a gate, and changing D1 after seeing it would be a post-hoc change. If A2 fails, this check is the first suspect, and any D1 variant is registered separately.
 
+### G28: does a blade-defect detector work on a dataset it never saw? Leave-one-dataset-out, twin-free (Kaggle). Pre-registered before any pool was built or run started (7 Nov)
+
+**Why (user, 7 Nov):** G27's components did not beat plain RF-DETR (validation, seed 0; the formal A-1 result is logged separately), and the diagnostics put the leak-free ceiling in the data (annotator extent ceiling, rare-class scoring). So the next direction is a question where label count is not the bottleneck. A literature search found no study that tests blade-defect detectors across datasets under conflicting taxonomies. Papers claiming "cross-dataset" results test one other set or non-blade data. Our datasets share images with each other (WTBD ↔ Wind Surface ↔ Beijing; WTBs2025 ⊃ fengChe = WTBlade), so a naive leave-one-dataset-out test would leak. The twin machinery of pool L is what makes the test honest.
+
+**Question.** For a target dataset T, how close does a detector trained only on the other datasets (X) come to one trained on T itself (ID)? How much of the gap is how T's annotators draw boxes (convention), and how much is not finding the defect at all?
+
+**Targets:** WTBD-group and WTBlade-group, the two leak-free splits with scene groups. Scoring is on their test sets (WTBD 161 images / 58 scenes; WTBlade 332).
+
+**Arms** (RF-DETR-M, `rfdetr[train]==1.11.2`, cosine schedule, batch 4 × accum 4, seed 0, 640 px for every arm):
+
+| arm | trained on | checkpoint selection |
+|---|---|---|
+| ID-T | T's group train, class-agnostic (every box → `defect`); WTBD 100 epochs, WTBlade 60 (G27 A0's epochs) | best on T's group val (RF-DETR default) |
+| X-T | every other source, class-agnostic, twin-free against **all** of T (12 epochs, as G27 stage 1) | best on a held-out 5% of X-T's own images (training-domain validation, DomainBed); T is never seen, not even for selection |
+
+- **Class-agnostic is required:** the taxonomies differ, and mapping them is the later method question, not the first test. One consequence, noted in advance: X learns to box things T does not label (e.g. dirt, oil, which WTBD has no class for). That shows up as false positives against T's labels, so the test is conservative for X. To make this visible, recall (AR) is reported beside AP, since recall is unaffected by scope.
+- **X-T pools** (`tools/g27_pool.py`, new pool types X-WTBD and X-WTBlade):
+  - T's whole source is left out (all of `external/WTBD-official`, or all 10,660 WTBlade-Defect images).
+  - Every image of T is an evaluation key for the pool-L twin rule (same file, DINOv2 ≥ 0.90, ORB ≥ 25 inliers, pixel ≥ 0.97, closure), so copies of T inside other datasets are removed.
+  - WTBs2025 GAN images and box-less images are dropped, as in pool L.
+  - Each pool gets the same independent audit as pool L before export.
+
+**Scores** (T's test, scene bootstrap, 2,000 replicates, paired):
+- standard class-agnostic AP50 and AP50-95 (`tools/bootstrap_ci.py`, nc = 1);
+- tolerant AP and region AP (`tools/granularity_eval.py`). Region AP is pixel-level and does not depend on how a defect is split into boxes.
+- Gaps: `G_std = ID − X` (standard AP50) and `G_reg = ID − X` (region AP). Convention share = 1 − G_reg / G_std.
+
+**Decision, per target, on point estimates, with CIs reported:**
+- **Alive, direction "convention-adaptive cross-dataset detection"** if on both targets X reaches ≥ 0.80 × ID in region AP (it finds T's defects), and the convention share is ≥ 0.5 (most of the standard-AP gap is how boxes are drawn). The method question is then learning a target's annotation convention from a few target labels. That is registered separately.
+- **Already generalizes** if X ≥ ID in standard AP50 on a target. That is a finding in itself; whether pooling also helps in-domain is a separate registration.
+- **Dead otherwise:** drop the direction and move to defect detection without defect labels (normal-only anomaly detection, the next candidate of 7 Nov).
+- The 0.80 and 0.5 bars are judgment calls, fixed here before any number exists.
+
+**Reported, not decisive:**
+- per-source composition of each X pool and how many images the twin rule removed (expected large for WTBD via Wind Surface/Beijing, and for WTBlade via WTBs2025);
+- G27 A0 (class-aware, 768/640) scored class-agnostically, as a reference for ID-T.
+
+**Sessions (estimates, T4):**
+- X-WTBD and X-WTBlade, each about 7–9 h at 640 for 12 epochs, one session each;
+- ID-WTBD and ID-WTBlade together, about 6 h, one session.
+- Three sessions, all parallel.
+
 ---
 
 ## 25. Engineering problems solved
