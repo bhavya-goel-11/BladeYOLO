@@ -39,9 +39,10 @@ else
         for py in "$PWD/.venv-rfdetr/bin/python" "$PWD/.venv/bin/python" python3 python; do
             if command -v "$py" >/dev/null 2>&1 && "$py" -c "import $1" >/dev/null 2>&1; then echo "$py"; return; fi
         done
-        echo "no python with $1" >&2; echo python
+        echo "no python can import $1 (make the project venv: see research_log.md, 'All remaining runs on one A100')" >&2
+        return 1
     }
-    PYTHON=${PYTHON:-$(pick rfdetr)}
+    PYTHON=${PYTHON:-$(pick rfdetr)} || exit 1
     if [ -z "${RF_HOME:-}" ] && [ -f data/weights/rfdetr/rf-detr-medium.pth ]; then export RF_HOME=$PWD/data/weights/rfdetr; fi
 fi
 WTBD=${WTBD:-$BENCH/leakfree/WTBD-group}
@@ -145,7 +146,8 @@ session() {
             ;;
         yolo12l_wtbl)  # the architecture-comparison baseline missing on WTBlade-group (the §12 recipe, 50 epochs)
             need "$WTBL/data.yaml"
-            local y=${YOLO_PYTHON:-$( [ "$ON" = kaggle ] && echo python || pick ultralytics )}
+            local y
+            y=${YOLO_PYTHON:-$( [ "$ON" = kaggle ] && echo python || pick ultralytics )} || exit 1
             if [ -f "$R/yolo12l_wtblade_group/test/metrics.json" ]; then echo "== yolo12l_wtblade_group: done, skipped"
             else
                 echo "== yolo12l_wtblade_group ($(date '+%F %T'))"

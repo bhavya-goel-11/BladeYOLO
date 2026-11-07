@@ -3592,7 +3592,19 @@ The session script is renamed `tools/sessions.sh` (it now serves G27, G28 and th
 - `g28id`, `g28x_wtbd`, `g28x_wtbl`: all of G28;
 - `yolo12l_wtbl`: the YOLO12-L baseline on WTBlade-group (Ultralytics, `train.py`, the §12 recipe, 50 epochs).
 
-The recipe is unchanged everywhere (RF-DETR batch 4 × accum 4, cosine), so DGX runs stay comparable in everything except the hardware. Each run folder now records `machine.txt` (host, GPU, torch, bf16 support).
+The recipe is unchanged everywhere (RF-DETR batch 4 × accum 4, cosine), so DGX runs stay comparable in everything except the hardware.
+
+**DGX environment (NGC container).** Installing the requirements into the container's system Python broke it:
+- NVIDIA's torch build (`2.6.0a0+…nv24.12`) reads as below 2.6 to `transformers` 5, which then disables PyTorch, so `import rfdetr` fails;
+- the upgrade to NumPy 2 also conflicts with that torch, which was compiled against NumPy 1.
+
+The runs use a project venv with a standard PyTorch instead. torch 2.7.1 for CUDA 12.8 is the build of the G26 A100 run:
+```
+python3 -m venv .venv-rfdetr
+.venv-rfdetr/bin/pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cu128
+.venv-rfdetr/bin/pip install -r requirements.txt
+```
+`tools/sessions.sh` picks `.venv-rfdetr` automatically, and stops if no interpreter can import `rfdetr` (or `ultralytics` for the YOLO run). Each run folder now records `machine.txt` (host, GPU, torch, bf16 support).
 
 **Decision, before any A1 seed-1 result exists: A0 seed 1 is rerun on the A100.**
 - A-2 pairs R and A0 within each seed. The existing A0 seed 1 ran on a Kaggle T4 in fp16.
