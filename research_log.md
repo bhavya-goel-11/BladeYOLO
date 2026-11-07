@@ -3516,7 +3516,7 @@ Its outputs are `runs/ssl/g27_d1_L/rfdetrm_g27ssl.pth` (D1) and `runs/detect/Bla
 
 Locally, pull the run folders and run `.venv/bin/python tools/g27_score.py`.
 
-**From 7 Nov, S2–S4 run through `tools/g27_session.sh`** (one notebook line after the setup cell: `!bash tools/g27_session.sh s2`, `s3` or `s4`). It runs exactly the arms above.
+**From 7 Nov, S2–S4 run through `tools/sessions.sh`** (one notebook line after the setup cell: `!bash tools/sessions.sh s2`, `s3` or `s4`). It runs exactly the arms above.
 - **Why:** the first S2 attempt (7 Nov) set its paths as shell variables but ran the lines as separate `!` commands. Each line ran in a fresh shell with empty variables (`--data: expected one argument`, outputs under `/`), and the cell carried on past every failure. Nothing trained.
 - **What the script fixes:** every path is set inside it, with `set -euo pipefail`, so a failed step stops the session.
 - **Inputs are checked first.** For s3/s4 that includes the S1 checkpoints, from the private dataset `beegee11/g27-s1` by default, or from `D1=`/`D2=`.
@@ -3582,8 +3582,23 @@ All 10 runs of S2, S3, S4 and `a0s1` completed with no NaN, each from its intend
   | BladeYOLO-v2 ViT-B | – | 18.0 |
 
   On seed 0, A1 is 2.5 points below A0 on WTBD test and 1.1 above on WTBlade.
-- **Next (A-2):** A1 seed 1 on both datasets (`tools/g27_session.sh a1s1`). Then the primary claim on test: R − A0 > 0 on each dataset over seeds 0 and 1, with pooled P ≥ 0.95.
+- **Next (A-2):** A1 seed 1 on both datasets (`tools/sessions.sh a1s1`). Then the primary claim on test: R − A0 > 0 on each dataset over seeds 0 and 1, with pooled P ≥ 0.95.
 - **Every RF-DETR arm beats BladeYOLO-v2 on WTBD-group test by 3–9 points** (secondary, point estimates). On WTBlade-group, RF-DETR's 16.1–17.3 is below the ViT-B BladeYOLO-v2's 18.0, so the "generic detector is strongest" framing holds on WTBD only, so far.
+
+### All remaining runs on one A100 (8 Nov): `tools/sessions.sh all`
+
+The session script is renamed `tools/sessions.sh` (it now serves G27, G28 and the baselines). The user's DGX workstation has a single A100 (40 GB) and no time limit. `bash tools/sessions.sh all` queues, one after another:
+- `a0s1`, `a1s1`: the two seed-1 arms of G27 A-2;
+- `g28id`, `g28x_wtbd`, `g28x_wtbl`: all of G28;
+- `yolo12l_wtbl`: the YOLO12-L baseline on WTBlade-group (Ultralytics, `train.py`, the §12 recipe, 50 epochs).
+
+The recipe is unchanged everywhere (RF-DETR batch 4 × accum 4, cosine), so DGX runs stay comparable in everything except the hardware. Each run folder now records `machine.txt` (host, GPU, torch, bf16 support).
+
+**Decision, before any A1 seed-1 result exists: A0 seed 1 is rerun on the A100.**
+- A-2 pairs R and A0 within each seed. The existing A0 seed 1 ran on a Kaggle T4 in fp16.
+- An A100 A1 seed 1 against it would mix the method with the GPU and precision change.
+- Rerunning A0 seed 1 on the A100 makes each pair like for like: seed 0 on T4, both arms; seed 1 on A100, both arms.
+- When the DGX runs are copied back, the Kaggle A0 seed-1 runs move to `runs/analysis/archive/kaggle_a0s1/` (same run names), and are reported as a hardware check: the same seed on two GPUs.
 
 ### G28: does a blade-defect detector work on a dataset it never saw? Leave-one-dataset-out, twin-free (Kaggle). Pre-registered before any pool was built or run started (7 Nov)
 
