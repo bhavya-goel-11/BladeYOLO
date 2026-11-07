@@ -3555,6 +3555,36 @@ Kaggle, 6–7 Nov, restarted without the pool copy. Both steps read `/kaggle/inp
 - **Reading:** no full collapse (the target keeps its variance), but the last stage became lower-dimensional and more alike across images (effective rank halved). This is the partial dimensional collapse that masked feature distillation is known for. It may or may not survive the end-to-end fine-tune, which updates the encoder at 1.5e-4.
 - **Decision: run as pre-registered.** A2 is judged only by A2 − A1. The check is not a gate, and changing D1 after seeing it would be a post-hoc change. If A2 fails, this check is the first suspect, and any D1 variant is registered separately.
 
+### G27 A-1 result: R = A1 (copy-paste) by 0.04 points on WTBD-group val; D1 and D2 rejected (8 Nov)
+
+All 10 runs of S2, S3, S4 and `a0s1` completed with no NaN, each from its intended init (`v1_options.json`). `tools/g27_score.py` → `runs/analysis/g27/score.md`. A first scorer run was killed by a 30-minute timeout I set, and its "pending" output was the stale 5 Nov dry run; the rerun had no time limit.
+
+| val mAP50-95, seed 0 | WTBD-group | WTBlade-group | Δ vs A0, WTBD [95% CI] | Δ vs A0, WTBlade [95% CI] |
+|---|---|---|---|---|
+| A0 | 40.11 | 15.68 | | |
+| A1 (+ CP) | 40.15 | 17.10 | +0.04 [−5.7, +4.4] | +1.4 [−0.5, +5.5] |
+| A2 (+ CP + D1) | 34.2 | 15.6 | −5.9 [−14.1, +0.5] | −0.0 [−5.6, +1.4] |
+| A3 (+ CP + D2) | 33.4 | 17.7 | −6.8 [−9.9, −0.9] | +2.0 [−1.7, +3.4] |
+
+- **R = A1.** It is the only arm whose val point estimate is above A0's on both datasets, as the rule requires. On WTBD the margin is +0.0004 mAP50-95. That is smaller than A0's own seed-to-seed difference on val (0.08 points), so it is a tie in practice. The rule settles such ties on test over two seeds (A-2), which is why A-2 exists.
+- **D1 and D2 are rejected.** Their component contrasts against A1 on WTBD val are −5.9 and −6.8 points (D2's CI excludes 0). This is consistent with the S1 check (D1 halved the encoder's last-stage effective rank).
+- **Test, seed 0 (secondary, not a decision):**
+
+  | model | WTBD-group | WTBlade-group |
+  |---|---|---|
+  | A0 seed 0 | 33.2 | 16.2 |
+  | A0 seed 1 | 31.2 | 16.9 |
+  | A1 seed 0 | 30.7 | 17.3 |
+  | A2 seed 0 | 27.4 | 16.1 |
+  | A3 seed 0 | 33.2 | 16.6 |
+  | BladeYOLO-v2 (ViT-S) | 24.4 | – |
+  | YOLO12-L | 18.5 | – |
+  | BladeYOLO-v2 ViT-B | – | 18.0 |
+
+  On seed 0, A1 is 2.5 points below A0 on WTBD test and 1.1 above on WTBlade.
+- **Next (A-2):** A1 seed 1 on both datasets (`tools/g27_session.sh a1s1`). Then the primary claim on test: R − A0 > 0 on each dataset over seeds 0 and 1, with pooled P ≥ 0.95.
+- **Every RF-DETR arm beats BladeYOLO-v2 on WTBD-group test by 3–9 points** (secondary, point estimates). On WTBlade-group, RF-DETR's 16.1–17.3 is below the ViT-B BladeYOLO-v2's 18.0, so the "generic detector is strongest" framing holds on WTBD only, so far.
+
 ### G28: does a blade-defect detector work on a dataset it never saw? Leave-one-dataset-out, twin-free (Kaggle). Pre-registered before any pool was built or run started (7 Nov)
 
 **Why (user, 7 Nov):** G27's components did not beat plain RF-DETR (validation, seed 0; the formal A-1 result is logged separately), and the diagnostics put the leak-free ceiling in the data (annotator extent ceiling, rare-class scoring). So the next direction is a question where label count is not the bottleneck. A literature search found no study that tests blade-defect detectors across datasets under conflicting taxonomies. Papers claiming "cross-dataset" results test one other set or non-blade data. Our datasets share images with each other (WTBD ↔ Wind Surface ↔ Beijing; WTBs2025 ⊃ fengChe = WTBlade), so a naive leave-one-dataset-out test would leak. The twin machinery of pool L is what makes the test honest.
