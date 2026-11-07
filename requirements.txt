@@ -1,11 +1,18 @@
-# torch / torchvision: use the CUDA build preinstalled on Kaggle; nothing below pins or reinstalls them.
+# Full environment for a local GPU machine (Linux, NVIDIA driver with CUDA 12.8 support, Python 3.10-3.13):
+#   python3 -m venv .venv && .venv/bin/pip install -U pip && .venv/bin/pip install -r requirements.txt
+# Use a venv: in an NVIDIA NGC container, installing into the system Python breaks the container's own torch build.
+# On Kaggle do not install this file (it would replace Kaggle's preinstalled torch); RF-DETR sessions need only
+#   pip install "rfdetr[train]==1.11.2"
+--extra-index-url https://download.pytorch.org/whl/cu128
+torch==2.7.1+cu128        # the build of the A100 runs (G26 onwards); transformers 5 needs a release torch >= 2.6
+torchvision==0.22.1+cu128
 ultralytics==8.4.174  # parse_model hooks and DDP launch are tested against this version (brings opencv, numpy, pyyaml)
 cloudpickle>=3.1.1    # Ultralytics multi-GPU launcher
 # DINOv3 backbone code, pinned for reproducibility. Its own requirements (omegaconf, torchmetrics, termcolor, ...) are unpinned.
 dinov3 @ git+https://github.com/facebookresearch/dinov3.git@6876159a11b4df116f30f667f8c9888617df0751
+rfdetr[train]==1.11.2  # RF-DETR runs (tools/rfdetr_v1.py, tools/sessions.sh)
+transformers>=5.1,<6   # RF-DETR 1.11.2's range
 kaggle
 safetensors
 diffusers
 peft
-transformers
-rfdetr[train]==1.11.2  # RF-DETR runs (tools/rfdetr_v1.py, G27); locally in .venv-rfdetr

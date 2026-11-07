@@ -28,8 +28,7 @@ STAGE = os.path.join(ROOT, ".kaggle_pull")
 
 
 def kaggle_cli():
-    exe = os.path.join(os.path.dirname(sys.executable), "kaggle")  # the project venv's CLI
-    return exe if os.path.exists(exe) else (shutil.which("kaggle") or sys.exit("kaggle CLI not found: .venv/bin/pip install kaggle"))
+    return shutil.which("kaggle") or sys.exit("kaggle CLI not found (it is in requirements.txt)")
 
 
 def run(*args):
