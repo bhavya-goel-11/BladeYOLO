@@ -1,7 +1,7 @@
 """Wind Surface Defect: for every val (= official test) image, its best pixel correlation with a training image the
 official-protocol runs trained on (train minus the seeded 10% carve of rfdetr_v1.prepare_official), over the 8
 flips/rotations, on 48x48 grey images. A pixel twin is corr >= 0.99 (tools/official_leak_eval.py).
-  .venv/bin/python -I tools/ws_pixel_twins.py WindSurface-Defect   -> runs/analysis/paper/ws_pixel.npz
+  .venv/bin/python -I tools/ws_pixel_twins.py data/blade-defect-benchmark/raw/WindSurface-Defect   -> runs/analysis/paper/ws_pixel.npz
 """
 import os, random, sys, numpy as np, cv2
 D = sys.argv[1]

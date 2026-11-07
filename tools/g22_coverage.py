@@ -44,12 +44,12 @@ def runs(pre, ds, frac, cache):
 
 
 DATASETS = {
-    "WTBD": dict(data=os.path.join(ROOT, "external", "WTBD-group"), proto=PR,
+    "WTBD": dict(data=os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBD-group"), proto=PR,
                  groups=os.path.join(B, "wtbd_group", "groups.csv"),
                  fams={"fine-tuned f25": runs("rfdetrm", "wtbd", "f25", os.path.join(B, "seeds_f25", "preds")),
                        "frozen f25": runs("rfdetrmfz", "wtbd", "f25", os.path.join(B, "seeds_f25", "preds"))}),
-    "WTBlade": dict(data=os.path.join(ROOT, "external", "WTBlade-group"), proto=os.path.join(PR, "wtblade"),
-                    groups=os.path.join(ROOT, "external", "WTBlade-group", "groups.csv"),
+    "WTBlade": dict(data=os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBlade-group"), proto=os.path.join(PR, "wtblade"),
+                    groups=os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBlade-group", "groups.csv"),
                     fams={"fine-tuned f25": runs("rfdetrm", "wtblade", "f25", os.path.join(B, "wtblade_f25", "test")),
                           "fine-tuned f08": runs("rfdetrm", "wtblade", "f08", os.path.join(B, "wtblade_f08", "test")),
                           "frozen f25": runs("rfdetrmfz", "wtblade", "f25", os.path.join(B, "wtblade_f25", "test"))}),

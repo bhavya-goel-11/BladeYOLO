@@ -11,7 +11,7 @@ use the labels. Here no label is read. Defects cover a few patches of a blade ph
 Also writes plain random scene draws of the same budget (--random N, no class matching) as controls for luck.
 
 Usage:
-    python tools/select_scenes.py --data external/WTBD-group --budget 189 --prefix wtbd_group_train_f25 --random 2
+    python tools/select_scenes.py --data data/blade-defect-benchmark/leakfree/WTBD-group --budget 189 --prefix wtbd_group_train_f25 --random 2
 Writes tools/splits/<prefix>_cover.txt, <prefix>_rand<k>.txt and runs/analysis/select_scenes/<prefix>.txt (summary).
 """
 
@@ -106,7 +106,7 @@ def main():
     ap.add_argument("--random", type=int, default=2, help="plain random scene draws of the same budget")
     ap.add_argument("--dino", default="b")
     ap.add_argument("--seed", type=int, default=0, help="k-means seed; >0 writes <prefix>_cover_k<seed>.txt and no random draws")
-    ap.add_argument("--cache", default=os.path.join(ROOT, ".dataset_cache"))
+    ap.add_argument("--cache", default=os.path.join(ROOT, "data", "cache"))
     ap.add_argument("--workers", type=int, default=4)
     args = ap.parse_args()
     import yaml

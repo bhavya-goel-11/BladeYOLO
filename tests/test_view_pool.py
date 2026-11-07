@@ -13,7 +13,7 @@ import view_pool as vp  # noqa: E402
 
 
 def test_copy_aligns_and_other_image_does_not():
-    imgs = sorted(glob.glob(os.path.join(ROOT, "external", "WTBD-official", "train", "images", "*.jpg")))
+    imgs = sorted(glob.glob(os.path.join(ROOT, "data", "blade-defect-benchmark", "raw", "WTBD-official", "train", "images", "*.jpg")))
     a = cv2.imread(imgs[0])
     H, W = a.shape[:2]
     out = os.path.join(ROOT, "runs", "tests", "view_pool")

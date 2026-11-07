@@ -10,7 +10,7 @@ import bootstrap_ci as bc
 tw = list(csv.DictReader(open(os.path.join(OUT, "twins.csv"))))
 out = ["# Leak-free test scores with and without the pixel-twin test images", "",
        "mAP50-95 (bootstrap_ci evaluator, conf 0.001 caches). 'clean' drops the test images with a training pixel twin.", ""]
-for name, root, nc in (("WTBD-group", "external/WTBD-group", 6), ("WTBlade-group", "external/WTBlade-group", 7)):
+for name, root, nc in (("WTBD-group", "data/blade-defect-benchmark/leakfree/WTBD-group", 6), ("WTBlade-group", "data/blade-defect-benchmark/leakfree/WTBlade-group", 7)):
     data = os.path.join(ROOT, root)
     imgs = bc.load_yolo_split(data, "test")
     files = sorted(imgs)

@@ -23,8 +23,8 @@ A pair counts once per direction. Pairs are reported in two strata:
 Example sheets per stratum and outcome let the transform be checked by eye.
 
 Usage:
-    python tools/view_label_audit.py external/WTBD-official --name wtbd
-    python tools/view_label_audit.py WTBlade-Defect --name wtblade
+    python tools/view_label_audit.py data/blade-defect-benchmark/raw/WTBD-official --name wtbd
+    python tools/view_label_audit.py data/blade-defect-benchmark/raw/WTBlade-Defect --name wtblade
 Writes runs/analysis/novel/label_audit/<name>/{report.md, report.json, pairs.csv, examples_<outcome>.jpg}.
 """
 
@@ -216,7 +216,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("data", help="YOLO-layout dataset root with <split>/images and <split>/labels folders")
     ap.add_argument("--name", required=True)
-    ap.add_argument("--cache", default=os.path.join(ROOT, ".dataset_cache"))
+    ap.add_argument("--cache", default=os.path.join(ROOT, "data", "cache"))
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--min-inliers", type=int, default=mt.MIN_INLIERS)
     args = ap.parse_args()

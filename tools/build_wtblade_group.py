@@ -9,7 +9,7 @@ kept images (view_label_audit.transform_job, both directions; >= MIN_INLIERS inl
 different view of the surface; above it, a neighbouring video frame of nearly the same view.
 Writes <out>/{train,val,test}/{images,labels}, data.yaml (the official 7 classes), groups.csv, views_{val,test}.json.
 Usage:
-    python tools/build_wtblade_group.py WTBlade-Defect --out external/WTBlade-group
+    python tools/build_wtblade_group.py data/blade-defect-benchmark/raw/WTBlade-Defect --out data/blade-defect-benchmark/leakfree/WTBlade-group
 """
 
 import argparse
@@ -31,7 +31,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("src")
     ap.add_argument("--split", default=os.path.join(ROOT, "runs", "analysis", "wtblade", "split_groups.csv"))
-    ap.add_argument("--out", default=os.path.join(ROOT, "external", "WTBlade-group"))
+    ap.add_argument("--out", default=os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBlade-group"))
     ap.add_argument("--workers", type=int, default=4)
     args = ap.parse_args()
     os.chdir(ROOT)

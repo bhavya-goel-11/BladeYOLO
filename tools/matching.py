@@ -22,7 +22,7 @@ SPLITS = {"train": 0.70, "val": 0.15, "test": 0.15}
 def dinov2_embeddings(paths, cache, batch=32):
     """L2-normalised DINOv2 ViT-S/14 [CLS, mean patch] embeddings, cached per file path.
 
-    Paths are cache keys (as given; keep them relative to the repo root to reuse .dataset_cache). Runs on CUDA when
+    Paths are cache keys (as given; keep them relative to the repo root to reuse data/cache). Runs on CUDA when
     available; the cache is saved every 50 batches, so an interrupted run resumes.
     """
     known = {}

@@ -16,8 +16,8 @@ Diagnostic (--diagnose): on the training images, the share of all patches and of
 centre inside a box) that the tau filter keeps. If defects fall outside the [CLS] attention, FreeSel never sees them.
 
 Usage:
-    python tools/freesel.py --data external/WTBD-group --budget 189 --prefix wtbd_group_train_f25 --size 224 --seed 0
-    python tools/freesel.py --data external/WTBD-group --diagnose --size 224 640
+    python tools/freesel.py --data data/blade-defect-benchmark/leakfree/WTBD-group --budget 189 --prefix wtbd_group_train_f25 --size 224 --seed 0
+    python tools/freesel.py --data data/blade-defect-benchmark/leakfree/WTBD-group --diagnose --size 224 640
 """
 
 import argparse

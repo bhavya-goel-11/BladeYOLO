@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 import bootstrap_ci as bc  # noqa: E402
 import detection_metrics as dm  # noqa: E402
 
-DATA = os.path.join(ROOT, "external", "WTBD-group")
+DATA = os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBD-group")
 SPLITS = os.path.join(ROOT, "tools", "splits")
 RUNS = os.path.join(ROOT, "runs", "detect", "BladeYOLO_WindSurface")
 ARCHIVE = os.path.join(ROOT, "runs", "analysis", "archive")

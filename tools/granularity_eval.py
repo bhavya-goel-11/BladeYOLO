@@ -20,9 +20,9 @@ subset, over the classes with >= MIN_LABELS labels in every subset, and the pair
 
 Usage:
     python tools/granularity_eval.py runs/.../bladeyolo2_wtbd_group runs/.../yolo12l_wtbd_group \
-        --data external/WTBD-group --preds runs/analysis/bootstrap/wtbd_group --name wtbd_group
+        --data data/blade-defect-benchmark/leakfree/WTBD-group --preds runs/analysis/bootstrap/wtbd_group --name wtbd_group
     python tools/granularity_eval.py runs/.../bladeyolo2_wtbd_official runs/.../yolo12l_wtbd_official \
-        --data external/WTBD-official --preds runs/analysis/bootstrap/wtbd_official --name wtbd_official_twins \
+        --data data/blade-defect-benchmark/raw/WTBD-official --preds runs/analysis/bootstrap/wtbd_official --name wtbd_official_twins \
         --subsets runs/analysis/wtbd_leak/test_leak.csv
 Writes runs/analysis/novel/granularity/<name>/{report.md, report.json}.
 """

@@ -7,7 +7,7 @@ authors' split, e.g. with tools/splits/wtbd_group_split.csv (tools/wtbd_groups.p
 views of one defect stay in one split (the authors' random split puts 122 of 161 test images' twins in train).
 
 Usage:
-    python tools/convert_wtbd.py "external/WTBD/WT blade defect dataset" --out WTBD-group \
+    python tools/convert_wtbd.py "data/blade-defect-benchmark/raw/WTBD-original/WT blade defect dataset" --out WTBD-group \
         --split-file tools/splits/wtbd_group_split.csv
 """
 

@@ -35,11 +35,11 @@ def dino_size():
 def weight_paths(size):
     """Candidate weight files, in order: DINOV3_WEIGHTS, the Kaggle model (beegee11/vit?16, the official Hugging Face
     release facebook/dinov3-vit?16-pretrain-lvd1689m; latest version first), then the local download
-    (external/dinov3/vit?16/model.safetensors, from `hf download ... --local-dir`)."""
+    (data/weights/dinov3/vit?16/model.safetensors, from `hf download ... --local-dir`)."""
     v = f"vit{size}16"
     kaggle = glob.glob(f"/kaggle/input/models/beegee11/{v}/*/default/*/model.safetensors")
     kaggle.sort(key=lambda p: int(p.split("/")[-2]) if p.split("/")[-2].isdigit() else -1, reverse=True)
-    return [os.environ.get("DINOV3_WEIGHTS", ""), *kaggle, os.path.join(ROOT_DIR, "external", "dinov3", v, "model.safetensors")]
+    return [os.environ.get("DINOV3_WEIGHTS", ""), *kaggle, os.path.join(ROOT_DIR, "data", "weights", "dinov3", v, "model.safetensors")]
 
 
 def ensure_dinov3_importable():

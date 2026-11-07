@@ -7,7 +7,7 @@ predictions. That separates an fp16 overflow inside a layer from a problem in th
 
 Usage (Kaggle, one GPU; the weights are those of the failing run):
     python tools/probe_nan.py --weights runs/detect/BladeYOLO_WindSurface/bladeyolo2_wtbd_group/weights/last.pt \
-        --data WTBD/WTBD-group/data.yaml
+        --data data/blade-defect-benchmark/leakfree/WTBD-group/data.yaml
 Output: runs/debug/<name>/{probe_report.json, nan_batch.pt}
 """
 

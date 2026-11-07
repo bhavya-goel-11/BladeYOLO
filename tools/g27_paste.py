@@ -27,9 +27,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import synth_defects as sd  # noqa: E402
 
-PROTOCOLS = {"wtbd_group": "external/WTBD-group", "wtbd_official": "external/WTBD-official",
-             "wtblade_group": "external/WTBlade-group", "wtblade_defect": "WTBlade-Defect",
-             "windsurface": "WindSurface-Defect"}
+PROTOCOLS = {"wtbd_group": "data/blade-defect-benchmark/leakfree/WTBD-group", "wtbd_official": "data/blade-defect-benchmark/raw/WTBD-official",
+             "wtblade_group": "data/blade-defect-benchmark/leakfree/WTBlade-group", "wtblade_defect": "data/blade-defect-benchmark/raw/WTBlade-Defect",
+             "windsurface": "data/blade-defect-benchmark/raw/WindSurface-Defect"}
 SAM = os.path.join(ROOT, "runs", "analysis", "sam_refine", "sam2.1_t.pt")
 PER_IMAGE, MIN_BLADE, TRIES = 2, 0.8, 300
 FIELDS = ["i", "image", "cls", "cx", "cy", "w", "h", "src_image", "src_cx", "src_cy", "src_w", "src_h"]

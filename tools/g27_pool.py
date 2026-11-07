@@ -28,7 +28,7 @@ the same image set for direction 1 (images only) and direction 2 (images + label
 
   .venv/bin/python tools/g27_pool.py build --pool L   -> tools/splits/g27_pool_L.csv, runs/analysis/g27/pool_L.md
   .venv/bin/python tools/g27_pool.py audit --pool L   -> runs/analysis/g27/pool_L_audit.md (+ contact sheets)
-  .venv/bin/python tools/g27_pool.py export --pool L --out g27-pool-L
+  .venv/bin/python tools/g27_pool.py export --pool L --out data/blade-defect-benchmark/pools/g27-pool-L
       -> {train,valid,test}/{images,labels}, data.yaml (slot names "<dataset>:<class>"), slots.json, g27_pool_L.csv
          train = the kept pool; valid = test = WTBD-group val + WTBlade-group val in their slots (logging only)
 Upload the export folder as a Kaggle dataset (contains DTU-derived WTBlade frames, CC BY-NC: research use only).
@@ -63,18 +63,18 @@ csv_path = lambda pool: os.path.join(ROOT, "tools", "splits", f"g27_pool_{pool}.
 report_path = lambda pool: os.path.join(ROOT, "runs", "analysis", "g27", f"pool_{pool}.md")  # noqa: E731
 WTBLADE_GROUPS = os.path.join(ROOT, "runs", "analysis", "wtblade", "split_groups.csv")
 POOL_K, POOL_COS = 3, 0.80
-CACHE = os.path.join(ROOT, ".dataset_cache", "dinov2_vits14.npz")
+CACHE = os.path.join(ROOT, "data", "cache", "dinov2_vits14.npz")
 # exclusion thresholds sit below the leak-audit thresholds (DINOv2 0.93 = matching.DINO_GROUP, pixel 0.99) by a
 # margin: at those exact values the pool L audit's closest kept pairs were still same-scene (a re-exposed WTBD copy at
 # pixel 0.98, re-tinted and neighbouring drone frames at cosine 0.92-0.93)
 TWIN_COS, CAND_COS, CAND_K, PIXEL_TWIN = 0.90, 0.70, 30, 0.97
 AUDIT_COS, AUDIT_PIX = matching.DINO_GROUP, 0.99
-WTBS = "WTBs2025"
+WTBS = "data/blade-defect-benchmark/raw/WTBs2025"
 # slot order = this order; (root, splits) relative to the repo
-SOURCES = {"wtbd": ("external/WTBD-official", ["train", "val", "test"]),
-           "wtblade": ("WTBlade-Defect", ["train", "valid", "test"]),
-           "ws": ("WindSurface-Defect", ["train", "val"]),
-           "bj": ("wind-turbine.v1i.yolov12", ["train", "valid", "test"]),
+SOURCES = {"wtbd": ("data/blade-defect-benchmark/raw/WTBD-official", ["train", "val", "test"]),
+           "wtblade": ("data/blade-defect-benchmark/raw/WTBlade-Defect", ["train", "valid", "test"]),
+           "ws": ("data/blade-defect-benchmark/raw/WindSurface-Defect", ["train", "val"]),
+           "bj": ("data/blade-defect-benchmark/raw/Beijing-wind-turbine", ["train", "valid", "test"]),
            "wtbs": (WTBS, None)}  # one folder per class, each with images/ labels/
 FIELDS = ["path", "source", "split", "name", "boxes", "status", "match", "cos"]
 
@@ -110,7 +110,7 @@ def records():
 
 def ws_carve(seed=0, frac=0.1):
     """The Wind Surface validation images of rfdetr_v1.prepare_official (--carve 0.1, seed 0)."""
-    train = sorted(os.listdir(os.path.join(ROOT, "WindSurface-Defect", "train", "images")))
+    train = sorted(os.listdir(os.path.join(ROOT, "data", "blade-defect-benchmark", "raw", "WindSurface-Defect", "train", "images")))
     return set(random.Random(seed).sample(train, round(frac * len(train))))
 
 
@@ -121,20 +121,20 @@ def eval_keys(pool):
         root, splits = SOURCES[TARGET[pool]]
         return {(TARGET[pool], f) for s in splits for f in ls(os.path.join(root, s, "images"))}
     if pool == "L":
-        wtbd = ("external/WTBD-group/val/images", "external/WTBD-group/test/images")
-        wtbl = ("external/WTBlade-group/val/images", "external/WTBlade-group/test/images")
+        wtbd = ("data/blade-defect-benchmark/leakfree/WTBD-group/val/images", "data/blade-defect-benchmark/leakfree/WTBD-group/test/images")
+        wtbl = ("data/blade-defect-benchmark/leakfree/WTBlade-group/val/images", "data/blade-defect-benchmark/leakfree/WTBlade-group/test/images")
         ws = set()
     else:
-        wtbd = ("external/WTBD-official/val/images", "external/WTBD-official/test/images")
-        wtbl = ("WTBlade-Defect/valid/images", "WTBlade-Defect/test/images")
-        ws = set(ls("WindSurface-Defect/val/images")) | ws_carve()
+        wtbd = ("data/blade-defect-benchmark/raw/WTBD-official/val/images", "data/blade-defect-benchmark/raw/WTBD-official/test/images")
+        wtbl = ("data/blade-defect-benchmark/raw/WTBlade-Defect/valid/images", "data/blade-defect-benchmark/raw/WTBlade-Defect/test/images")
+        ws = set(ls("data/blade-defect-benchmark/raw/WindSurface-Defect/val/images")) | ws_carve()
     keys = {("wtbd", f) for d in wtbd for f in ls(d)} | {("wtblade", f) for d in wtbl for f in ls(d)}
     return keys | {("ws", f) for f in ws}
 
 
 def scene_rule(recs):
     """Pool L: WTBD only from WTBD-group train; WTBlade-Defect only from scene groups of WTBlade-group train."""
-    wtbd_train = set(os.listdir(os.path.join(ROOT, "external", "WTBD-group", "train", "images")))
+    wtbd_train = set(os.listdir(os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBD-group", "train", "images")))
     sub = {r["image"]: r["subset"] for r in csv.DictReader(open(WTBLADE_GROUPS))}
     for r in recs:
         if r["status"]:
@@ -307,7 +307,7 @@ def export(pool, out):
         if n % 2000 == 0:
             print(f"  train {n}/{len(kept)}", flush=True)
     nval = 0
-    for src, root in (("wtbd", "external/WTBD-group"), ("wtblade", "external/WTBlade-group")):
+    for src, root in (("wtbd", "data/blade-defect-benchmark/leakfree/WTBD-group"), ("wtblade", "data/blade-defect-benchmark/leakfree/WTBlade-group")):
         d = os.path.join(root, "val", "images")
         for f in sorted(os.listdir(os.path.join(ROOT, d))):
             for s in ("valid", "test"):

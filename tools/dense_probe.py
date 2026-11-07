@@ -26,7 +26,7 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import bootstrap_ci as bc  # noqa: E402
 
-DATA = os.path.join(ROOT, "external", "WTBD-group")
+DATA = os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBD-group")
 OUT = os.path.join(ROOT, "runs", "analysis", "dense_probe")
 SUBSET = os.path.join(ROOT, "tools", "splits", "wtbd_group_train_f25.txt")
 GROUPS = {"test": os.path.join(ROOT, "runs", "analysis", "bootstrap", "wtbd_group", "groups.csv"),

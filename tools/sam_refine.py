@@ -102,7 +102,7 @@ def refine(p, sb, min_conf, max_det, k, r, a):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--runs", nargs="+", required=True, help="run folders (weights/best.pt)")
-    ap.add_argument("--data", default=os.path.join(ROOT, "external", "WTBD-group"))
+    ap.add_argument("--data", default=os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBD-group"))
     ap.add_argument("--groups", default=os.path.join(ROOT, "runs", "analysis", "bootstrap", "wtbd_group", "groups.csv"))
     ap.add_argument("--out", default=os.path.join(ROOT, "runs", "analysis", "sam_refine"))
     ap.add_argument("--weights", default=os.path.join(ROOT, "runs", "analysis", "sam_refine", "sam2.1_t.pt"))

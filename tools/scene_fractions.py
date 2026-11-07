@@ -7,7 +7,7 @@ mix (box shares) at its fraction; subsets are prefixes of that order, so each fr
 Writes <out>/<prefix>_f<NN>.txt (image file names) for train.py --train-subset, and a summary.
 
 Usage:
-    python tools/scene_fractions.py --data external/WTBD-group --fractions 0.25 0.5 --prefix wtbd_group_train
+    python tools/scene_fractions.py --data data/blade-defect-benchmark/leakfree/WTBD-group --fractions 0.25 0.5 --prefix wtbd_group_train
 """
 
 import argparse
@@ -28,7 +28,7 @@ def main():
     ap.add_argument("--fractions", type=float, nargs="+", default=[0.25, 0.5])
     ap.add_argument("--prefix", required=True)
     ap.add_argument("--out", default=os.path.join(ROOT, "tools", "splits"))
-    ap.add_argument("--cache", default=os.path.join(ROOT, ".dataset_cache"))
+    ap.add_argument("--cache", default=os.path.join(ROOT, "data", "cache"))
     ap.add_argument("--trials", type=int, default=1000)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--workers", type=int, default=4)

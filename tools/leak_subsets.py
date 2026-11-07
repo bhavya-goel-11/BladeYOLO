@@ -25,10 +25,10 @@ import matching as mt  # noqa: E402
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--src", default=os.path.join(ROOT, "external", "WTBD", "WT blade defect dataset"))
-    ap.add_argument("--official", default=os.path.join(ROOT, "external", "WTBD-official"))
+    ap.add_argument("--src", default=os.path.join(ROOT, "data", "blade-defect-benchmark", "raw", "WTBD-original", "WT blade defect dataset"))
+    ap.add_argument("--official", default=os.path.join(ROOT, "data", "blade-defect-benchmark", "raw", "WTBD-official"))
     ap.add_argument("--out", default=os.path.join(ROOT, "runs", "analysis", "wtbd_leak"))
-    ap.add_argument("--cache", default=os.path.join(ROOT, ".dataset_cache"))
+    ap.add_argument("--cache", default=os.path.join(ROOT, "data", "cache"))
     ap.add_argument("--workers", type=int, default=4)
     args = ap.parse_args()
 

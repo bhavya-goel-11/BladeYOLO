@@ -37,7 +37,7 @@ for _ in range(200):
         assert (ours == ref).all()
 print("matcher identical to ultralytics on 200 random cases")
 
-data = os.path.join(ROOT, "external", "WTBD-official")
+data = os.path.join(ROOT, "data", "blade-defect-benchmark", "raw", "WTBD-official")
 imgs = bc.load_yolo_split(data, "test")
 for run, logged in (("bladeyolo2_wtbd_official", (0.840, 0.493)), ("yolo12l_wtbd_official", (0.704, 0.388))):
     preds = ole.load_preds(run, data, "test")

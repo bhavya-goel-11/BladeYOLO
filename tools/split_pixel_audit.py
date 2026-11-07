@@ -17,7 +17,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 from g27_pool import dihedral, gray48, unit  # noqa: E402
 
-SPLITS = {"WTBD-group": "external/WTBD-group", "WTBlade-group": "external/WTBlade-group"}
+SPLITS = {"WTBD-group": "data/blade-defect-benchmark/leakfree/WTBD-group", "WTBlade-group": "data/blade-defect-benchmark/leakfree/WTBlade-group"}
 TWIN = 0.99
 OUT = os.path.join(ROOT, "runs", "analysis", "split_audit")
 

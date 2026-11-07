@@ -25,8 +25,8 @@ import bootstrap_ci as bc  # noqa: E402
 import detection_metrics as dm  # noqa: E402
 
 B = os.path.join(ROOT, "runs", "analysis", "bootstrap")
-WTBD = (os.path.join(ROOT, "external", "WTBD-group"), ["craze", "corrosion", "surface_injure", "thunderstrike", "crack", "hide_craze"])
-WTBLADE = (os.path.join(ROOT, "external", "WTBlade-group"), ["burn", "crack", "deformity", "dirt", "oil", "peeling", "rust"])
+WTBD = (os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBD-group"), ["craze", "corrosion", "surface_injure", "thunderstrike", "crack", "hide_craze"])
+WTBLADE = (os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBlade-group"), ["burn", "crack", "deformity", "dirt", "oil", "peeling", "rust"])
 F25 = lambda pre, ds, suf="": [f"{pre}_{ds}_group_f25{suf}"] + [f"{pre}_rand{k}_{ds}_group_f25{suf}" for k in (1, 2, 3)]
 GROUPS = [
     ("WTBD", WTBD, "RF-DETR-M 25% (4 subsets)", os.path.join(B, "seeds_f25", "preds"), F25("rfdetrm", "wtbd")),

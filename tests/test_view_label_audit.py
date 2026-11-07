@@ -14,7 +14,7 @@ import view_label_audit as va  # noqa: E402
 
 
 def test_projection_through_flip_rotation_scale():
-    src = sorted(glob.glob(os.path.join(ROOT, "external", "WTBD-official", "train", "images", "*.jpg")))[0]
+    src = sorted(glob.glob(os.path.join(ROOT, "data", "blade-defect-benchmark", "raw", "WTBD-official", "train", "images", "*.jpg")))[0]
     a = cv2.imread(src)
     H, W = a.shape[:2]
     out = os.path.join(ROOT, "runs", "tests", "view_audit")

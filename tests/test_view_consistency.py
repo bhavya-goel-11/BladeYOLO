@@ -43,7 +43,7 @@ def iou(a, b):
 
 def test_audit_matrix_matches_projection():
     os.makedirs(OUT, exist_ok=True)
-    src = sorted(glob.glob(os.path.join(ROOT, "external", "WTBD-official", "train", "images", "*.jpg")))[0]
+    src = sorted(glob.glob(os.path.join(ROOT, "data", "blade-defect-benchmark", "raw", "WTBD-official", "train", "images", "*.jpg")))[0]
     a = cv2.imread(src)
     H, W = a.shape[:2]
     R = cv2.getRotationMatrix2D((W / 2, H / 2), 25, 0.85)

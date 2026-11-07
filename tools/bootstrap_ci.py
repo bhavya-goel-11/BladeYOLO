@@ -9,7 +9,7 @@ at IoU 0.50 and 0.50:0.95, averaged over the classes present in the draw.
 
 Usage:
     python tools/bootstrap_ci.py runs/.../bladeyolo2_wtbd_group runs/.../yolo12l_wtbd_group \
-        --data external/WTBD-group --name wtbd_group
+        --data data/blade-defect-benchmark/leakfree/WTBD-group --name wtbd_group
 Writes runs/analysis/bootstrap/<name>/{report.md, report.json, groups.csv}.
 """
 
@@ -134,7 +134,7 @@ def main():
     ap.add_argument("--name", required=True)
     ap.add_argument("--n", type=int, default=2000, help="bootstrap replicates")
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--cache", default=os.path.join(ROOT, ".dataset_cache"))
+    ap.add_argument("--cache", default=os.path.join(ROOT, "data", "cache"))
     ap.add_argument("--workers", type=int, default=4)
     args = ap.parse_args()
 

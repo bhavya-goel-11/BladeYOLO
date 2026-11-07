@@ -17,9 +17,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import rfdetr_v1 as v1  # noqa: E402
 
-CKPT = os.path.join(ROOT, "external", "rfdetr", "rf-detr-medium.pth")
+CKPT = os.path.join(ROOT, "data", "weights", "rfdetr", "rf-detr-medium.pth")
 OUT = os.path.join(ROOT, "runs", "tests", "g27_train")
-WTBD, WTBL = os.path.join(ROOT, "external", "WTBD-group"), os.path.join(ROOT, "external", "WTBlade-group")
+WTBD, WTBL = os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBD-group"), os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBlade-group")
 
 
 def labelled(root, split, n):

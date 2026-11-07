@@ -8,8 +8,8 @@
             rnd  a random scene order (seed fixed per start)
           -> tools/splits/wtbd_group_train_f25_al<k>_{unc,rnd}.txt
 
-  python tools/active_select.py scenes --data external/WTBD-group/data.yaml
-  python tools/active_select.py start  --data external/WTBD-group/data.yaml --budget 75 --draws 3
+  python tools/active_select.py scenes --data data/blade-defect-benchmark/leakfree/WTBD-group/data.yaml
+  python tools/active_select.py start  --data data/blade-defect-benchmark/leakfree/WTBD-group/data.yaml --budget 75 --draws 3
   python tools/active_select.py extend --data D --start tools/splits/wtbd_group_train_f10_al1.txt \
       --weights runs/detect/BladeYOLO_WindSurface/bladeyolo2nodino_al1_wtbd_group_f10/weights/best.pt --budget 189
 """
@@ -85,7 +85,7 @@ def main():
         import select_scenes as ss
 
         files = sorted(os.listdir(img_dir))
-        groups = ss.scenes([os.path.join(img_dir, f) for f in files], os.path.join(ROOT, ".dataset_cache"), 4)
+        groups = ss.scenes([os.path.join(img_dir, f) for f in files], os.path.join(ROOT, "data", "cache"), 4)
         with open(SCENES, "w", newline="") as f:
             w = csv.writer(f)
             w.writerow(["image", "scene"])

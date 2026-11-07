@@ -23,12 +23,12 @@ RUNS = os.path.join(ROOT, "runs", "detect", "BladeYOLO_WindSurface")
 OUT = os.path.join(ROOT, "runs", "analysis", "transfer")
 SETS = {  # data, groups.csv, damage class ids, models: name -> (run, the model's damage class ids, its class -> mapped name)
     "WTBD-group test": dict(
-        data=os.path.join(ROOT, "external", "WTBD-group"),
+        data=os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBD-group"),
         groups=os.path.join(ROOT, "runs", "analysis", "bootstrap", "wtbd_group", "groups.csv"),
         damage=[0, 1, 2, 3, 4, 5], mapped={4: "crack", 3: "lightning"}),
     "WTBlade-group test": dict(
-        data=os.path.join(ROOT, "external", "WTBlade-group"),
-        groups=os.path.join(ROOT, "external", "WTBlade-group", "groups.csv"),
+        data=os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBlade-group"),
+        groups=os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBlade-group", "groups.csv"),
         damage=[0, 1, 2, 5, 6], mapped={1: "crack", 0: "lightning"}),
 }
 MODELS = {  # run -> (trained on, its damage class ids, mapped classes)

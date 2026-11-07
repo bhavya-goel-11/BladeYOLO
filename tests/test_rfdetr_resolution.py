@@ -9,8 +9,8 @@ import rfdetr_v1 as v1
 
 run = os.path.join(ROOT, "runs", "detect", "BladeYOLO_WindSurface", "rfdetrm_wtbd_group_f25")
 assert v1.run_resolution(run) is None
-img = Image.open(os.path.join(ROOT, "external", "WTBlade-group", "test", "images",
-                              sorted(os.listdir(os.path.join(ROOT, "external", "WTBlade-group", "test", "images")))[0])).convert("RGB")
+img = Image.open(os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBlade-group", "test", "images",
+                              sorted(os.listdir(os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBlade-group", "test", "images")))[0])).convert("RGB")
 for res in (None, 768):
     m = v1.model_class("medium")(pretrain_weights=v1.best_checkpoint(run), num_classes=6, **v1.model_kwargs(resolution=res))
     det = m.predict(img, threshold=0.001)

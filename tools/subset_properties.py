@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 import bootstrap_ci as bc  # noqa: E402
 import select_scenes as ss  # noqa: E402
 
-DATA = os.path.join(ROOT, "external", "WTBD-group")
+DATA = os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBD-group")
 RUNS = os.path.join(ROOT, "runs", "detect", "BladeYOLO_WindSurface")
 SPLITS = os.path.join(ROOT, "tools", "splits")
 SEL = os.path.join(ROOT, "runs", "analysis", "select_scenes")
@@ -73,7 +73,7 @@ def main():
     X = F.reshape(-1, F.shape[-1])
     M = F.mean(1)
     M /= np.linalg.norm(M, axis=1, keepdims=True)
-    groups = ss.scenes(paths, os.path.join(ROOT, ".dataset_cache"), 4)
+    groups = ss.scenes(paths, os.path.join(ROOT, "data", "cache"), 4)
     scene_of = np.empty(len(files), int)
     for g, mem in enumerate(groups):
         scene_of[mem] = g

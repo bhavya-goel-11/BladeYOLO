@@ -1,14 +1,14 @@
 """Train BladeYOLO (or a stock Ultralytics baseline) on a dataset with its official classes, e.g. WTBD.
 
 Examples (WTBD = the folder holding WTBD-group/ and WTBD-official/):
-    python train.py --data WTBD/WTBD-group/data.yaml --model bladeyolo2-l.yaml --name bladeyolo2_wtbd_group --epochs 150
-    python train.py --data WTBD/WTBD-group/data.yaml --model yolo12l.pt --box-loss ciou --name yolo12l_wtbd_group --epochs 150
-    python train.py --data WTBD/WTBD-group/data.yaml --model bladeyolo2-l.yaml --tolerant --name bladeyolo2_wtbd_group_tolerant
-    python train.py --data WTBD/WTBD-group/data.yaml --tolerant-classes corrosion,hide_craze --name bladeyolo2_wtbd_group_tolsel_s0
-    python train.py --data WTBD/WTBD-group/data.yaml --dino b --train-subset tools/splits/wtbd_group_train_f25.txt --name bladeyolo2b_wtbd_group_f25_s0
-    python train.py --data WTBD/WTBD-group/data.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --name bladeyolo2_wtbd_group_f25
-    python train.py --data WTBD/WTBD-group/data.yaml --test runs/detect/BladeYOLO_WindSurface/bladeyolo2_wtbd_group/weights/best.pt
-    python train.py --data WTBD/WTBD-group/data.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --ssl synthetic \
+    python train.py --data data/blade-defect-benchmark/leakfree/WTBD-group/data.yaml --model bladeyolo2-l.yaml --name bladeyolo2_wtbd_group --epochs 150
+    python train.py --data data/blade-defect-benchmark/leakfree/WTBD-group/data.yaml --model yolo12l.pt --box-loss ciou --name yolo12l_wtbd_group --epochs 150
+    python train.py --data data/blade-defect-benchmark/leakfree/WTBD-group/data.yaml --model bladeyolo2-l.yaml --tolerant --name bladeyolo2_wtbd_group_tolerant
+    python train.py --data data/blade-defect-benchmark/leakfree/WTBD-group/data.yaml --tolerant-classes corrosion,hide_craze --name bladeyolo2_wtbd_group_tolsel_s0
+    python train.py --data data/blade-defect-benchmark/leakfree/WTBD-group/data.yaml --dino b --train-subset tools/splits/wtbd_group_train_f25.txt --name bladeyolo2b_wtbd_group_f25_s0
+    python train.py --data data/blade-defect-benchmark/leakfree/WTBD-group/data.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --name bladeyolo2_wtbd_group_f25
+    python train.py --data data/blade-defect-benchmark/leakfree/WTBD-group/data.yaml --test runs/detect/BladeYOLO_WindSurface/bladeyolo2_wtbd_group/weights/best.pt
+    python train.py --data data/blade-defect-benchmark/leakfree/WTBD-group/data.yaml --train-subset tools/splits/wtbd_group_train_f25.txt --ssl synthetic \
         --ssl-unlabelled tools/splits/wtbd_group_train_f25_rest.txt --name bladeyolo2_wtbd_group_f25_sslin
     python train.py --resume runs/detect/BladeYOLO_WindSurface/bladeyolo2_wtbd_group/weights/last.pt
 """

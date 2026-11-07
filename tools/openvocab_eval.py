@@ -25,7 +25,7 @@ import bootstrap_ci as bc  # noqa: E402
 import detection_metrics as dm  # noqa: E402
 
 MODEL = "google/owlv2-base-patch16-ensemble"
-LOCAL = os.path.join(ROOT, "external", "owlv2")  # a local copy (config, tokenizer, weights) is used when present
+LOCAL = os.path.join(ROOT, "data", "weights", "owlv2")  # a local copy (config, tokenizer, weights) is used when present
 CLASSES = ["craze", "corrosion", "surface_injure", "thunderstrike", "crack", "hide_craze"]
 PROMPTS = {
     "craze": ["crazing on a wind turbine blade", "a network of fine hairline cracks in the coating", "craze"],
@@ -95,7 +95,7 @@ def detections(boxes, sc):
 
 def main():
     os.makedirs(OUT, exist_ok=True)
-    data = os.path.join(ROOT, "external", "WTBD-group")
+    data = os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBD-group")
     te = bc.load_yolo_split(data, "test")
     sub = {n.strip() for n in open(os.path.join(ROOT, "tools", "splits", "wtbd_group_train_f25.txt")) if n.strip()}
     tr = {k: v for k, v in bc.load_yolo_split(data, "train").items() if os.path.basename(k) in sub}

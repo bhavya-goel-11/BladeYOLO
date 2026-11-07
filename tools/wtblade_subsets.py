@@ -2,7 +2,7 @@
   class-matched  best of --trials random scene orders by L1 distance to the full set's class box shares, every class
                  present (tools/scene_fractions.py)
   rand1..randN   plain random scene draws of the same image budget, no class matching (tools/select_scenes.py)
-Scenes are the WTBlade-group groups (external/WTBlade-group/groups.csv), so no scene straddles labelled and unlabelled.
+Scenes are the WTBlade-group groups (data/blade-defect-benchmark/leakfree/WTBlade-group/groups.csv), so no scene straddles labelled and unlabelled.
 
 Usage:
     python tools/wtblade_subsets.py
@@ -17,7 +17,7 @@ import numpy as np
 import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA = os.path.join(ROOT, "external", "WTBlade-group")
+DATA = os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBlade-group")
 
 
 def train_scenes(data):

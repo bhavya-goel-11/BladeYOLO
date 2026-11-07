@@ -3728,23 +3728,46 @@ Val best is the best epoch in `results.csv` by fitness (0.1 × mAP50 + 0.9 × mA
 
 ## 28. Datasets and artefacts
 
+**Layout from 8 Nov: all data lives under `data/` (gitignored).** Earlier entries in this log use the old paths. They map as follows:
+
+| old path | new path |
+|---|---|
+| `external/WTBD/` | `data/blade-defect-benchmark/raw/WTBD-original/` |
+| `external/WTBD-official/` | `data/blade-defect-benchmark/raw/WTBD-official/` |
+| `WTBlade-Defect/`, `WindSurface-Defect/`, `WTBs2025/` | `data/blade-defect-benchmark/raw/<same name>/` |
+| `wind-turbine.v1i.yolov12/`, `wind_turbine_check.v1i.yolov12/` | `data/blade-defect-benchmark/raw/Beijing-wind-turbine/`, `…/raw/Beijing-wind_turbine_check/` |
+| `external/WTBD-group/`, `external/WTBlade-group/` | `data/blade-defect-benchmark/leakfree/<same name>/` |
+| `g27-pool-L/` | `data/blade-defect-benchmark/pools/g27-pool-L/` (with `g28-x-wtbd/`, `g28-x-wtblade/`) |
+| `external/{dinov3,owlv2,rfdetr}/` | `data/weights/{dinov3,owlv2,rfdetr}/` |
+| `.dataset_cache/` | `data/cache/` |
+
+- `data/blade-defect-benchmark/` is the single dataset that is published on Kaggle (`README.md`, `LICENSES.md` inside it). `data/weights/` and `data/cache/` stay local.
+- The migration (`runs/analysis/cleanup/migrate_layout.py`, 8 Nov) rewrote every code path, and every stored path, in 47 code files, 263 csv/json files under `runs/analysis` and `tools/splits`, and 43,864 DINOv2 cache keys. The previous stored files are in `runs/analysis/cleanup/stored_paths_backup.tar.gz`.
+- **Removed as redundant** (each checked file by file before deletion):
+  - the old dataset folders: every file was a hard link of a bundle file;
+  - `external/data.zip`: a zip of the group splits;
+  - `view-pool/`: the retired real-view pool, rebuildable with `tools/view_pool.py --export`;
+  - `runs/exports/`: copies of the official splits, plus their zips;
+  - `runs/tests/`: test scratch;
+  - `runs/analysis/v1/kaggle_out_*`: every file byte-identical to one in `runs/detect/`; the notebook logs were kept as `runs/kaggle_logs/v1_*`.
+
 | Item | Location | Notes |
 |---|---|---|
-| WTBD raw | `external/WTBD/` | figshare 10.6084/m9.figshare.30210175 |
-| WTBD-group / WTBD-official | `external/WTBD-group/`, `external/WTBD-official/`; Kaggle `beegee11/wind-surface-defect/WTBD-yolo` | `tools/convert_wtbd.py` |
+| WTBD raw | `data/blade-defect-benchmark/raw/WTBD-original/` | figshare 10.6084/m9.figshare.30210175 |
+| WTBD-group / WTBD-official | `data/blade-defect-benchmark/{leakfree/WTBD-group,raw/WTBD-official}/` | `tools/convert_wtbd.py` |
 | WTBD group split, scene fractions | `tools/splits/` (committed) | Zero-leak audited split; nested 25% / 50% training subsets |
-| Other raw datasets | `WindSurface-Defect/`, `WTBlade-Defect/`, `wind-turbine.v1i.yolov12/`, `wind_turbine_check.v1i.yolov12/`, `WTBs2025/` | Official classes only |
+| Other raw datasets | `data/blade-defect-benchmark/raw/` | Official classes only |
 | Current runs | `runs/detect/BladeYOLO_WindSurface/` | `bladeyolo2_wtbd_{group,official,group_tolerant}`, `yolo12l_wtbd_{group,official}`, learning-curve, seed and SSL runs at 25%, DINOv3 size (`bladeyolo2{b,l}_…`) and without-DINOv3 (`bladeyolo2nodino_…`) runs |
 | SAM refinement | `runs/analysis/sam_refine/` | SAM 2.1-tiny weights, cached predictions and SAM boxes, `val_grid.csv`, `report.md` |
 | Kaggle logs | `runs/kaggle_logs/` | One per `pull_kaggle_runs.py` pull |
-| DINOv3 weights | `external/dinov3/vit{s,b,l}16/` (Hugging Face, gated), `external/dinov3/official/` (Meta ViT-S .pth) | DINOv3 License (Meta, 19 Aug 2025; `external/dinov3/vits16/LICENSE.md`): use, modification and redistribution allowed, but anything containing the weights (including our trained checkpoints) must ship with the license; publications must acknowledge DINOv3; military/ITAR uses prohibited |
+| DINOv3 weights | `data/weights/dinov3/vit{s,b,l}16/` (Hugging Face, gated), `data/weights/dinov3/official/` (Meta ViT-S .pth) | DINOv3 License (Meta, 19 Aug 2025; `data/weights/dinov3/vits16/LICENSE.md`): use, modification and redistribution allowed, but anything containing the weights (including our trained checkpoints) must ship with the license; publications must acknowledge DINOv3; military/ITAR uses prohibited |
 | Retired runs and the v3 label review | `runs/analysis/archive/` | `results.csv`, `args.yaml`, test metrics; `review_test_v3.json` |
 | Dataset audit (Phase 13) | `runs/analysis/datasets/report.md` | |
 | WTBD leakage and craze diagnosis | `runs/analysis/{wtbd, wtbd_leak, wtbd_craze}/` | |
 | Scene bootstrap | `runs/analysis/bootstrap/` | Reports, scene groups, cached predictions |
 | Evaluation experiments | `runs/analysis/novel/` | `granularity/`, `label_audit/{wtbd,windsurface,wtblade}/`, `conformal/`, cached predictions |
 | NaN replay | `runs/analysis/nan_probe/` | Layer-6 replay of the tolerant run's NaN batches |
-| Caches | `.dataset_cache/` | DINOv2 embeddings, ORB verifications |
+| Caches | `data/cache/` | DINOv2 embeddings, ORB verifications |
 
 **Tools:**
 - matching and splits: `matching.py`, `wtbd_groups.py`, `convert_wtbd.py`, `scene_fractions.py`, `view_pool.py`

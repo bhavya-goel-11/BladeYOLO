@@ -18,8 +18,8 @@ With --views DIR (WTBlade-group, tools/build_wtblade_group.py) the transforms co
 registered between distinct source frames: there "same view" partners are neighbouring video frames, not copies.
 
   .venv/bin/python tools/multiview_fusion.py --runs runs/detect/BladeYOLO_WindSurface/bladeyolo2_wtbd_group_f25 ...
-  .venv/bin/python tools/multiview_fusion.py --runs runs/.../bladeyolo2b_wtblade_group --data external/WTBlade-group \
-      --views external/WTBlade-group --groups external/WTBlade-group/groups.csv --out runs/analysis/multiview_wtblade
+  .venv/bin/python tools/multiview_fusion.py --runs runs/.../bladeyolo2b_wtblade_group --data data/blade-defect-benchmark/leakfree/WTBlade-group \
+      --views data/blade-defect-benchmark/leakfree/WTBlade-group --groups data/blade-defect-benchmark/leakfree/WTBlade-group/groups.csv --out runs/analysis/multiview_wtblade
 """
 
 import argparse
@@ -194,8 +194,8 @@ def fuse(preds, graph, iou, w, geom, partners, size=640.0, min_conf=0.001):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--runs", nargs="+", required=True)
-    ap.add_argument("--data", default=os.path.join(ROOT, "external", "WTBD-group"))
-    ap.add_argument("--official", default=os.path.join(ROOT, "external", "WTBD-official"),
+    ap.add_argument("--data", default=os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBD-group"))
+    ap.add_argument("--official", default=os.path.join(ROOT, "data", "blade-defect-benchmark", "raw", "WTBD-official"),
                     help="the dataset the transforms' indices refer to (the label audit ran on WTBD-official)")
     ap.add_argument("--transforms", default=os.path.join(ROOT, "runs", "analysis", "novel", "label_audit", "wtbd", "transforms_v3.json"))
     ap.add_argument("--groups", default=os.path.join(ROOT, "runs", "analysis", "bootstrap", "wtbd_group", "groups.csv"))

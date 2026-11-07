@@ -39,7 +39,7 @@ hide_craze). The full history of experiments, results and corrections is in `res
 1. Setup: `pip install -r requirements.txt`. DINOv3 weights (ViT-S/16 by default; `--dino b|l` for ViT-B/16, ViT-L/16):
    the official Hugging Face releases `facebook/dinov3-vit{s,b,l}16-pretrain-lvd1689m` (gated; DINOv3 License, which
    asks publications to acknowledge DINOv3). Locally `hf download facebook/dinov3-vits16-pretrain-lvd1689m
-   --local-dir external/dinov3/vits16` (likewise vitb16, vitl16); on Kaggle the `beegee11/vits16`, `beegee11/vitb16`,
+   --local-dir data/weights/dinov3/vits16` (likewise vitb16, vitl16); on Kaggle the `beegee11/vits16`, `beegee11/vitb16`,
    `beegee11/vitl16` model inputs are used in place. Override with `DINOV3_WEIGHTS=/path/to/model.safetensors`.
 2. Dataset: build WTBD-group / WTBD-official as below and upload them (zipped) as a Kaggle dataset. `--data` is required;
    a read-only input (Kaggle) is copied once into the project folder so label caches can be written.

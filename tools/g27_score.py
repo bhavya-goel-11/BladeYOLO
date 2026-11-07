@@ -35,7 +35,7 @@ N_BOOT = 2000
 ARMS = ["A0", "A1", "A2", "A3"]
 DATASETS = {
     "WTBD-group": dict(
-        data=os.path.join(ROOT, "external", "WTBD-group"), nc=6,
+        data=os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBD-group"), nc=6,
         groups={"test": os.path.join(ROOT, "runs", "analysis", "bootstrap", "wtbd_group", "groups.csv"),
                 "val": os.path.join(ROOT, "runs", "analysis", "bootstrap", "h5_last_val", "groups.csv")},
         runs={"A0": "rfdetrm768cos_wtbd_group_full", "A1": "rfdetrm768cos_cp_wtbd_group_full",
@@ -43,8 +43,8 @@ DATASETS = {
         others={"BladeYOLO-v2 (ViT-S)": "bladeyolo2_wtbd_group", "YOLO12-L": "yolo12l_wtbd_group",
                 "BladeYOLO-v2 without DINOv3": "bladeyolo2nodino_wtbd_group"}),
     "WTBlade-group": dict(
-        data=os.path.join(ROOT, "external", "WTBlade-group"), nc=7,
-        groups={s: os.path.join(ROOT, "external", "WTBlade-group", "groups.csv") for s in ("test", "val")},
+        data=os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBlade-group"), nc=7,
+        groups={s: os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBlade-group", "groups.csv") for s in ("test", "val")},
         runs={"A0": "rfdetrm640cos_wtblade_group_full", "A1": "rfdetrm640cos_cp_wtblade_group_full",
               "A2": "rfdetrm640cos_cp_d1_wtblade_group_full", "A3": "rfdetrm640cos_cp_d2_wtblade_group_full"},
         others={"BladeYOLO-v2 (ViT-B)": "bladeyolo2b_wtblade_group_last", "YOLO12-L": "yolo12l_wtblade_group"}),

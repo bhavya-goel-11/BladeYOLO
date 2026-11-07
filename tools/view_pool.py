@@ -39,7 +39,7 @@ import matching as mt  # noqa: E402
 import view_label_audit as va  # noqa: E402
 
 OUT = os.path.join(ROOT, "runs", "analysis", "novel", "view_pool")
-WTBD = os.path.join(ROOT, "external", "WTBD-group")
+WTBD = os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBD-group")
 
 
 TILE_NAMES = (
@@ -100,7 +100,7 @@ def main():
     ap.add_argument("--sources", nargs="+", default=None,
                     help="<dataset root>:<label-audit name> (the audit's transforms_v3.json supplies the pairs)")
     ap.add_argument("--export", default=None, metavar="DIR", help="export the real pairs and their images to DIR")
-    ap.add_argument("--cache", default=os.path.join(ROOT, ".dataset_cache"))
+    ap.add_argument("--cache", default=os.path.join(ROOT, "data", "cache"))
     ap.add_argument("--workers", type=int, default=3)
     args = ap.parse_args()
     if args.export:

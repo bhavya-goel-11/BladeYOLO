@@ -29,10 +29,10 @@ import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
-DATA = os.path.join(ROOT, "external", "WTBD-group")
+DATA = os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBD-group")
 CACHE = {"test": os.path.join(ROOT, "runs", "analysis", "bootstrap", "seeds_f25", "preds"),
          "val": os.path.join(ROOT, "runs", "analysis", "bootstrap", "v1_val_preds")}
-WTBLADE = os.path.join(ROOT, "external", "WTBlade-group")  # H18-W, cross-dataset replication
+WTBLADE = os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBlade-group")  # H18-W, cross-dataset replication
 
 
 def wtblade_cache(run):
@@ -243,7 +243,7 @@ def score_v1(n_boot=2000, seed=0, pairs=PAIRS, tag=""):
 
     imgs = bc.load_yolo_split(DATA, "test")
     files = sorted(imgs)
-    groups = [[files[i] for i in g] for g in bc.scene_groups(files, os.path.join(ROOT, ".dataset_cache"), 4)]
+    groups = [[files[i] for i in g] for g in bc.scene_groups(files, os.path.join(ROOT, "data", "cache"), 4)]
     nc = len(CLASSES)
     load = lambda n: {k: np.array(v).reshape(-1, 6) for k, v in json.load(open(os.path.join(CACHE["test"], n + ".json"))).items()}  # noqa: E731
     have = [p for p in pairs if os.path.exists(os.path.join(CACHE["test"], p[1] + ".json"))]

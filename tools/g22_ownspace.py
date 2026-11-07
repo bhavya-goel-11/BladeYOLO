@@ -21,8 +21,8 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 RUNS = os.path.join(ROOT, "runs", "detect", "BladeYOLO_WindSurface")
 OWN = os.path.join(ROOT, "runs", "analysis", "g22", "own")
 SPLITS = os.path.join(ROOT, "tools", "splits")
-WTBD = os.path.join(ROOT, "external", "WTBD-group")
-WTBLADE = os.path.join(ROOT, "external", "WTBlade-group")
+WTBD = os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBD-group")
+WTBLADE = os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBlade-group")
 # run -> (dataset key, data dir, subset file); only models whose checkpoints are local
 MODELS = {
     "rfdetrm_wtbd_group_f25": ("WTBD", WTBD, "wtbd_group_train_f25.txt"),

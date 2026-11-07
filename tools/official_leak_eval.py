@@ -12,7 +12,7 @@ Leak flags (a test image is "leaked" if a training image that the run actually t
   Wind Surface     pixel twin: correlation >= 0.99 of 48x48 grey images over the 8 flips/rotations, against the 2,570
                    training images left after the seeded 10% carve (rfdetr_v1.prepare_official, seed 0)
                    (tools/ws_pixel_twins.py -> ws_pixel.npz)
-  WTBlade-Defect   scene groups of tools/wtblade_groups.py (runs/analysis/wtblade/split_groups.csv): leaked if the test
+  data/blade-defect-benchmark/raw/WTBlade-Defect   scene groups of tools/wtblade_groups.py (runs/analysis/wtblade/split_groups.csv): leaked if the test
                    image's group holds an official-train image; "copy" if a Roboflow copy of the same source frame is
                    in train. 11 test images matched WTBD and were never grouped; they are left out of both subsets.
 
@@ -46,14 +46,14 @@ PIXEL_TWIN = 0.99
 THR_COL = {round(float(t), 2): i for i, t in enumerate(dm.IOU_THRS)}
 
 PROTOCOLS = [  # name, data dir, test folder, runs (label, run)
-    ("WTBD-official", os.path.join(ROOT, "external", "WTBD-official"), "test",
+    ("WTBD-official", os.path.join(ROOT, "data", "blade-defect-benchmark", "raw", "WTBD-official"), "test",
      [("YOLO12-L", "yolo12l_wtbd_official"), ("BladeYOLO-v2 (ours)", "bladeyolo2_wtbd_official"),
       ("RF-DETR-M 640, const", "rfdetrm640_wtbd_official"), ("RF-DETR-M 768, const", "rfdetrm768_wtbd_official"),
       ("RF-DETR-M 768, cosine", "rfdetrm768cos_wtbd_official"), ("RF-DETR-L 704, cosine", "rfdetrl704cos_wtbd_official")]),
-    ("Wind Surface Defect", os.path.join(ROOT, "WindSurface-Defect"), "val",
+    ("Wind Surface Defect", os.path.join(ROOT, "data", "blade-defect-benchmark", "raw", "WindSurface-Defect"), "val",
      [("RF-DETR-M 640, 60 ep const", "rfdetrm640_windsurface_official"),
       ("RF-DETR-M 640, 100 ep cosine", "rfdetrm640cos_windsurface_official")]),
-    ("WTBlade-Defect", os.path.join(ROOT, "WTBlade-Defect"), "test",
+    ("WTBlade-Defect", os.path.join(ROOT, "data", "blade-defect-benchmark", "raw", "WTBlade-Defect"), "test",
      [("RF-DETR-M 640, 25 ep const", "rfdetrm640_wtblade_defect_official"),
       ("RF-DETR-M 640, 40 ep cosine", "rfdetrm640cos_wtblade_defect_official")]),
 ]

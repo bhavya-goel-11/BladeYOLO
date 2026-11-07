@@ -150,7 +150,7 @@ def scene_groups(imgs, name, workers):
     if os.path.exists(path):
         return json.load(open(path))
     files = sorted(imgs)
-    groups = [[files[i] for i in g] for g in bc.scene_groups(files, os.path.join(ROOT, ".dataset_cache"), workers)]
+    groups = [[files[i] for i in g] for g in bc.scene_groups(files, os.path.join(ROOT, "data", "cache"), workers)]
     json.dump(groups, open(path, "w"))
     return groups
 
@@ -181,7 +181,7 @@ def main():
             for s, cache in (("train", "runs/analysis/novel/preds/WTBD-group/train"),
                              ("val", "runs/analysis/novel/preds/WTBD-group/val"),
                              ("test", "runs/analysis/bootstrap/wtbd_group/preds")):
-                imgs, preds = load(run, "external/WTBD-group", s, cache)
+                imgs, preds = load(run, "data/blade-defect-benchmark/leakfree/WTBD-group", s, cache)
                 groups = scene_groups(imgs, f"group_{s}", args.workers) if unit == "scene" else None
                 split[s] = units(imgs, preds, groups, aware)
             n = N_CAL[unit]
@@ -195,9 +195,9 @@ def main():
                                alarms_per_image=v["test"]["alarms_per_image"]) for a, v in c.items()]
 
             run = f"{model}_wtbd_official"
-            imgs, preds = load(run, "external/WTBD-official", "val", "runs/analysis/novel/preds/WTBD-official/val")
+            imgs, preds = load(run, "data/blade-defect-benchmark/raw/WTBD-official", "val", "runs/analysis/novel/preds/WTBD-official/val")
             val = units(imgs, preds, scene_groups(imgs, "official_val", args.workers) if unit == "scene" else None, aware)
-            imgs, preds = load(run, "external/WTBD-official", "test", "runs/analysis/bootstrap/wtbd_official/preds")
+            imgs, preds = load(run, "data/blade-defect-benchmark/raw/WTBD-official", "test", "runs/analysis/bootstrap/wtbd_official/preds")
             groups = scene_groups(imgs, "official_test", args.workers) if unit == "scene" else [[f] for f in imgs]
             dep = {}
             for name, want in (("test_with_twin", True), ("test_without_twin", False)):

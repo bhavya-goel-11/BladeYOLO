@@ -11,7 +11,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import bootstrap_ci as bc  # noqa: E402
 from subset_properties import spearman_perm  # noqa: E402
-DATA = os.path.join(ROOT, "external", "WTBD-group")
+DATA = os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBD-group")
 TABLE = os.path.join(ROOT, "runs", "analysis", "subset_properties", "table.csv")
 OUT = os.path.join(ROOT, "runs", "analysis", "h20")
 NC = 6

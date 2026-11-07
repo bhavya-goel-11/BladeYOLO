@@ -26,8 +26,8 @@ import detection_metrics as dm  # noqa: E402
 import matching as mt  # noqa: E402
 import view_label_audit as va  # noqa: E402
 
-OFFICIAL = os.path.join("external", "WTBD-official")  # relative, as the audit cache was built
-GROUP = os.path.join(ROOT, "external", "WTBD-group")
+OFFICIAL = os.path.join("data", "blade-defect-benchmark", "raw", "WTBD-official")  # relative, as the audit cache was built
+GROUP = os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBD-group")
 AUDIT = os.path.join(ROOT, "runs", "analysis", "novel", "label_audit", "wtbd", "transforms_v3.json")
 PREDS = os.path.join(ROOT, "runs", "analysis", "bootstrap", "seeds_f25", "preds")
 OUT = os.path.join(ROOT, "runs", "analysis", "extent")

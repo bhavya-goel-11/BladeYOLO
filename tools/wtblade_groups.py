@@ -11,7 +11,7 @@ train image. The official 7 classes are kept.
 Writes <out>/split_groups.csv (image path relative to the repo, subset, group, real_views = number of partners in
 the same subset that are a different view, i.e. a verified non-copy pair covering < SAME_VIEW) and report.json.
 Usage:
-    python tools/wtblade_groups.py WTBlade-Defect --out runs/analysis/wtblade
+    python tools/wtblade_groups.py data/blade-defect-benchmark/raw/WTBlade-Defect --out runs/analysis/wtblade
 """
 
 import argparse
@@ -43,7 +43,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("src", help="WTBlade-Defect folder (relative to the repo root, as in the view pool)")
     ap.add_argument("--out", default=os.path.join(ROOT, "runs", "analysis", "wtblade"))
-    ap.add_argument("--cache", default=os.path.join(ROOT, ".dataset_cache"))
+    ap.add_argument("--cache", default=os.path.join(ROOT, "data", "cache"))
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()

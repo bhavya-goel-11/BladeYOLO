@@ -1,8 +1,8 @@
 """DINOv3 sizes: the Hugging Face weights convert exactly to Meta's layout, and ViT-S/B/L build and fuse correctly.
 
-Needs the real weights (gated): external/dinov3/vit{s,b,l}16/model.safetensors from `hf download
-facebook/dinov3-vit?16-pretrain-lvd1689m --local-dir external/dinov3/vit?16`, and Meta's ViT-S .pth under
-external/dinov3/official/. Tests whose files are missing are skipped.
+Needs the real weights (gated): data/weights/dinov3/vit{s,b,l}16/model.safetensors from `hf download
+facebook/dinov3-vit?16-pretrain-lvd1689m --local-dir data/weights/dinov3/vit?16`, and Meta's ViT-S .pth under
+data/weights/dinov3/official/. Tests whose files are missing are skipped.
 """
 
 import glob
@@ -15,8 +15,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from models import dino_weights as dw  # noqa: E402
 
-HF = {s: os.path.join(ROOT, "external", "dinov3", f"vit{s}16", "model.safetensors") for s in "sbl"}
-OFFICIAL_S = (glob.glob(os.path.join(ROOT, "external", "dinov3", "official", "**", "dinov3_vits16_pretrain_*.pth"),
+HF = {s: os.path.join(ROOT, "data", "weights", "dinov3", f"vit{s}16", "model.safetensors") for s in "sbl"}
+OFFICIAL_S = (glob.glob(os.path.join(ROOT, "data", "weights", "dinov3", "official", "**", "dinov3_vits16_pretrain_*.pth"),
                         recursive=True) or [""])[0]
 
 

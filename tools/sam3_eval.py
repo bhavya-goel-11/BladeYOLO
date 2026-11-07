@@ -104,7 +104,7 @@ def predict(args):
 def score(args):
     import bootstrap_ci as bc
 
-    data = os.path.join(ROOT, "external", "WTBD-group")
+    data = os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBD-group")
     te = bc.load_yolo_split(data, "test")
     files = sorted(te)
     by_name = {os.path.basename(k): k for k in te}
@@ -156,7 +156,7 @@ def score(args):
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("mode", choices=("predict", "score"))
-    p.add_argument("--data", default=os.path.join(ROOT, "external", "WTBD-group", "data.yaml"))
+    p.add_argument("--data", default=os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBD-group", "data.yaml"))
     args = p.parse_args()
     predict(args) if args.mode == "predict" else score(args)
 

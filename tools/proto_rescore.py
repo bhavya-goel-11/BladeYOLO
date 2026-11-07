@@ -25,7 +25,7 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import bootstrap_ci as bc  # noqa: E402
 
-DATA = os.path.join(ROOT, "external", "WTBD-group")
+DATA = os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBD-group")
 RUNS = os.path.join(ROOT, "runs", "detect", "BladeYOLO_WindSurface")
 SPLITS = os.path.join(ROOT, "tools", "splits")
 PREDS = {"test": os.path.join(ROOT, "runs", "analysis", "bootstrap", "seeds_f25", "preds"),
@@ -53,7 +53,7 @@ def use_wtblade(frac="f25"):
     and their RF-DETR runs. Rare = the two classes with the fewest full-train boxes (burn 141, oil 149), the rule that
     gave WTBD's [3, 4]. OUT (train bank over all train images, test/val feature maps) is shared across fractions."""
     global DATA, PREDS, GROUPS, OUT, CLASSES, RARE, NC, PREFIX, RFDETR, RFDETR_VAL_PREDS
-    DATA = os.path.join(ROOT, "external", "WTBlade-group")
+    DATA = os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBlade-group")
     cache = os.path.join(ROOT, "runs", "analysis", "bootstrap", f"wtblade_{frac}")
     PREDS = {s: os.path.join(cache, s) for s in ("test", "val")}
     RFDETR_VAL_PREDS = PREDS["val"]

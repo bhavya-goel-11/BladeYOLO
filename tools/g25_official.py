@@ -31,13 +31,13 @@ G26 = {"WTBD-official": ["rfdetrm768cos_wtbd_official", "rfdetrl704cos_wtbd_offi
        "WTBlade-Defect": ["rfdetrm640cos_wtblade_defect_official"]}
 N_BOOT = 1000
 SETS = [  # name, data dir, test folder, runs, published references (mAP50, mAP50-95; percent)
-    ("WTBD-official", os.path.join(ROOT, "external", "WTBD-official"), "test",
+    ("WTBD-official", os.path.join(ROOT, "data", "blade-defect-benchmark", "raw", "WTBD-official"), "test",
      ["rfdetrm640_wtbd_official", "rfdetrm768_wtbd_official"],
      [("BladeYOLO-v2 (ours, Ultralytics eval, §12)", 84.0, 49.3), ("YOLO12-L (ours, §12)", 70.4, 38.8)]),
-    ("Wind Surface Defect", os.path.join(ROOT, "WindSurface-Defect"), "val",
+    ("Wind Surface Defect", os.path.join(ROOT, "data", "blade-defect-benchmark", "raw", "WindSurface-Defect"), "val",
      ["rfdetrm640_windsurface_official"],
      [("BladeYOLO (paper, Table V)", 86.5, 57.4), ("BladeYOLO-L, our best leaky reproduction (§2, Run 6, val)", 78.2, 46.9)]),
-    ("WTBlade-Defect", os.path.join(ROOT, "WTBlade-Defect"), "test",
+    ("WTBlade-Defect", os.path.join(ROOT, "data", "blade-defect-benchmark", "raw", "WTBlade-Defect"), "test",
      ["rfdetrm640_wtblade_defect_official"],
      [("BladeYOLO (paper, Table I, 3 seeds; its own 9:1 re-split of 5,326 images)", 85.8, 74.6),
       ("YOLOv12-L (paper, Table III baseline; same re-split)", 83.3, 71.9)]),

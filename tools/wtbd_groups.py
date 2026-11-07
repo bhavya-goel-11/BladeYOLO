@@ -8,7 +8,7 @@ two images are the same scene if verified (>= MIN_INLIERS inliers) or embedding 
   2. group split: connected same-scene groups assigned whole to train/val/test (class-stratified), audited until no
      held-out image matches a train image; written as <out>/split_groups.csv for tools/convert_wtbd.py --split-file
 Usage:
-    python tools/wtbd_groups.py "external/WTBD/WT blade defect dataset" --out runs/analysis/wtbd
+    python tools/wtbd_groups.py "data/blade-defect-benchmark/raw/WTBD-original/WT blade defect dataset" --out runs/analysis/wtbd
 """
 
 import argparse
@@ -30,7 +30,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("src")
     ap.add_argument("--out", default=os.path.join(ROOT, "runs", "analysis", "wtbd"))
-    ap.add_argument("--cache", default=os.path.join(ROOT, ".dataset_cache"))
+    ap.add_argument("--cache", default=os.path.join(ROOT, "data", "cache"))
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()

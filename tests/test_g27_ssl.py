@@ -13,7 +13,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import g27_ssl as S  # noqa: E402
 
-CKPT = os.path.join(ROOT, "external", "rfdetr", "rf-detr-medium.pth")
+CKPT = os.path.join(ROOT, "data", "weights", "rfdetr", "rf-detr-medium.pth")
 OUT = os.path.join(ROOT, "runs", "tests", "g27_ssl")
 IMGS = os.path.join(OUT, "imgs")
 
@@ -24,7 +24,7 @@ for r in (0.3, 0.5, 0.7):
 
 shutil.rmtree(OUT, ignore_errors=True)
 os.makedirs(IMGS)
-src = os.path.join(ROOT, "external", "WTBD-group", "train", "images")
+src = os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBD-group", "train", "images")
 for f in sorted(os.listdir(src))[:6]:
     shutil.copy2(os.path.join(src, f), IMGS)
 

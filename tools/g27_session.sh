@@ -13,7 +13,7 @@
 #   either, and every derived path (WTBD, WTBL, D1, D2, XWTBD, XWTBL) can be overridden too.
 # Python: `python` on Kaggle; locally .venv-rfdetr/bin/python if it exists, else `python`; PYTHON=... overrides.
 # COCO weights: RF-DETR downloads rf-detr-medium.pth into RF_HOME (default ~/.roboflow/models). Locally, without
-#   internet, put that file in external/rfdetr/; the script then sets RF_HOME there.
+#   internet, put that file in data/weights/rfdetr/; the script then sets RF_HOME there.
 # Work folders (prepared dataset copies) are per session: /kaggle/working/<session>/ or runs/work/<session>/.
 # Every variable is set here, so nothing depends on notebook cell magics. Any failing step stops the script.
 # A run whose preds_test.json and preds_val.json already exist is skipped, so rerunning an interrupted session resumes.
@@ -32,7 +32,7 @@ else
     if [ -z "${PYTHON:-}" ]; then
         if [ -x .venv-rfdetr/bin/python ]; then PYTHON=$PWD/.venv-rfdetr/bin/python; else PYTHON=python; fi
     fi
-    if [ -z "${RF_HOME:-}" ] && [ -f external/rfdetr/rf-detr-medium.pth ]; then export RF_HOME=$PWD/external/rfdetr; fi
+    if [ -z "${RF_HOME:-}" ] && [ -f data/weights/rfdetr/rf-detr-medium.pth ]; then export RF_HOME=$PWD/data/weights/rfdetr; fi
 fi
 WTBD=${WTBD:-$BENCH/leakfree/WTBD-group}
 WTBL=${WTBL:-$BENCH/leakfree/WTBlade-group}

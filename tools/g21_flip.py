@@ -26,8 +26,8 @@ import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 RUNS = os.path.join(ROOT, "runs", "detect", "BladeYOLO_WindSurface")
-WTBD = os.path.join(ROOT, "external", "WTBD-group")
-WTBLADE = os.path.join(ROOT, "external", "WTBlade-group")
+WTBD = os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBD-group")
+WTBLADE = os.path.join(ROOT, "data", "blade-defect-benchmark", "leakfree", "WTBlade-group")
 MODELS = {"WTBD": (WTBD, ["rfdetrm_wtbd_group_f25", "rfdetrm_rand3_wtbd_group_f25"]),
           "WTBlade": (WTBLADE, ["rfdetrm_wtblade_group_f08"] + [f"rfdetrm_rand{k}_wtblade_group_f08" for k in (1, 2, 3)])}
 N_BOOT = 2000
