@@ -1,0 +1,3913 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <meta name="author" content="Bhavya Goel" />
+  <title>Memorised Blades: data leakage inflates wind-turbine blade defect benchmarks, and tuning on them rewards it</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    /* CSS for citations */
+    div.csl-bib-body { }
+    div.csl-entry {
+      clear: both;
+      margin-bottom: 0em;
+    }
+    .hanging-indent div.csl-entry {
+      margin-left:2em;
+      text-indent:-2em;
+    }
+    div.csl-left-margin {
+      min-width:2em;
+      float:left;
+    }
+    div.csl-right-inline {
+      margin-left:2em;
+      padding-left:1em;
+    }
+    div.csl-indent {
+      margin-left: 2em;
+    }  </style>
+  <link rel="stylesheet" href="paper.css" />
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">Memorised Blades: data leakage inflates wind-turbine
+blade defect benchmarks, and tuning on them rewards it</h1>
+<p class="author">Bhavya Goel</p>
+<p class="date">Draft of 8 November 2026. Affiliation and contact to be
+added.</p>
+<div class="abstract">
+<div class="abstract-title">Abstract</div>
+<p>Public benchmarks for wind-turbine blade defect detection report
+85–92 mAP50. We audit the three most used, WTBD, Wind Surface Defect and
+WTBlade-Defect, with image retrieval, geometric verification and pixel
+correlation. We find that 78%, 84% and 92% of their official test images
+have a near-copy or same-scene image in the training split, because the
+datasets were augmented or tiled before a random split. A generic
+foundation detector (RF-DETR-M) with a standard recipe scores 90.4 mAP50
+on WTBD’s official split and 87.2 on WTBlade-Defect’s, above the
+published BladeYOLO on the latter (85.8), though below it on Wind
+Surface (81.0 vs 86.5). The same runs lose 24 and 40 points on the Wind
+Surface and WTBlade-Defect test images without a training twin: on
+WTBlade-Defect they score 98.2 on copies of training frames and 50.4 on
+images with no twin. Trained with the same recipe on a scene-grouped
+split of the same WTBD images, the detector falls from 90.4 / 61.2 to
+55.3 / 33.2 mAP50 / mAP50-95. A single step of recipe tuning against the
+official numbers raised the score on leaked images and lowered it on
+unseen ones on all three datasets, so leaderboard tuning on these splits
+rewards memorisation. We release two leak-free benchmarks with
+scene-level intervals. On them, frozen DINOv3 features account for the
+whole advantage of a modern YOLO variant at every label budget, and its
+deformable, selective-scan and loss components add nothing measurable.
+Fine-tuned RF-DETR leads on WTBD-group but not on WTBlade-group. We
+measure an annotation self-consistency ceiling of 84–87% on exact
+copies, a factor-of-two dependence of low-label results on which scenes
+are labelled, and a failure of conformal recall guarantees calibrated on
+seen scenes (31.5% missed against a promised 10%). Finally, more data
+from other sources does not replace target labels: a detector trained on
+26,065 twin-free images from other datasets reaches 17.7 class-agnostic
+AP50 on WTBD-group test, against 72.9 for 745 target images, and 2.4
+against 51.7 on WTBlade-group. A ledger of our pre-registered method
+tests, most of them failures, shows that the usual add-ons do not close
+the leak-free gap.</p>
+</div>
+</header>
+<h1 data-number="1" id="introduction"><span
+class="header-section-number">1</span> Introduction</h1>
+<p>Blade inspection by drone is one of the more mature applications of
+defect detection, and the published numbers suggest a nearly solved
+problem. BladeYOLO <span class="citation" data-cites="bladeyolo">[<a
+href="#ref-bladeyolo" role="doc-biblioref">1</a>]</span> reports 86.5 /
+57.4 mAP50 / mAP50-95 on Wind Surface Defect and 85.8 / 74.6 on
+WTBlade-Defect, and other recent architectures report similar levels
+<span class="citation" data-cites="gfdyolox gayolo kgpyolo">[<a
+href="#ref-gfdyolox" role="doc-biblioref">2</a>–<a href="#ref-kgpyolo"
+role="doc-biblioref">4</a>]</span>. This work began as an attempt to
+reproduce one of those results and build on it. The closest faithful
+reimplementation we could build stopped at about 52.6 / 28, and our next
+model reached 78.2 / 46.9, until we found that three-quarters of the
+validation images had a near-identical twin in the training set. That
+finding changed the question from “how do we beat this number?” to three
+others:</p>
+<ol type="1">
+<li>What do these benchmarks measure?</li>
+<li>How much of a reported score is memorisation of scenes seen in
+training?</li>
+<li>Once leakage is removed, what actually helps, and what limits the
+score?</li>
+</ol>
+<p>We answer them with an end-to-end audit and about two months of
+controlled experiments. Our contributions are measurements, not a new
+architecture. We tried to find a method that survives a second dataset,
+and did not; § 9 reports those attempts.</p>
+<ul>
+<li><strong>A leakage audit of the public blade benchmarks</strong>
+(Table 1, Fig. 3). A literature check found no earlier audit of these
+datasets. The check was not exhaustive.</li>
+<li><strong>The size of the inflation</strong>, on the same detector and
+recipe: leaked against no-twin test images (Table 3), and official
+against scene-grouped splits (Table 4, Fig. 10).</li>
+<li><strong>Evidence that tuning on leaky benchmarks selects for
+memorisation</strong> (Table 5, Fig. 8). This analysis is post hoc and
+covers one tuning step.</li>
+<li><strong>Two leak-free benchmarks</strong>, WTBD-group and
+WTBlade-group, with audited splits, scene groups and a scene bootstrap
+(§ 4), and baselines for RF-DETR, a DINOv3-fused YOLO and stock YOLO12-L
+(Table 7).</li>
+<li><strong>Controlled ablations</strong> that attribute the low-label
+and full-label advantage of a DINOv3-fused YOLO to the frozen features
+alone (Table 8, Fig. 12).</li>
+<li><strong>Measured ceilings</strong>: annotator self-consistency, box
+granularity, subset luck and error anatomy (§ 7).</li>
+<li><strong>A leave-one-dataset-out test</strong> with twin-free pools
+(§ 8), and a recall-guarantee failure caused by leaked calibration
+(Table 6).</li>
+<li><strong>A ledger of the method tests we ran or formally
+gated</strong>, including the failures (Table 21), and an account of how
+our own early numbers were wrong (§ 10).</li>
+</ul>
+<p>The authors of the papers we discuss followed common practice, which
+is to augment and then split at random. Our argument is about the
+protocol, not about them. We cannot say that any specific published
+number is due to memorisation, because those splits were not
+published.</p>
+<p>Fig. 1 shows how the parts of the study fit together.</p>
+<figure>
+<img src="figures/fig7_pipeline.png" style="width:92.0%"
+alt="Figure 1. Overview of the study. The audit produces scene groups and per-image twin flags. These define the leak-free splits and the leaked and no-twin subsets of the official test sets. All experiments share the same scoring." />
+<figcaption aria-hidden="true">Figure 1. Overview of the study. The
+audit produces scene groups and per-image twin flags. These define the
+leak-free splits and the leaked and no-twin subsets of the official test
+sets. All experiments share the same scoring.</figcaption>
+</figure>
+<h1 data-number="2" id="related-work"><span
+class="header-section-number">2</span> Related work</h1>
+<p><strong>Blade defect detection.</strong> Most work adapts YOLO
+variants with attention, wavelet, deformable or Mamba-style modules
+<span class="citation"
+data-cites="bladeyolo gfdyolox gayolo kgpyolo">[<a href="#ref-bladeyolo"
+role="doc-biblioref">1</a>–<a href="#ref-kgpyolo"
+role="doc-biblioref">4</a>]</span>, and several build on the DTU
+NordTank drone inspection imagery <span class="citation"
+data-cites="shihavuddin foster">[<a href="#ref-shihavuddin"
+role="doc-biblioref">5</a>, <a href="#ref-foster"
+role="doc-biblioref">6</a>]</span>. BladeYOLO fuses frozen DINOv3
+ViT-S/16 features into YOLOv12-L <span class="citation"
+data-cites="bladeyolo yolov12">[<a href="#ref-bladeyolo"
+role="doc-biblioref">1</a>, <a href="#ref-yolov12"
+role="doc-biblioref">7</a>]</span>, close in spirit to DINO-YOLO in
+civil engineering <span class="citation" data-cites="dinoyolo">[<a
+href="#ref-dinoyolo" role="doc-biblioref">8</a>]</span>. Data-descriptor
+papers have added new sets, notably WTBD <span class="citation"
+data-cites="wtbd">[<a href="#ref-wtbd"
+role="doc-biblioref">9</a>]</span> and WTBs2025 <span class="citation"
+data-cites="wtbs2025">[<a href="#ref-wtbs2025"
+role="doc-biblioref">10</a>]</span>. Training-free language-model
+inspection <span class="citation" data-cites="seeingunseen">[<a
+href="#ref-seeingunseen" role="doc-biblioref">11</a>]</span> and
+box-to-mask supervision <span class="citation"
+data-cites="boxes2pixels">[<a href="#ref-boxes2pixels"
+role="doc-biblioref">12</a>]</span> are recent directions, and we have
+not tested those specific claims on a leak-free split.</p>
+<p><strong>Leakage and near-duplicates.</strong> Near-duplicates between
+train and test are documented for CIFAR <span class="citation"
+data-cites="barz">[<a href="#ref-barz"
+role="doc-biblioref">13</a>]</span>, geospatial mapping data <span
+class="citation" data-cites="adimoolam">[<a href="#ref-adimoolam"
+role="doc-biblioref">14</a>]</span> and more generally as a source of
+irreproducible machine-learning results <span class="citation"
+data-cites="kapoor">[<a href="#ref-kapoor"
+role="doc-biblioref">15</a>]</span>; and a fresh test set can show lower
+accuracy than a reused one <span class="citation" data-cites="recht">[<a
+href="#ref-recht" role="doc-biblioref">16</a>]</span>. Long-tail
+memorisation is a mechanism by which rare test examples are classified
+correctly through similar training examples <span class="citation"
+data-cites="feldman">[<a href="#ref-feldman"
+role="doc-biblioref">17</a>]</span>. We apply this line of work to blade
+defect benchmarks, and add a same-detector measurement of what the leak
+buys and what tuning on it rewards.</p>
+<p><strong>Foundation detectors.</strong> RF-DETR <span class="citation"
+data-cites="rfdetr">[<a href="#ref-rfdetr"
+role="doc-biblioref">18</a>]</span> fine-tunes DINOv2 <span
+class="citation" data-cites="dinov2">[<a href="#ref-dinov2"
+role="doc-biblioref">19</a>]</span> end to end and is strong on
+Roboflow100-VL <span class="citation" data-cites="rf100vl">[<a
+href="#ref-rf100vl" role="doc-biblioref">20</a>]</span>. DINOv3 <span
+class="citation" data-cites="dinov3">[<a href="#ref-dinov3"
+role="doc-biblioref">21</a>]</span> offers frozen dense features.
+Fine-tuning can distort pretrained features under distribution shift
+<span class="citation" data-cites="lpft">[<a href="#ref-lpft"
+role="doc-biblioref">22</a>]</span>.</p>
+<p><strong>Label noise and granularity in evaluation.</strong> TedEval
+<span class="citation" data-cites="tedeval">[<a href="#ref-tedeval"
+role="doc-biblioref">23</a>]</span> handles split and merged instances
+in text detection. Box-annotation noise has been studied in detection
+evaluation <span class="citation" data-cites="murrugarra">[<a
+href="#ref-murrugarra" role="doc-biblioref">24</a>]</span> and in
+repeated labels <span class="citation" data-cites="tschirschwitz">[<a
+href="#ref-tschirschwitz" role="doc-biblioref">25</a>]</span>, and box
+regression can model its own uncertainty <span class="citation"
+data-cites="klloss">[<a href="#ref-klloss"
+role="doc-biblioref">26</a>]</span>. We measure the same kind of
+ambiguity from accidental repeated labels: independently annotated
+copies of the same image.</p>
+<p><strong>Calibration and subset variance.</strong> Conformal risk
+control <span class="citation" data-cites="crc">[<a href="#ref-crc"
+role="doc-biblioref">27</a>]</span> gives distribution-free guarantees
+under exchangeability, and has been applied to detection <span
+class="citation" data-cites="andeol">[<a href="#ref-andeol"
+role="doc-biblioref">28</a>]</span>. Few-shot detection results vary
+strongly with the sampled shots <span class="citation"
+data-cites="tfa">[<a href="#ref-tfa"
+role="doc-biblioref">29</a>]</span>; we measure that variance in a
+realistic low-label setting and test label-free selection <span
+class="citation" data-cites="freesel">[<a href="#ref-freesel"
+role="doc-biblioref">30</a>]</span>.</p>
+<p><strong>Multi-dataset and domain generalisation.</strong>
+Multi-dataset detection with partitioned label spaces <span
+class="citation" data-cites="multidataset">[<a href="#ref-multidataset"
+role="doc-biblioref">31</a>]</span> and training-domain model selection
+<span class="citation" data-cites="domainbed">[<a href="#ref-domainbed"
+role="doc-biblioref">32</a>]</span> inform our G27 and G28 designs.
+Copy-paste <span class="citation" data-cites="copypaste">[<a
+href="#ref-copypaste" role="doc-biblioref">33</a>]</span> is a known
+augmentation, and we test it only as a recipe component.</p>
+<h1 data-number="3" id="sec:audit"><span
+class="header-section-number">3</span> Datasets and the leakage
+audit</h1>
+<h2 data-number="3.1" id="datasets"><span
+class="header-section-number">3.1</span> Datasets</h2>
+<p>We work with the official classes of each dataset, because the
+taxonomies conflict (below). Fig. 2 shows random labelled examples and
+Table 1 summarises the audit.</p>
+<figure>
+<img src="figures/fig8_dataset_gallery.jpg" style="width:88.0%"
+alt="Figure 2. Random labelled training images from each dataset (fixed seed; the first three in each row are required to show a class not yet shown). Colour marks the class within a row. Note the differences in viewpoint and box style, from close-ups with one box (WTBD) to chains of small boxes along an edge (Wind Surface, Beijing) and very small boxes (WTBs2025). Black squares in WTBlade-Defect are the Roboflow export’s offline cutout augmentation. Source licences are in § 13." />
+<figcaption aria-hidden="true">Figure 2. Random labelled training images
+from each dataset (fixed seed; the first three in each row are required
+to show a class not yet shown). Colour marks the class within a row.
+Note the differences in viewpoint and box style, from close-ups with one
+box (WTBD) to chains of small boxes along an edge (Wind Surface,
+Beijing) and very small boxes (WTBs2025). Black squares in
+WTBlade-Defect are the Roboflow export’s offline cutout augmentation.
+Source licences are in § 13.</figcaption>
+</figure>
+<table>
+<caption>Table 1. The three benchmarks and their official splits. Unique
+images and scenes are from the content-based audit. A <em>twin</em> is a
+near-copy or same-scene image among the images the run trained
+on.</caption>
+
+<thead>
+<tr>
+<th>dataset</th>
+<th>files</th>
+<th>unique images</th>
+<th>independent scenes</th>
+<th>official split (train / val / test)</th>
+<th>test images with a training twin</th>
+<th>how the twin arises</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>WTBD <span class="citation" data-cites="wtbd">[<a href="#ref-wtbd"
+role="doc-biblioref">9</a>]</span></td>
+<td>1,065</td>
+<td>597</td>
+<td>~550</td>
+<td>745 / 159 / 161</td>
+<td><strong>125 / 161 (78%)</strong></td>
+<td>duplicate and augmented copies of one photo, split at random (seed
+42)</td>
+</tr>
+<tr>
+<td>Wind Surface Defect <span class="citation" data-cites="gfdyolox">[<a
+href="#ref-gfdyolox" role="doc-biblioref">2</a>]</span>, used by
+BladeYOLO</td>
+<td>3,570</td>
+<td>954</td>
+<td><strong>81</strong></td>
+<td>2,856 / 714 (val = test)</td>
+<td><strong>600 / 714 (84%)</strong> pixel twins (corr ≥ 0.99)</td>
+<td>1,785 originals plus one augmented copy each (550 pairs split across
+train and val); up to 44 tiles per drone photo (386 of 882 photos on
+both sides)</td>
+</tr>
+<tr>
+<td>WTBlade-Defect <span class="citation" data-cites="fengche">[<a
+href="#ref-fengche" role="doc-biblioref">34</a>]</span>, used by
+BladeYOLO</td>
+<td>10,660</td>
+<td>1,146</td>
+<td>803</td>
+<td>9,010 / 1,097 / 553</td>
+<td><strong>499 / 542 (92%)</strong> same scene; <strong>360
+(66%)</strong> copies of a training frame</td>
+<td>about 3 Roboflow augmentation copies per source frame; consecutive
+drone-video frames</td>
+</tr>
+</tbody>
+</table>
+<h2 data-number="3.2" id="audit-method"><span
+class="header-section-number">3.2</span> Audit method</h2>
+<p>Files cannot be compared by name or hash, because the copies are
+flipped, rotated, recoloured or re-encoded. We combine several
+signals:</p>
+<ol type="1">
+<li><strong>Retrieval:</strong> DINOv2 embeddings <span class="citation"
+data-cites="dinov2">[<a href="#ref-dinov2"
+role="doc-biblioref">19</a>]</span>, cosine nearest neighbours.</li>
+<li><strong>Geometric verification:</strong> flip-aware ORB matching
+with a RANSAC similarity transform, at least 25 inliers.</li>
+<li><strong>Pixel twins:</strong> correlation at 48 px over the eight
+flips and rotations, at least 0.99.</li>
+<li><strong>Provenance from file names:</strong> Roboflow source
+prefixes, <code>DJI_xxxx_r_c</code> tile coordinates, and
+<code>_0</code> / <code>_1</code> pairs.</li>
+<li><strong>Grouping:</strong> union-find over all of the above, with
+DINOv2 cosine ≥ 0.93 counted as same scene. Deduplication is
+non-chaining, so that a chain of weak matches cannot merge unrelated
+images.</li>
+</ol>
+<p>Example sheets were checked by eye for every dataset and outcome. On
+Wind Surface the first pixel comparison, flips only, found 532 of 714
+validation images (75%); adding rotations and restricting to the images
+actually trained on gives 600 (84%). The Wind Surface “no twin” subset
+has no near-identical copy in training, but most of it comes from drone
+photos with other tiles in training, so it is cleaner rather than
+leak-free.</p>
+<p>Fig. 3 shows test images and their training twins, drawn at
+random.</p>
+<figure>
+<img src="figures/fig10_twins.jpg" style="width:100.0%"
+alt="Figure 3. Official test images (blue tag) next to their training twins (black tag), drawn at random with a fixed seed from the leaked subsets. Labels are drawn as supplied. Row 1: WTBD, with DINOv2 cosine and ORB inliers. Row 2: Wind Surface _0 / _1 pairs split across the partition. Row 3: WTBlade-Defect Roboflow copies of one source frame." />
+<figcaption aria-hidden="true">Figure 3. Official test images (blue tag)
+next to their training twins (black tag), drawn at random with a fixed
+seed from the leaked subsets. Labels are drawn as supplied. Row 1: WTBD,
+with DINOv2 cosine and ORB inliers. Row 2: Wind Surface <code>_0</code>
+/ <code>_1</code> pairs split across the partition. Row 3:
+WTBlade-Defect Roboflow copies of one source frame.</figcaption>
+</figure>
+<h2 data-number="3.3" id="what-the-file-counts-hide"><span
+class="header-section-number">3.3</span> What the file counts hide</h2>
+<p>File count is a poor guide to the information in a dataset (Fig. 4).
+Wind Surface’s 3,570 files come from about 81 independent scenes, and
+all <code>surface_eye</code> boxes (412 in the raw files, 103 after
+deduplication) come from tiles of a single photo. Any
+<code>surface_eye</code> score on the original split, including
+published ones, was measured on tiles of a training photo. WTBD has far
+fewer files and far more independent scenes per class. Three more
+findings limit what can be merged:</p>
+<ul>
+<li><strong>Same-named classes do not match across datasets.</strong>
+Mutual crop retrieval between same-named classes is at most 0.33, apart
+from the two Beijing exports, which are the same data.</li>
+<li><strong>Datasets overlap under other names.</strong> WTBs2025 shares
+1,499 images with WTBlade-Defect under different class names (peeling →
+erosion). Beijing contains WTBD test photos.</li>
+<li><strong>Licences are not what the export pages say.</strong>
+“NORDTANK” is legible on many WTBlade-Defect nacelles, so the set
+contains DTU imagery <span class="citation" data-cites="shihavuddin">[<a
+href="#ref-shihavuddin" role="doc-biblioref">5</a>]</span>, which is CC
+BY-NC, while its Roboflow page states CC BY 4.0. It also contains
+synthetic copy-paste images.</li>
+</ul>
+<figure>
+<img src="figures/fig9_effective_size.png" style="width:96.0%"
+alt="Figure 4. Effective size. (a) Files, unique images and independent scenes per dataset. (b) Independent scenes with a learnable box, per class. A single scene supports Wind Surface’s surface_eye." />
+<figcaption aria-hidden="true">Figure 4. Effective size. (a) Files,
+unique images and independent scenes per dataset. (b) Independent scenes
+with a learnable box, per class. A single scene supports Wind Surface’s
+<code>surface_eye</code>.</figcaption>
+</figure>
+<p>The same augment-then-split pattern appears in other published work:
+130 DTU images expanded to 780 and then split 624 / 78 / 78 <span
+class="citation" data-cites="kgpyolo">[<a href="#ref-kgpyolo"
+role="doc-biblioref">4</a>]</span>, and CLAHE copies with a random 60 /
+40 split of repeated shots of one turbine <span class="citation"
+data-cites="gayolo">[<a href="#ref-gayolo"
+role="doc-biblioref">3</a>]</span>. BladeYOLO’s WTBlade numbers use its
+authors’ own 9:1 re-split of 5,326 images, which is not public <span
+class="citation" data-cites="bladeyolo">[<a href="#ref-bladeyolo"
+role="doc-biblioref">1</a>]</span>.</p>
+<h1 data-number="4" id="sec:benchmarks"><span
+class="header-section-number">4</span> Leak-free benchmarks, models and
+evaluation</h1>
+<h2 data-number="4.1" id="splits"><span
+class="header-section-number">4.1</span> Splits</h2>
+<p><strong>WTBD-group.</strong> The 1,065 WTBD images are split by scene
+into 745 / 159 / 161 images (the official sizes), with 1,109 / 240 / 235
+boxes and 224 / 60 / 58 scene groups. The split was audited until no
+held-out image matched train under DINOv2 and ORB verification.
+Fractions of 25% and 50% are nested subsets of training scenes.</p>
+<p><strong>WTBlade-group.</strong> From 10,527 WTBlade-Defect images
+(133 that match WTBD are left out, so the benchmarks share nothing), we
+form 841 groups from 2,791 source frames, verified pairs and DINOv2
+neighbours. A class-stratified 70 / 15 / 15 split over groups converged
+with no held-out or train match after 11 rounds of the audit. We keep
+one image per source frame, giving 2,136 / 323 / 332 frames, 5,237 / 729
+/ 748 boxes, and 177 test scenes, with all seven classes in every
+split.</p>
+<p><strong>A residual leak in our own splits.</strong> While building a
+later pool we added the pixel test to our audit and ran it on these
+splits. It found copies that DINOv2 and ORB had missed: 6 of 161 test
+and 6 of 159 validation images on WTBD-group, and 1 of 332 and 1 of 323
+on WTBlade-group (Fig. 5). All six WTBD-group test pairs are real copies
+by eye, re-exposed, darkened, tinted or rotated. Rescoring 116 cached
+WTBD-group runs without those images changes mAP50-95 by −0.62 on
+average (range −1.09 to +0.33) and mAP50 by −0.70, and 20 WTBlade-group
+runs by ±0.03. Our leak-free numbers are therefore inflated by under a
+point. We kept the splits unchanged, so that every comparison stays like
+for like, and report the G27 and G28 decisions both ways (§ 9, § 8).
+Neither changes. So a leak-free split needs the pixel test next to scene
+grouping, and “audited” is only as good as the audit.</p>
+<figure>
+<img src="figures/fig28_residual_twins.jpg" style="width:78.0%"
+alt="Figure 5. The residual leak in our WTBD-group test set: each pair is a test image and its pixel twin in train, with the correlation. Photometric copies defeat DINOv2 + ORB grouping." />
+<figcaption aria-hidden="true">Figure 5. The residual leak in our
+WTBD-group test set: each pair is a test image and its pixel twin in
+train, with the correlation. Photometric copies defeat DINOv2 + ORB
+grouping.</figcaption>
+</figure>
+<h2 data-number="4.2" id="models-and-recipes"><span
+class="header-section-number">4.2</span> Models and recipes</h2>
+<ul>
+<li><strong>YOLO12-L:</strong> COCO-pretrained, stock, CIoU loss, AdamW
+(lr 0.001, weight decay 0.01), cosine schedule, mosaic. 150 epochs on
+WTBD and 50 on WTBlade-group.</li>
+<li><strong>BladeYOLO-v2:</strong> our model, on the same recipe. A
+COCO-pretrained YOLOv12-L <span class="citation"
+data-cites="yolov12">[<a href="#ref-yolov12"
+role="doc-biblioref">7</a>]</span> with three zero-initialised residual
+additions, so that training starts exactly at the pretrained detector:
+frozen DINOv3 <span class="citation" data-cites="dinov3">[<a
+href="#ref-dinov3" role="doc-biblioref">21</a>]</span> features fused at
+P3 / P4 / P5, deformable refinement at P3 / P4 <span class="citation"
+data-cites="dcnv2">[<a href="#ref-dcnv2"
+role="doc-biblioref">35</a>]</span>, and four-direction selective scan
+at P5 <span class="citation" data-cites="vmamba mamba">[<a
+href="#ref-vmamba" role="doc-biblioref">36</a>, <a href="#ref-mamba"
+role="doc-biblioref">37</a>]</span>; WIoU v3 loss <span class="citation"
+data-cites="wiou">[<a href="#ref-wiou"
+role="doc-biblioref">38</a>]</span>. 53.7 M parameters with
+ViT-S/16.</li>
+<li><strong>RF-DETR-M:</strong> <code>rfdetr</code> 1.11.2 <span
+class="citation" data-cites="rfdetr">[<a href="#ref-rfdetr"
+role="doc-biblioref">18</a>]</span>, fine-tuned end to end from its COCO
+checkpoint. Batch 4 × accumulation 4 (effective 16), cosine schedule,
+EMA checkpoint selected on validation. WTBD at 768 px for 100 epochs;
+WTBlade at 640 px for 60 epochs.</li>
+</ul>
+<p>Runs used Kaggle Tesla T4 (fp16 mixed precision) and one A100 (bf16).
+All G27 seed-1 runs were on the A100 and seed-0 runs on Kaggle, so every
+pair of arms within a seed shares hardware.</p>
+<h2 data-number="4.3" id="evaluation"><span
+class="header-section-number">4.3</span> Evaluation</h2>
+<p><strong>Selection and reporting.</strong> Model selection uses
+validation only, and results are reported on test. Wind Surface has no
+separate test split, so we carve a seeded 10% of train for
+validation.</p>
+<p><strong>Evaluators.</strong> We use a 101-point COCO-style evaluator
+<span class="citation" data-cites="coco">[<a href="#ref-coco"
+role="doc-biblioref">39</a>]</span>
+(<code>tools/bootstrap_ci.py</code>). On identical predictions it agrees
+with Ultralytics’ <code>ap_per_class</code> within 0.4 points on every
+run and subset, so gaps to published figures are not an artefact of the
+metric. Ultralytics’ <code>val</code> reports differ by 1–2.5 points
+from cached predictions because of its rectangular-batch inference path.
+Tables state which is used.</p>
+<p><strong>Intervals.</strong> Test images of one scene are correlated,
+so on group splits we resample whole scenes, paired across models (2,000
+replicates unless noted). Official splits have no scene groups, so those
+intervals are image-level and therefore narrower than they should be.
+All intervals are 95%.</p>
+<p><strong>Three box scores.</strong> <em>Standard</em> AP is one-to-one
+matching at IoU ≥ 0.5. <em>Tolerant</em> AP lets one prediction match
+several same-class labels whose union it fits, and ignores fragments of
+an already found defect. <em>Region</em> AP is pixel-level precision and
+recall of the union of predicted boxes against the union of labels (4 px
+grid), so it does not depend on how a defect is split into boxes.</p>
+<p><strong>Pre-registration.</strong> From late October, hypotheses were
+written down with their pass bars before any run or computation, and
+committed. After a bad result we allow one scope check, on whether any
+part is usable, and then discard the hypothesis without rescue runs.
+Post hoc analyses are labelled as such.</p>
+<h1 data-number="5" id="sec:official"><span
+class="header-section-number">5</span> Official protocols: the scores
+and what they are made of</h1>
+<h2 data-number="5.1" id="our-numbers-against-published"><span
+class="header-section-number">5.1</span> Our numbers against
+published</h2>
+<p>Table 2 gives our scores on the official protocols. A generic
+detector with a standard recipe, and no blade-specific modules, reaches
+the level of the specialised models on two protocols, but not on Wind
+Surface.</p>
+<table>
+<caption>Table 2. Official protocols: this work against published. mAP50
+/ mAP50-95, single seed, selected on validation; intervals are
+image-level. BladeYOLO’s WTBlade numbers use its own unpublished 9:1
+re-split, so that row is not directly comparable.</caption>
+
+<thead>
+<tr>
+<th>protocol</th>
+<th>model</th>
+<th>mAP50 / mAP50-95 [95% CI]</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>WTBD-official (test 161)</td>
+<td>YOLO12-L (ours, Ultralytics)</td>
+<td>70.4 / 38.8</td>
+</tr>
+<tr>
+<td></td>
+<td>BladeYOLO-v2 (ours, Ultralytics)</td>
+<td>84.0 / 49.3</td>
+</tr>
+<tr>
+<td></td>
+<td>RF-DETR-M 768, constant LR (G25)</td>
+<td>90.5 [86.3, 94.4] / 60.2 [55.6, 65.3]</td>
+</tr>
+<tr>
+<td></td>
+<td><strong>RF-DETR-M 768, cosine (G26)</strong></td>
+<td><strong>90.4</strong> [85.8, 94.7] / <strong>61.2</strong> [56.5,
+66.1]</td>
+</tr>
+<tr>
+<td></td>
+<td>RF-DETR-L 704, cosine (G26)</td>
+<td>88.9 / 59.5</td>
+</tr>
+<tr>
+<td>Wind Surface (val 714)</td>
+<td>BladeYOLO <span class="citation" data-cites="bladeyolo">[<a
+href="#ref-bladeyolo" role="doc-biblioref">1</a>]</span></td>
+<td><strong>86.5 / 57.4</strong></td>
+</tr>
+<tr>
+<td></td>
+<td>our best leaky BladeYOLO-L</td>
+<td>78.2 / 46.9</td>
+</tr>
+<tr>
+<td></td>
+<td>RF-DETR-M 640, 60 ep, constant (G25)</td>
+<td>81.8 [78.0, 85.4] / 51.4 [48.3, 55.0]</td>
+</tr>
+<tr>
+<td></td>
+<td>RF-DETR-M 640, 100 ep, cosine (G26)</td>
+<td>81.0 [77.1, 84.9] / 53.3 [50.0, 57.0]</td>
+</tr>
+<tr>
+<td>WTBlade-Defect (test 553)</td>
+<td>BladeYOLO <span class="citation" data-cites="bladeyolo">[<a
+href="#ref-bladeyolo" role="doc-biblioref">1</a>]</span></td>
+<td>85.8 / <strong>74.6</strong></td>
+</tr>
+<tr>
+<td></td>
+<td>YOLOv12-L, as reported there</td>
+<td>83.3 / 71.9</td>
+</tr>
+<tr>
+<td></td>
+<td>RF-DETR-M 640, 25 ep, constant (G25)</td>
+<td>87.4 [84.4, 90.9] / 52.5 [49.6, 56.2]</td>
+</tr>
+<tr>
+<td></td>
+<td><strong>RF-DETR-M 640, 40 ep, cosine (G26)</strong></td>
+<td><strong>87.2</strong> [84.0, 90.6] / 55.1 [52.0, 59.1]</td>
+</tr>
+</tbody>
+</table>
+<p>To our knowledge, the WTBD-official row is the best reported on that
+protocol; the dataset paper itself gives no detection baselines <span
+class="citation" data-cites="wtbd">[<a href="#ref-wtbd"
+role="doc-biblioref">9</a>]</span>. On Wind Surface, our copy has 3,570
+images against the 3,790 reported by BladeYOLO, so the splits
+differ.</p>
+<p><strong>The mAP50-95 / mAP50 ratio.</strong> The ratio on WTBlade is
+0.87 in the BladeYOLO paper and 0.86 for its YOLOv12-L baseline.
+RF-DETR’s ratio on WTBlade copies of training frames is 0.71, on all
+official test images 0.63, and on no-twin images 0.34. Across all our
+leak-free runs it spans 0.41–0.60. A ratio of 0.87 sits above every one
+of these. This is consistent with near-duplicate copies falling on both
+sides of a random split, but it is not proof, because that split is not
+available.</p>
+<h2 data-number="5.2" id="leaked-and-no-twin-test-images"><span
+class="header-section-number">5.2</span> Leaked and no-twin test
+images</h2>
+<p>Using the per-image flags from the audit, we score the same official
+runs on the two subsets (Table 3, Fig. 6).</p>
+<table>
+<caption>Table 3. The same official runs on leaked and no-twin test
+images (COCO-style evaluator, mAP50 / mAP50-95 [95% CI], post hoc).
+Subset sizes (images / boxes): WTBD 125 / 185 leaked and 36 / 53 no
+twin; Wind Surface 600 / 1,169 and 114 / 158; WTBlade 499 / 1,235 and 43
+/ 91.</caption>
+
+<thead>
+<tr>
+<th>protocol, run</th>
+<th>all</th>
+<th>leaked</th>
+<th>no twin</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>WTBD-official, YOLO12-L</td>
+<td>69.0 / 37.7</td>
+<td>69.7 / 38.5</td>
+<td>70.0 / 35.2</td>
+</tr>
+<tr>
+<td>WTBD-official, BladeYOLO-v2</td>
+<td>81.5 / 48.1</td>
+<td>82.6 / 48.9</td>
+<td>81.5 / 47.8</td>
+</tr>
+<tr>
+<td>WTBD-official, RF-DETR-M 768 cosine</td>
+<td>90.4 / 61.2</td>
+<td>91.5 / 63.9</td>
+<td>81.6 [69.1, 93.2] / 49.9 [40.4, 61.1]</td>
+</tr>
+<tr>
+<td>Wind Surface, RF-DETR-M cosine</td>
+<td>81.0 / 53.3</td>
+<td>83.3 / 55.1</td>
+<td><strong>59.2</strong> [49.0, 68.1] / <strong>37.6</strong> [29.9,
+45.4]</td>
+</tr>
+<tr>
+<td>WTBlade-Defect, RF-DETR-M cosine</td>
+<td>87.2 / 55.1</td>
+<td>90.8 / 59.4</td>
+<td><strong>50.4</strong> [38.5, 64.0] / <strong>17.2</strong> [13.5,
+23.4]</td>
+</tr>
+<tr>
+<td>WTBlade-Defect, copies of a training frame (360)</td>
+<td></td>
+<td><strong>98.2</strong> [97.7, 98.8] / <strong>69.8</strong> [67.8,
+72.5]</td>
+<td></td>
+</tr>
+<tr>
+<td>WTBlade-Defect, same scene, not a copy (139)</td>
+<td></td>
+<td>65.7 / 30.1</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<figure>
+<img src="figures/fig1_leak_subsets.png" style="width:88.0%"
+alt="Figure 6. Official-protocol scores of the best RF-DETR-M run on leaked and no-twin test images. Bars show the COCO-style evaluator with image-bootstrap 95% intervals." />
+<figcaption aria-hidden="true">Figure 6. Official-protocol scores of the
+best RF-DETR-M run on leaked and no-twin test images. Bars show the
+COCO-style evaluator with image-bootstrap 95% intervals.</figcaption>
+</figure>
+<p>WTBlade-Defect’s official number is mostly its copies: 98.2 on copies
+of training frames and 50.4 with no same-scene training image. The
+independently built WTBlade-group benchmark agrees from a different
+direction: its RF-DETR-M runs score 16.1–17.3 mAP50-95 (Table 7) against
+17.2 here. Their 38.5–41.8 mAP50 is inside this small subset’s interval
+of [38.5, 64.0].</p>
+<p>WTBD’s no-twin subset is too small to read on its own: it holds a
+single box each of craze, thunderstrike and crack. Corrosion is the only
+class with a clear drop (AP50 97 to 54). The split comparison below is
+therefore the stronger evidence for WTBD.</p>
+<h2 data-number="5.3" id="same-detector-only-the-split-differs"><span
+class="header-section-number">5.3</span> Same detector, only the split
+differs</h2>
+<p>Table 4 and Fig. 7 compare models trained on the same 1,065 WTBD
+images, official against scene-grouped.</p>
+<table>
+<caption>Table 4. Same recipe, only the WTBD split differs. Test AP50 by
+class and overall mAP50 / mAP50-95. BladeYOLO-v2 and YOLO12-L use
+Ultralytics <code>val</code> and trained for 120 epochs on the official
+split and 150 on the group split. RF-DETR-M uses the COCO-style
+evaluator (seed 0), 768 px and 100 epochs on both splits, with an
+effective batch of 16 on both (2 × 8 and 4 × 4).</caption>
+
+<thead>
+<tr>
+<th>class</th>
+<th>BladeYOLO-v2 official</th>
+<th>BladeYOLO-v2 group</th>
+<th>YOLO12-L official</th>
+<th>YOLO12-L group</th>
+<th>RF-DETR-M official</th>
+<th>RF-DETR-M group</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>crack</td>
+<td>99.1</td>
+<td>38.1</td>
+<td>85.4</td>
+<td>38.4</td>
+<td>95.3</td>
+<td>61</td>
+</tr>
+<tr>
+<td>craze</td>
+<td>90.9</td>
+<td>7.6</td>
+<td>62.2</td>
+<td>6.5</td>
+<td>95.3</td>
+<td>9</td>
+</tr>
+<tr>
+<td>hide_craze</td>
+<td>80.0</td>
+<td>56.9</td>
+<td>63.9</td>
+<td>52.6</td>
+<td>80.3</td>
+<td>71</td>
+</tr>
+<tr>
+<td>surface_injure</td>
+<td>81.6</td>
+<td>74.7</td>
+<td>71.1</td>
+<td>62.9</td>
+<td>91.0</td>
+<td>83</td>
+</tr>
+<tr>
+<td>thunderstrike</td>
+<td>99.5</td>
+<td>98.0</td>
+<td>93.8</td>
+<td>41.8</td>
+<td>94.3</td>
+<td>64</td>
+</tr>
+<tr>
+<td>corrosion</td>
+<td>52.7</td>
+<td>53.8</td>
+<td>46.0</td>
+<td>60.8</td>
+<td>86.0</td>
+<td>46</td>
+</tr>
+<tr>
+<td><strong>all</strong></td>
+<td><strong>84.0 / 49.3</strong></td>
+<td><strong>54.8 / 24.5</strong></td>
+<td><strong>70.4 / 38.8</strong></td>
+<td><strong>43.8 / 20.6</strong></td>
+<td><strong>90.4 / 61.2</strong></td>
+<td><strong>55.3 / 33.2</strong></td>
+</tr>
+</tbody>
+</table>
+<figure>
+<img src="figures/fig3_wtbd_inflation.png" style="width:78.0%"
+alt="Figure 7. Inflation per class on WTBD for BladeYOLO-v2 and YOLO12-L, from the same recipe on the official and the group split." />
+<figcaption aria-hidden="true">Figure 7. Inflation per class on WTBD for
+BladeYOLO-v2 and YOLO12-L, from the same recipe on the official and the
+group split.</figcaption>
+</figure>
+<p>The inflation is model-independent: +29.2 mAP50 for BladeYOLO-v2,
++26.6 for YOLO12-L and +35.1 for RF-DETR-M, with mAP50-95 multiplied by
+2.0, 1.9 and 1.8. Fig. 10 (c) adds WTBlade: 87.2 / 55.1 officially and
+38.5 / 16.2 on WTBlade-group. That second pair is not a pure split
+comparison, because WTBlade-group also keeps one frame per source and 60
+rather than 40 epochs.</p>
+<h2 data-number="5.4"
+id="tuning-on-the-official-splits-rewards-memorisation"><span
+class="header-section-number">5.4</span> Tuning on the official splits
+rewards memorisation</h2>
+<p>Between G25 and G26 we made one tuning step in the usual spirit,
+moving to a cosine schedule (and on two protocols, longer training)
+because the official numbers improved. Table 5 decomposes what that step
+bought (post hoc).</p>
+<table>
+<caption>Table 5. What one tuning step bought. Paired image bootstrap, Δ
+mAP50-95 in points = G26 recipe − G25 recipe, same images. Interaction =
+Δ leaked − Δ no twin, with the subsets resampled
+independently.</caption>
+
+<thead>
+<tr>
+<th>protocol (change)</th>
+<th>Δ all</th>
+<th>Δ leaked</th>
+<th>Δ no twin</th>
+<th>interaction, P(&gt;0)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>WTBD-official (constant → cosine)</td>
+<td>+1.0 [−1.2, +3.0]</td>
+<td>+1.8 [−0.1, +4.0]</td>
+<td>−8.1 [−13.4, +0.2]</td>
+<td>+9.9 [+1.1, +15.8], 0.993</td>
+</tr>
+<tr>
+<td>Wind Surface (60 ep constant → 100 ep cosine)</td>
+<td>+1.8 [+0.5, +3.1]</td>
+<td>+2.3 [+0.9, +3.8]</td>
+<td>−1.5 [−4.2, +1.4]</td>
+<td>+3.8 [+0.7, +7.0], 0.988</td>
+</tr>
+<tr>
+<td>WTBlade-Defect (25 ep constant → 40 ep cosine)</td>
+<td>+2.6 [+1.1, +3.9]</td>
+<td>+3.5 [+2.0, +5.0]; copies +5.4 [+3.6, +7.0]</td>
+<td>−4.0 [−7.2, +0.1]</td>
+<td>+7.4 [+3.0, +11.1], 1.000</td>
+</tr>
+</tbody>
+</table>
+<figure>
+<img src="figures/fig2_tuning_memorisation.png" style="width:84.0%"
+alt="Figure 8. The tuning step of Table 5: gains sit on leaked images, and the same change lowers the no-twin score." />
+<figcaption aria-hidden="true">Figure 8. The tuning step of Table 5:
+gains sit on leaked images, and the same change lowers the no-twin
+score.</figcaption>
+</figure>
+<p>On every protocol the gain sits on leaked images, and the same change
+lowers the score on images without a twin. At mAP50 the change is −0.2
+to −0.8 overall and −5.0 to −6.0 on no-twin images. The interaction
+excludes zero on all three. This applies to our own G26 numbers, which
+stay in Table 2 labelled as what they are. Two confounds remain: on Wind
+Surface and WTBlade-Defect the epoch count also changed (on WTBD only
+the schedule changed, with the same pattern), and this is one tuning
+step, not a study of tuning in general.</p>
+<p>A second reading comes from the leaderboard itself. RF-DETR-M leads
+BladeYOLO-v2 on WTBD-official by +13.2 [+8.2, +17.4] mAP50-95 on all
+images, but by only +2.1 [−5.3, +19.8] on the 36 no-twin images, so that
+official lead is not established on unseen images.</p>
+<h2 data-number="5.5"
+id="consequence-for-deployment-leaked-calibration-breaks-recall-guarantees"><span
+class="header-section-number">5.5</span> Consequence for deployment:
+leaked calibration breaks recall guarantees</h2>
+<p>An inspection system should promise a bound on missed defects.
+Conformal risk control <span class="citation" data-cites="crc">[<a
+href="#ref-crc" role="doc-biblioref">27</a>]</span> picks a confidence
+threshold so that the expected share of missed defects is at most α. A
+defect counts as flagged if at least 50% of its box is covered by
+predictions above the threshold. We calibrate on seen or unseen scenes
+and always deploy on unseen scenes (Table 6, Fig. 9).</p>
+<table>
+<caption>Table 6. Conformal recall guarantee, target ≤ 10% missed
+(BladeYOLO-v2, 500 draws of 100 calibration images, or scene groups as
+units).</caption>
+
+<thead>
+<tr>
+<th>calibrated on</th>
+<th>deployed on</th>
+<th>realised miss rate</th>
+<th>draws violating</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>seen scenes (group train), image units</td>
+<td>unseen scenes</td>
+<td><strong>31.5%</strong></td>
+<td>100%</td>
+</tr>
+<tr>
+<td>seen scenes, scene units</td>
+<td>unseen scenes</td>
+<td>28.8%</td>
+<td>100%</td>
+</tr>
+<tr>
+<td>unseen scenes (group val), image units</td>
+<td>unseen scenes</td>
+<td>6.3%</td>
+<td>0%</td>
+</tr>
+<tr>
+<td>unseen scenes, scene units</td>
+<td>unseen scenes</td>
+<td>4.7%</td>
+<td>1%</td>
+</tr>
+<tr>
+<td>official val (leaky)</td>
+<td>official test, images with a twin</td>
+<td>12.6%</td>
+<td>91%</td>
+</tr>
+<tr>
+<td>official val (leaky)</td>
+<td>official test, no-twin images</td>
+<td><strong>25.9%</strong></td>
+<td>100%</td>
+</tr>
+</tbody>
+</table>
+<figure>
+<img src="figures/fig14_conformal.png" style="width:92.0%"
+alt="Figure 9. (a) Realised miss rate on new scenes, by calibration set. (b) Operating curve with scene units, calibrated on unseen scenes. At 0.1 false alarms per image BladeYOLO-v2 flags about 90% of defects on new scenes, YOLO12-L about 71%. One test set of 58 scenes; the curve has no interval." />
+<figcaption aria-hidden="true">Figure 9. (a) Realised miss rate on new
+scenes, by calibration set. (b) Operating curve with scene units,
+calibrated on unseen scenes. At 0.1 false alarms per image BladeYOLO-v2
+flags about 90% of defects on new scenes, YOLO12-L about 71%. One test
+set of 58 scenes; the curve has no interval.</figcaption>
+</figure>
+<p>Models are overconfident on what they memorised, so a threshold
+calibrated on seen scenes is too high for new data. The practical rule
+is that calibration data must be split by scene, as test data must. The
+honest calibration is cheap: 0.2 instead of 0.1 false alarms per image.
+With only 60 calibration and 58 deployment scenes from one site, the val
+and test groups are not perfectly exchangeable: YOLO12-L still misses
+12.3% with scene-unit calibration on unseen scenes, violated in 71% of
+draws.</p>
+<h1 data-number="6" id="sec:leakfree"><span
+class="header-section-number">6</span> Leak-free results: what
+helps</h1>
+<h2 data-number="6.1" id="the-benchmark-at-full-labels"><span
+class="header-section-number">6.1</span> The benchmark at full
+labels</h2>
+<p>Table 7, Fig. 10 and Fig. 11 give the benchmark, all with one
+evaluator.</p>
+<table>
+<caption>Table 7. Leak-free benchmark, full labels, test mAP50 /
+mAP50-95, COCO-style evaluator on cached predictions. YOLO12-L on
+WTBlade-group trained for 50 epochs, reached its best validation at
+epoch 43, and rose almost linearly until then (Fig. 15 f), so its row
+may understate it. No paired interval was computed for the
+cross-architecture comparisons in this table, so treat them as point
+estimates.</caption>
+
+<thead>
+<tr>
+<th>model</th>
+<th>WTBD-group (161 images, 58 scenes)</th>
+<th>WTBlade-group (332 frames, 177 scenes)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>YOLO12-L</td>
+<td>40.0 / 18.5</td>
+<td>32.2 / 13.3</td>
+</tr>
+<tr>
+<td>BladeYOLO-v2 without DINOv3</td>
+<td>31.8 / 15.2</td>
+<td>not run</td>
+</tr>
+<tr>
+<td>BladeYOLO-v2</td>
+<td>56.1 / 24.4 (ViT-S)</td>
+<td>41.8 / 18.0 (ViT-B)</td>
+</tr>
+<tr>
+<td>RF-DETR-M, A0, seeds 0 / 1</td>
+<td>55.3 / 33.2, 54.8 / 32.2</td>
+<td>38.5 / 16.2, 41.0 / 16.9</td>
+</tr>
+<tr>
+<td>RF-DETR-M + copy-paste, A1, seeds 0 / 1</td>
+<td>51.5 / 30.7, 58.5 / 32.7</td>
+<td>41.8 / 17.3, 39.3 / 16.5</td>
+</tr>
+<tr>
+<td>RF-DETR-M + copy-paste + in-domain SSL, A2</td>
+<td>49.6 / 27.4</td>
+<td>40.1 / 16.1</td>
+</tr>
+<tr>
+<td>RF-DETR-M + copy-paste + multi-dataset stage 1, A3</td>
+<td>55.3 / 33.2</td>
+<td>41.7 / 16.6</td>
+</tr>
+</tbody>
+</table>
+<figure>
+<img src="figures/fig17_benchmark.png" style="width:100.0%"
+alt="Figure 10. (a, b) Leak-free test scores by model (BYv2: BladeYOLO-v2; s0, s1: seeds). (c) RF-DETR-M on official and leak-free splits." />
+<figcaption aria-hidden="true">Figure 10. (a, b) Leak-free test scores
+by model (BYv2: BladeYOLO-v2; s0, s1: seeds). (c) RF-DETR-M on official
+and leak-free splits.</figcaption>
+</figure>
+<figure>
+<img src="figures/fig24_per_class.png" style="width:98.0%"
+alt="Figure 11. Per-class test AP50 on the leak-free benchmarks. Note the seed-to-seed swings within RF-DETR on rare classes (craze 9–25, thunderstrike 48–67), and BladeYOLO-v2’s thunderstrike 100, which rests on 3 test scenes." />
+<figcaption aria-hidden="true">Figure 11. Per-class test AP50 on the
+leak-free benchmarks. Note the seed-to-seed swings within RF-DETR on
+rare classes (craze 9–25, thunderstrike 48–67), and BladeYOLO-v2’s
+thunderstrike 100, which rests on 3 test scenes.</figcaption>
+</figure>
+<p>Four points stand out:</p>
+<ul>
+<li><strong>The ranking depends on the dataset.</strong> RF-DETR-M leads
+on WTBD-group by 8–9 mAP50-95 points over BladeYOLO-v2, but on
+WTBlade-group the frozen ViT-B BladeYOLO-v2 (18.0) is ahead of every
+RF-DETR run (16.1–17.3). A “generic detector is strongest” claim holds
+on one benchmark.</li>
+<li><strong>On WTBD the RF-DETR gain is box quality, not
+finding.</strong> mAP50 is level with BladeYOLO-v2 (55.3 and 54.8
+against 56.1) while mAP50-95 is 8–9 points higher. This matches the
+extent analysis in § 7.</li>
+<li><strong>Classification costs points on RF-DETR.</strong> Scoring A0
+with classes merged gives 66.1 / 40.5 on WTBD-group and 50.1 / 21.3 on
+WTBlade-group (Table 15), about 11 AP50 points above its class-aware
+score. BladeYOLO-v2’s class-agnostic and class-aware AP50 are about
+equal (56.3 against 56.1), while YOLO12-L shows a gap like RF-DETR’s
+(48.5 against 40.0).</li>
+<li><strong>The earlier BladeYOLO-v2 win over YOLO12-L rests largely on
+thunderstrike.</strong> The scene bootstrap gives +16.1 [+2.5, +28.4]
+mAP50 and +5.9 [+0.5, +16.9] mAP50-95, but without the two classes seen
+in at most 3 test scenes the mAP50 gain is +5.2 [−2.7, +13.5].</li>
+</ul>
+<h2 data-number="6.2"
+id="where-the-advantage-comes-from-dinov3-ablation"><span
+class="header-section-number">6.2</span> Where the advantage comes from:
+DINOv3 ablation</h2>
+<p>We removed only the frozen DINOv3 features from BladeYOLO-v2, keeping
+deformable refinement, selective scan and WIoU, at 25%, 50% and 100% of
+the labelled scenes (Table 8, Fig. 12).</p>
+<table>
+<caption>Table 8. DINOv3 ablation and learning curve, WTBD-group, test
+mAP50-95, scene bootstrap. Last row: stock YOLO12-L compared with our
+modules without DINOv3.</caption>
+
+<thead>
+<tr>
+<th></th>
+<th>25%</th>
+<th>50%</th>
+<th>100%</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>BladeYOLO-v2 (frozen DINOv3 ViT-S)</td>
+<td>7.6 (3 seeds)</td>
+<td>17.5</td>
+<td>24.2 (2 seeds)</td>
+</tr>
+<tr>
+<td>without DINOv3</td>
+<td>3.7 (2 seeds)</td>
+<td>8.8</td>
+<td>15.2</td>
+</tr>
+<tr>
+<td>YOLO12-L (stock)</td>
+<td>4.1</td>
+<td>9.9</td>
+<td>18.5</td>
+</tr>
+<tr>
+<td><strong>DINOv3 gain</strong></td>
+<td><strong>+3.9 [+2.5, +10.1]</strong></td>
+<td><strong>+8.8 [+4.0, +22.1]</strong></td>
+<td><strong>+9.0 [+4.0, +20.5]</strong></td>
+</tr>
+<tr>
+<td>same, 4 well-represented classes</td>
+<td>+4.4 [+2.3, +11.1]</td>
+<td>+6.1 [+2.2, +17.9]</td>
+<td>+4.9 [−1.8, +10.3]</td>
+</tr>
+<tr>
+<td>YOLO12-L − without DINOv3</td>
+<td>+0.4</td>
+<td>+1.1</td>
+<td>+3.3 [−0.2, +13.1]</td>
+</tr>
+</tbody>
+</table>
+<figure>
+<img src="figures/fig4_dinov3_learning_curve.png" style="width:74.0%"
+alt="Figure 12. Learning curves with and without frozen DINOv3 on WTBD-group. The modules around DINOv3 do not put the model above stock YOLO12-L." />
+<figcaption aria-hidden="true">Figure 12. Learning curves with and
+without frozen DINOv3 on WTBD-group. The modules around DINOv3 do not
+put the model above stock YOLO12-L.</figcaption>
+</figure>
+<p>Without DINOv3, BladeYOLO-v2 equals or trails stock YOLO12-L at every
+data size. The advantage is therefore the features, not the architecture
+around them. We first read it as a low-data advantage; the 50% and 100%
+runs corrected that, since the absolute gain does not shrink with data.
+Only the relative gain does (2.0× to 1.6×). This claim concerns our
+components. BladeYOLO’s exact Style Injection, WTConv and Cross-Mamba
+modules were reimplemented only before our code audit (§ 10), so we make
+no claim about them.</p>
+<p><strong>Backbone size at 25%</strong> (Table 9). A larger frozen
+backbone helps up to ViT-B, and ViT-L adds nothing further.</p>
+<table>
+<caption>Table 9. Frozen DINOv3 size at 25% of WTBD-group scenes. Test
+scores by Ultralytics <code>val</code>; differences by scene bootstrap,
+mAP50-95 in points.</caption>
+
+<thead>
+<tr>
+<th>backbone</th>
+<th>test mAP50 / mAP50-95 per seed</th>
+<th>difference</th>
+<th>Δ mAP50-95 [95% CI]</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ViT-S/16, 3 seeds</td>
+<td>23.2 / 8.2, 22.4 / 8.7, 18.4 / 6.8</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>ViT-B/16, 2 seeds</td>
+<td>25.2 / 10.2, 28.3 / 11.6</td>
+<td>ViT-B − ViT-S</td>
+<td>+2.8 [+0.4, +9.6]</td>
+</tr>
+<tr>
+<td>ViT-L/16, 2 seeds</td>
+<td>33.7 / 11.5, 30.1 / 10.9</td>
+<td>ViT-L − ViT-B</td>
+<td>+0.3 [−4.0, +3.1]</td>
+</tr>
+<tr>
+<td>without DINOv3, 2 seeds</td>
+<td>11.4 / 4.4, 8.1 / 3.1</td>
+<td>without − ViT-S</td>
+<td>−3.9 [−10.1, −2.5]</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Fine-tuned against frozen foundation features, 25% labels,
+same subsets.</strong> RF-DETR-M beats BladeYOLO-v2 ViT-B by +7.3 [+2.3,
++11.9] mAP50-95 (seed 0) and +8.3 [+4.5, +15.0] (seed 1), positive on 4
+of 4 subsets at each seed. As a controlled comparison, freezing
+RF-DETR’s encoder lowers test mAP50-95 from 18.9 to 12.3 on WTBD and
+from 13.2 to 8.7 on WTBlade. Input resolution (G24) adds +1.0 from 576
+to 768 on WTBD (P 0.958) and −0.1 on WTBlade, whose frames are natively
+640 px.</p>
+<h2 data-number="6.3" id="training-behaviour"><span
+class="header-section-number">6.3</span> Training behaviour</h2>
+<p>Fig. 15 shows validation curves from every recent run. RF-DETR peaks
+early and then drifts down, which is why EMA checkpoint selection
+matters. In contrast, YOLO12-L on WTBlade-group rises almost linearly
+until about epoch 43 of 50. Fig. 13 shows training and validation
+batches, and Fig. 14 confusion matrices and a PR curve. In the matrices,
+columns are true classes. The bottom row shows missed labels (crack 18%
+on WTBD-group and 27% on WTBlade-group for YOLO12-L), the right column
+shows where false positives go, and the strongest confusions involve
+rare classes (YOLO12-L calls 54% of thunderstrike labels craze on
+WTBD-group test).</p>
+<figure>
+<img src="figures/fig26_training_examples.jpg" style="width:100.0%"
+alt="Figure 13. BladeYOLO-v2 on WTBD-group, from the training run. Left: a training batch after mosaic and flips. Middle: a validation batch with its labels. Right: the same batch with predictions." />
+<figcaption aria-hidden="true">Figure 13. BladeYOLO-v2 on WTBD-group,
+from the training run. Left: a training batch after mosaic and flips.
+Middle: a validation batch with its labels. Right: the same batch with
+predictions.</figcaption>
+</figure>
+<figure>
+<img src="figures/fig27_diagnostics.jpg" style="width:84.0%"
+alt="Figure 14. Diagnostics from the runs. Normalised confusion matrices: BladeYOLO-v2 on WTBD-group validation, YOLO12-L on WTBD-group test, and YOLO12-L on WTBlade-group test. Bottom right: PR curves by class of BladeYOLO-v2 on WTBD-group validation." />
+<figcaption aria-hidden="true">Figure 14. Diagnostics from the runs.
+Normalised confusion matrices: BladeYOLO-v2 on WTBD-group validation,
+YOLO12-L on WTBD-group test, and YOLO12-L on WTBlade-group test. Bottom
+right: PR curves by class of BladeYOLO-v2 on WTBD-group
+validation.</figcaption>
+</figure>
+<figure>
+<img src="figures/fig15_training_curves.png" style="width:100.0%"
+alt="Figure 15. Training records. (a, b) Validation mAP50-95 of the G27 arms; dotted lines are seed 1. (c) Training loss of A0. (d) G28 ID arms on target validation. (e) G28 X arms on their own held-out 5%, not comparable with (d) since the images differ. (f) YOLO12-L on WTBlade-group." />
+<figcaption aria-hidden="true">Figure 15. Training records. (a, b)
+Validation mAP50-95 of the G27 arms; dotted lines are seed 1. (c)
+Training loss of A0. (d) G28 ID arms on target validation. (e) G28 X
+arms on their own held-out 5%, not comparable with (d) since the images
+differ. (f) YOLO12-L on WTBlade-group.</figcaption>
+</figure>
+<h1 data-number="7" id="sec:why"><span
+class="header-section-number">7</span> Why leak-free scores are low</h1>
+<h2 data-number="7.1" id="the-annotators-against-themselves"><span
+class="header-section-number">7.1</span> The annotators against
+themselves</h2>
+<p>WTBD’s augmented copies were annotated independently, so aligned
+copies of an image give accidental repeated labels. For every verified
+pair of the same surface we project each label through the transform
+(flip-aware ORB + RANSAC similarity, ≥ 25 inliers, at least 8 inliers
+inside the box) and classify it as agree (same class, IoU ≥ 0.5), class
+conflict, split, loose or missing. Fig. 16 shows examples and Table 10
+gives the rates.</p>
+<figure>
+<img src="figures/fig11_label_ambiguity.jpg" style="width:92.0%"
+alt="Figure 16. Annotation ambiguity on aligned copies. In each pair, left: a label (green). Right: its exact projection (yellow) and what the copy’s annotator drew (red). Top two rows: WTBD. Third row: WTBlade-Defect. Bottom row: Wind Surface. The disagreement is about extent and how a defect is cut into boxes, not about the class. The pairs come from the audit’s randomly ordered example sheets; “NORDTANK” is legible in the third row." />
+<figcaption aria-hidden="true">Figure 16. Annotation ambiguity on
+aligned copies. In each pair, left: a label (green). Right: its exact
+projection (yellow) and what the copy’s annotator drew (red). Top two
+rows: WTBD. Third row: WTBlade-Defect. Bottom row: Wind Surface. The
+disagreement is about extent and how a defect is cut into boxes, not
+about the class. The pairs come from the audit’s randomly ordered
+example sheets; “NORDTANK” is legible in the third row.</figcaption>
+</figure>
+<table>
+<caption>Table 10. Label self-consistency on axis-aligned copies of the
+same image (rotation within 3° of a multiple of 90°, flips included),
+where boxes map to boxes and every difference is an annotation
+difference. Rotated copies and other views of the surface agree less,
+but those strata also include geometric effects.</caption>
+
+<thead>
+<tr>
+<th>dataset</th>
+<th>labels</th>
+<th>agree</th>
+<th>split</th>
+<th>loose</th>
+<th>missing</th>
+<th>class conflicts</th>
+<th>rotated copies</th>
+<th>other views</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>WTBD</td>
+<td>2,965</td>
+<td><strong>87.3%</strong></td>
+<td>4.6%</td>
+<td>6.7%</td>
+<td>1.5%</td>
+<td>0</td>
+<td>77.9%</td>
+<td>64.1%</td>
+</tr>
+<tr>
+<td>WTBlade-Defect</td>
+<td>42,812</td>
+<td><strong>86.0%</strong></td>
+<td>2.5%</td>
+<td>8.2%</td>
+<td>3.1%</td>
+<td>91 (0.2%)</td>
+<td>80.7%</td>
+<td>59.8%</td>
+</tr>
+<tr>
+<td>Wind Surface</td>
+<td>10,261</td>
+<td><strong>83.8%</strong></td>
+<td>9.2%</td>
+<td>5.9%</td>
+<td>1.1%</td>
+<td>0</td>
+<td>(18 labels)</td>
+<td>44.2%</td>
+</tr>
+</tbody>
+</table>
+<p>So 13–16% of labels disagree with an exactly aligned copy, in all
+three datasets, including a double-annotated one (κ = 0.897 reported by
+its authors <span class="citation" data-cites="wtbd">[<a
+href="#ref-wtbd" role="doc-biblioref">9</a>]</span>). Almost none of it
+is class. The amorphous classes are the least consistent (Fig. 17).
+Counts are per label occurrence and concentrate in a few heavily
+duplicated scenes. On WTBlade the “missing” rate is mostly a matching
+artefact of rotating rotors in video (1.1% without dirt). Most of its 91
+class conflicts are pasted synthetic patches labelled peeling in one
+copy and crack in another.</p>
+<figure>
+<img src="figures/fig12_label_agreement.png" style="width:94.0%"
+alt="Figure 17. (a) Per-class agreement on aligned copies. (b) Box agreement on WTBD: how often an independent annotator’s box, or a detector’s best box, reaches IoU 0.5, and of those, how many reach 0.75. Conf ≥ 0.1 for detectors. RF-DETR-M at 25% labels matches the annotators on extent once it finds a defect (0.67 against 0.70; median IoU 0.83 for both)." />
+<figcaption aria-hidden="true">Figure 17. (a) Per-class agreement on
+aligned copies. (b) Box agreement on WTBD: how often an independent
+annotator’s box, or a detector’s best box, reaches IoU 0.5, and of
+those, how many reach 0.75. Conf ≥ 0.1 for detectors. RF-DETR-M at 25%
+labels matches the annotators on extent once it finds a defect (0.67
+against 0.70; median IoU 0.83 for both).</figcaption>
+</figure>
+<h2 data-number="7.2" id="box-granularity"><span
+class="header-section-number">7.2</span> Box granularity</h2>
+<p>On WTBD-group, tolerant AP50 exceeds standard AP50 by +11.9 for
+BladeYOLO-v2 (56.1 → 68.0) and +12.4 for YOLO12-L (40.0 → 52.4). Most
+striking is craze, from 9.9 to 66.1. All 15 craze test images are
+rotated, flipped or recoloured copies of one long leading-edge split,
+annotated as 2–3 segment boxes (Fig. 18). The same effect holds for
+RF-DETR scored with classes merged: AP50 rises from 66.1 to 79.7 on
+WTBD-group and from 50.1 to 61.2 on WTBlade-group (Table 15).</p>
+<figure>
+<img src="figures/fig13_craze_scene.jpg" style="width:78.0%"
+alt="Figure 18. All 15 WTBD-group craze test images come from one scene. Red: labels, split into segments by the annotator. Blue: BladeYOLO-v2 predictions. The model often draws one box where the label has several, which counts as an error at IoU 0.5 and explains most of the “craze failure”." />
+<figcaption aria-hidden="true">Figure 18. All 15 WTBD-group craze test
+images come from one scene. Red: labels, split into segments by the
+annotator. Blue: BladeYOLO-v2 predictions. The model often draws one box
+where the label has several, which counts as an error at IoU 0.5 and
+explains most of the “craze failure”.</figcaption>
+</figure>
+<p>Table 11 gives the per-class view for BladeYOLO-v2.</p>
+<table>
+<caption>Table 11. Three box scores on WTBD-group test, in percent (500
+scene replicates). Per class: BladeYOLO-v2. The official-split rows use
+the same scores, and the official-minus-group gap shrinks as the metric
+becomes split-invariant (BladeYOLO-v2: +25.4, +20.9, +16.8).</caption>
+
+<thead>
+<tr>
+<th></th>
+<th>standard AP50</th>
+<th>tolerant AP50</th>
+<th>region AP</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>BladeYOLO-v2, WTBD-group</td>
+<td>56.1 [48.3, 79.1]</td>
+<td>68.0 [60.4, 83.1]</td>
+<td>60.3 [55.2, 74.3]</td>
+</tr>
+<tr>
+<td>YOLO12-L, WTBD-group</td>
+<td>40.0 [33.9, 67.8]</td>
+<td>52.4 [46.5, 74.0]</td>
+<td>44.1 [40.2, 59.2]</td>
+</tr>
+<tr>
+<td>difference</td>
+<td>+16.1 [+2.3, +28.4]</td>
+<td>+15.6 [+0.1, +23.7]</td>
+<td><strong>+16.2 [+7.7, +23.6]</strong></td>
+</tr>
+<tr>
+<td>BladeYOLO-v2, WTBD official</td>
+<td>81.5</td>
+<td>88.9</td>
+<td>77.1</td>
+</tr>
+<tr>
+<td>YOLO12-L, WTBD official</td>
+<td>69.0</td>
+<td>80.0</td>
+<td>66.6</td>
+</tr>
+<tr>
+<td>craze</td>
+<td>9.9</td>
+<td><strong>66.1</strong></td>
+<td>42.7</td>
+</tr>
+<tr>
+<td>corrosion</td>
+<td>62.6</td>
+<td>67.6</td>
+<td>68.4</td>
+</tr>
+<tr>
+<td>surface_injure</td>
+<td>75.9</td>
+<td>81.6</td>
+<td>68.9</td>
+</tr>
+<tr>
+<td>thunderstrike</td>
+<td>100.0</td>
+<td>100.0</td>
+<td>68.2</td>
+</tr>
+<tr>
+<td>crack</td>
+<td>35.2</td>
+<td>35.6</td>
+<td>49.1</td>
+</tr>
+<tr>
+<td>hide_craze</td>
+<td>53.0</td>
+<td>56.8</td>
+<td>64.5</td>
+</tr>
+</tbody>
+</table>
+<p>Two limits apply. We hypothesised that part of the leakage inflation
+is memorised box splitting, and tested it: the tolerant gain is not
+smaller on test images with a training twin, so the hypothesis is not
+supported. And training a detector to tolerate splitting does not help
+overall: blanket split-tolerant training is not an improvement (tolerant
+AP50 +1.5 [−11.1, +6.4]), and class-selective tolerance raises corrosion
+by +9.3 [−0.3, +24.6] while the mean moves by −0.4. So the ambiguity
+limits what can be measured more than what can be trained away.</p>
+<p><strong>Annotators as a ceiling.</strong> Corrosion copies agree on
+only 69% of labels and models score near that (BladeYOLO-v2 AP50 54–63),
+so more corrosion “improvement” is largely unmeasurable with these
+labels. Crack copies agree on 95% while the YOLO family scores 35–39, so
+crack is a genuine model weakness there.</p>
+<h2 data-number="7.3" id="subset-luck"><span
+class="header-section-number">7.3</span> Subset luck</h2>
+<p>At a fixed budget of 25% of scenes, which scenes are labelled matters
+more than any model effect we measured (Fig. 19). Across 8 random draws,
+with the same model, recipe and seed, ViT-B test mAP50-95 spans 9.0–19.6
+(×2.2), and without DINOv3 it spans 2.6–7.2. The DINOv3 gain holds on 8
+of 8 draws (+7.1 [+5.1, +12.6]), and draw quality carries over between
+models (Spearman ρ 0.71). Yet no label-free subset property we tested
+predicts it (H7, G16, H20). Label-free scene selection by patch coverage
+beats random by +5.2 [+1.9, +10.5] but does not separate from FreeSel
+<span class="citation" data-cites="freesel">[<a href="#ref-freesel"
+role="doc-biblioref">30</a>]</span> (+2.1 [−1.2, +9.1], P 0.917,
+validation opposite).</p>
+<p>Table 12 gives the selection runs at the same 25% budget. Selecting
+by class balance does worst of the five arms, which suggests that which
+scenes are labelled matters more than matching class counts.</p>
+<table>
+<caption>Table 12. Selection of which 25% of WTBD-group scenes to label:
+18 ViT-B runs at the same budget, training seed 0 unless noted. Random
+draws per run: 11.2, 13.5, 11.8, 12.3, 9.0, 10.0, 12.4, 19.6.</caption>
+
+<thead>
+<tr>
+<th>arm (runs)</th>
+<th>test mAP50</th>
+<th>test mAP50-95</th>
+<th>val mAP50-95</th>
+<th>rank among 8 random (test / val)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>patch coverage, label-free (4)</td>
+<td>40.6</td>
+<td><strong>17.7</strong></td>
+<td>23.6</td>
+<td>2 of 9 / 3 of 9</td>
+</tr>
+<tr>
+<td>FreeSel-224 (2)</td>
+<td>42.9</td>
+<td>15.6</td>
+<td><strong>27.1</strong></td>
+<td>2 of 9 / 1 of 9</td>
+</tr>
+<tr>
+<td>FreeSel-640 (2)</td>
+<td>34.4</td>
+<td>14.5</td>
+<td>26.6</td>
+<td>2 of 9 / 2 of 9</td>
+</tr>
+<tr>
+<td>random (8)</td>
+<td>31.3</td>
+<td>12.5</td>
+<td>21.6</td>
+<td></td>
+</tr>
+<tr>
+<td>class-matched, uses labels (2)</td>
+<td>25.3</td>
+<td>10.4</td>
+<td>19.7</td>
+<td>7 of 9 / 7 of 9</td>
+</tr>
+</tbody>
+</table>
+<figure>
+<img src="figures/fig5_subset_luck.png" style="width:72.0%"
+alt="Figure 19. Subset luck: test mAP50-95 across random 25% scene draws, same model, recipe and seed." />
+<figcaption aria-hidden="true">Figure 19. Subset luck: test mAP50-95
+across random 25% scene draws, same model, recipe and seed.</figcaption>
+</figure>
+<h2 data-number="7.4" id="error-anatomy"><span
+class="header-section-number">7.4</span> Error anatomy</h2>
+<p>Scarce labels fail differently by detector family (Fig. 20, in the
+style of TIDE <span class="citation" data-cites="tide">[<a
+href="#ref-tide" role="doc-biblioref">40</a>]</span>). For each test box
+we ask whether a same-class box at IoU ≥ 0.5 is among the outputs and
+how it is scored.</p>
+<figure>
+<img src="figures/fig6_error_anatomy.png" style="width:84.0%"
+alt="Figure 20. Error anatomy. Hit: same-class box at IoU ≥ 0.5 with confidence ≥ 0.1. Ranked low: such a box exists only below 0.1. Other class: only other-class boxes at IoU ≥ 0.5. No box: nothing at IoU ≥ 0.5." />
+<figcaption aria-hidden="true">Figure 20. Error anatomy. Hit: same-class
+box at IoU ≥ 0.5 with confidence ≥ 0.1. Ranked low: such a box exists
+only below 0.1. Other class: only other-class boxes at IoU ≥ 0.5. No
+box: nothing at IoU ≥ 0.5.</figcaption>
+</figure>
+<p>Table 13 gives the numbers and Table 14 the extent comparison.</p>
+<table>
+<caption>Table 13. Error anatomy, as a share of test boxes. Candidate
+recall = hit + ranked low. YOLO-family runs keep fewer boxes after NMS
+(about 50–80 per image) than RF-DETR (about 300), so recall within each
+image’s top 50 boxes is also given.</caption>
+
+<thead>
+<tr>
+<th>dataset</th>
+<th>detector</th>
+<th>hit</th>
+<th>ranked low</th>
+<th>other class</th>
+<th>no box</th>
+<th>candidate recall</th>
+<th>in top 50</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>WTBD</td>
+<td>RF-DETR-M 25% (4 subsets)</td>
+<td>0.55</td>
+<td><strong>0.37</strong></td>
+<td>0.04</td>
+<td>0.04</td>
+<td><strong>0.92</strong></td>
+<td>0.81</td>
+</tr>
+<tr>
+<td>WTBD</td>
+<td>ViT-B 25% (4 subsets)</td>
+<td>0.41</td>
+<td>0.26</td>
+<td>0.15</td>
+<td>0.18</td>
+<td>0.67</td>
+<td>0.66</td>
+</tr>
+<tr>
+<td>WTBD</td>
+<td>BladeYOLO-v2 100% (2 seeds)</td>
+<td>0.63</td>
+<td>0.17</td>
+<td>0.08</td>
+<td>0.12</td>
+<td>0.80</td>
+<td>0.80</td>
+</tr>
+<tr>
+<td>WTBlade</td>
+<td>RF-DETR-M 25% (4 subsets)</td>
+<td>0.55</td>
+<td>0.28</td>
+<td>0.03</td>
+<td>0.14</td>
+<td><strong>0.83</strong></td>
+<td>0.72</td>
+</tr>
+<tr>
+<td>WTBlade</td>
+<td>RF-DETR-M 8% (4 subsets)</td>
+<td>0.43</td>
+<td>0.33</td>
+<td>0.07</td>
+<td>0.16</td>
+<td>0.77</td>
+<td>0.62</td>
+</tr>
+<tr>
+<td>WTBlade</td>
+<td>ViT-B 100%</td>
+<td>0.58</td>
+<td>0.27</td>
+<td>0.06</td>
+<td>0.09</td>
+<td>0.85</td>
+<td>0.81</td>
+</tr>
+</tbody>
+</table>
+<table>
+<caption>Table 14. Box extent against the annotator ceiling on WTBD
+(same-class IoU of a label with its copy, or of the best prediction with
+conf ≥ 0.1, per test box). RF-DETR-M’s gap is in finding defects; once
+found, its boxes match labels as well as a second annotator’s do. The
+YOLO-family runs were extent-limited.</caption>
+
+<thead>
+<tr>
+<th>source</th>
+<th>boxes</th>
+<th>IoU ≥ 0.5</th>
+<th>of those, IoU ≥ 0.75</th>
+<th>median IoU of those</th>
+<th>IoU ≥ 0.75</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>annotators, all copies</td>
+<td>2,965</td>
+<td>0.87</td>
+<td>0.70</td>
+<td>0.83</td>
+<td>0.61</td>
+</tr>
+<tr>
+<td>annotators, test copies</td>
+<td>392</td>
+<td>0.91</td>
+<td>0.75</td>
+<td>0.84</td>
+<td>0.68</td>
+</tr>
+<tr>
+<td>RF-DETR-M 25% (4 subsets)</td>
+<td>940</td>
+<td>0.55</td>
+<td>0.67</td>
+<td>0.83</td>
+<td>0.37</td>
+</tr>
+<tr>
+<td>ViT-B 25% (4 subsets)</td>
+<td>940</td>
+<td>0.41</td>
+<td>0.45</td>
+<td>0.73</td>
+<td>0.19</td>
+</tr>
+<tr>
+<td>BladeYOLO-v2 100%</td>
+<td>235</td>
+<td>0.63</td>
+<td>0.47</td>
+<td>0.74</td>
+<td>0.29</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>RF-DETR at 25% labels proposes the right box for most
+defects.</strong> Candidate recall is 0.92 on WTBD (above BladeYOLO-v2
+at 100%, 0.80) and 0.83 on WTBlade. Its deficit is scoring: 37% of WTBD
+test defects have a correct box scored below 0.1.</li>
+<li><strong>On WTBD the rare classes are confused</strong>, with crack
+missed or mislabelled and thunderstrike found under other classes (54%
+located as another class, in 4 subsets). On WTBlade, 43–49% of crack
+boxes lack a same-class box at IoU ≥ 0.5 at every budget (RF-DETR 8%:
+0.47; 25%: 0.49; ViT-B 100%: 0.43). So this is not a label-budget
+problem. Misses concentrate on small boxes (1.00 below 16 px, 0.65 below
+32 px, 0.22 above 64 px), and among near-misses the largest share is
+shifted boxes (44%), not split ones.</li>
+<li><strong>Not resolution, on WTBD.</strong> Median defect short sides
+at 640 px are 62–148 px by class.</li>
+</ul>
+<h1 data-number="8" id="sec:lodo"><span
+class="header-section-number">8</span> Leave-one-dataset-out: data
+volume does not replace target labels</h1>
+<p>If label count were the bottleneck, pooling every other blade dataset
+should help. G28 tests this directly. It was pre-registered before any
+pool was built or run started.</p>
+<h2 data-number="8.1" id="design"><span
+class="header-section-number">8.1</span> Design</h2>
+<p>For each target T, two class-agnostic RF-DETR-M arms (640 px, cosine,
+seed 0) are scored on T’s test set:</p>
+<ul>
+<li><strong>ID-T:</strong> T’s group train (WTBD 100 epochs, WTBlade
+60).</li>
+<li><strong>X-T:</strong> every other source, twin-free against
+<em>all</em> of T, 12 epochs. Selection uses a held-out 5% of X-T’s own
+images <span class="citation" data-cites="domainbed">[<a
+href="#ref-domainbed" role="doc-biblioref">32</a>]</span>; T is never
+seen, not even for selection.</li>
+</ul>
+<p>Every image of T is an evaluation key for the twin rule: same file,
+DINOv2 ≥ 0.90, ORB ≥ 25 inliers, pixel correlation ≥ 0.97 over 8
+orientations, and the closure of all of these. GAN images and box-less
+images are dropped. The rule deliberately sits below the audit’s twin
+thresholds (0.93 and 0.99): earlier versions of this rule, on the G27
+pool, kept 830 pixel twins and then neighbouring video frames, and each
+failure was logged and fixed before any training. Fig. 21 shows the
+result: X-WTBD has 26,065 training images (55,845 boxes across its train
+and held-out images) and X-WTBlade 14,405 (27,844). Fig. 22 shows the
+closest pairs an independent audit could find; the highest pixel
+correlation and cosine to any target image are 0.964 / 0.827 and 0.970 /
+0.900.</p>
+<figure>
+<img src="figures/fig20_pools.png" style="width:90.0%"
+alt="Figure 21. Composition of the G28 pools: images kept from each source and removed by the twin rule. For X-WTBlade, 2,964 WTBs2025 images are removed, since that dataset contains WTBlade-Defect’s images." />
+<figcaption aria-hidden="true">Figure 21. Composition of the G28 pools:
+images kept from each source and removed by the twin rule. For
+X-WTBlade, 2,964 WTBs2025 images are removed, since that dataset
+contains WTBlade-Defect’s images.</figcaption>
+</figure>
+<figure>
+<img src="figures/fig21_pool_audit.jpg" style="width:72.0%"
+alt="Figure 22. Independent audit of the X-WTBlade pool: the closest remaining pairs by pixel correlation between a kept pool image and a target image. By eye these are similar blades, not copies. The same physical defect from another flight cannot be excluded without capture metadata." />
+<figcaption aria-hidden="true">Figure 22. Independent audit of the
+X-WTBlade pool: the closest remaining pairs by pixel correlation between
+a kept pool image and a target image. By eye these are similar blades,
+not copies. The same physical defect from another flight cannot be
+excluded without capture metadata.</figcaption>
+</figure>
+<p>We define the gaps
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>G</mi><mrow><mi mathvariant="normal">s</mi><mi mathvariant="normal">t</mi><mi mathvariant="normal">d</mi></mrow></msub><mo>=</mo><mrow><mi mathvariant="normal">I</mi><mi mathvariant="normal">D</mi></mrow><mo>−</mo><mi mathvariant="normal">X</mi></mrow><annotation encoding="application/x-tex">G_{\mathrm{std}} = \mathrm{ID} - \mathrm{X}</annotation></semantics></math>
+in standard AP50 and
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>G</mi><mrow><mi mathvariant="normal">r</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">g</mi></mrow></msub><mo>=</mo><mrow><mi mathvariant="normal">I</mi><mi mathvariant="normal">D</mi></mrow><mo>−</mo><mi mathvariant="normal">X</mi></mrow><annotation encoding="application/x-tex">G_{\mathrm{reg}} = \mathrm{ID} - \mathrm{X}</annotation></semantics></math>
+in region AP, and the convention share
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><mo>−</mo><msub><mi>G</mi><mrow><mi mathvariant="normal">r</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">g</mi></mrow></msub><mi>/</mi><msub><mi>G</mi><mrow><mi mathvariant="normal">s</mi><mi mathvariant="normal">t</mi><mi mathvariant="normal">d</mi></mrow></msub></mrow><annotation encoding="application/x-tex">1 - G_{\mathrm{reg}} / G_{\mathrm{std}}</annotation></semantics></math>,
+the part of the gap that is about how boxes are drawn. The direction
+counted as alive only if, on <em>both</em> targets, X reached at least
+0.80 × ID in region AP and the convention share was at least 0.5. Both
+bars were judgment calls fixed before any number existed.</p>
+<h2 data-number="8.2" id="results"><span
+class="header-section-number">8.2</span> Results</h2>
+<table>
+<caption>Table 15. G28, class-agnostic, test, scene bootstrap (2,000
+replicates). <em>Ref</em> is G27 A0 (class-aware, 768 / 640 px), scored
+with classes merged; reported, not decisive. <em>Trivial</em> is one box
+over the whole image.</caption>
+
+<thead>
+<tr>
+<th>target</th>
+<th>arm</th>
+<th>train images</th>
+<th>AP50</th>
+<th>AP50-95</th>
+<th>tolerant AP50</th>
+<th>region AP</th>
+<th>AR50</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>WTBD-group</td>
+<td>ID</td>
+<td>745</td>
+<td>72.9 [57.6, 86.3]</td>
+<td>41.9</td>
+<td>84.6</td>
+<td>68.9 [61.3, 75.4]</td>
+<td>98.7</td>
+</tr>
+<tr>
+<td></td>
+<td>X</td>
+<td>26,065</td>
+<td><strong>17.7</strong> [11.9, 28.4]</td>
+<td>6.0</td>
+<td>24.2</td>
+<td>43.6 [37.4, 52.3]</td>
+<td>79.6</td>
+</tr>
+<tr>
+<td></td>
+<td>ref</td>
+<td>745</td>
+<td>66.1</td>
+<td>40.5</td>
+<td>79.7</td>
+<td>65.9</td>
+<td>97.9</td>
+</tr>
+<tr>
+<td></td>
+<td>trivial</td>
+<td></td>
+<td>0.0</td>
+<td></td>
+<td></td>
+<td>14.0</td>
+<td></td>
+</tr>
+<tr>
+<td>WTBlade-group</td>
+<td>ID</td>
+<td>2,136</td>
+<td>51.7 [48.0, 58.8]</td>
+<td>21.5</td>
+<td>65.1</td>
+<td>68.7 [62.6, 75.2]</td>
+<td>90.5</td>
+</tr>
+<tr>
+<td></td>
+<td>X</td>
+<td>14,405</td>
+<td><strong>2.4</strong> [0.8, 3.5]</td>
+<td>0.5</td>
+<td>3.2</td>
+<td>37.6 [32.5, 45.1]</td>
+<td>38.2</td>
+</tr>
+<tr>
+<td></td>
+<td>ref</td>
+<td>2,136</td>
+<td>50.1</td>
+<td>21.3</td>
+<td>61.2</td>
+<td>68.0</td>
+<td>92.2</td>
+</tr>
+<tr>
+<td></td>
+<td>trivial</td>
+<td></td>
+<td>1.0</td>
+<td></td>
+<td></td>
+<td>24.2</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<table>
+<caption>Table 16. G28 decision. Bars: ratio ≥ 0.80 and share ≥ 0.5 on
+both targets. ID − X has P(&gt; 0) = 1.000 on every metric of both
+targets.</caption>
+
+<thead>
+<tr>
+<th>target</th>
+<th>X / ID region AP</th>
+<th>convention share</th>
+<th><math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>G</mi><mrow><mi mathvariant="normal">s</mi><mi mathvariant="normal">t</mi><mi mathvariant="normal">d</mi></mrow></msub><annotation encoding="application/x-tex">G_{\mathrm{std}}</annotation></semantics></math>
+[95% CI]</th>
+<th><math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>G</mi><mrow><mi mathvariant="normal">r</mi><mi mathvariant="normal">e</mi><mi mathvariant="normal">g</mi></mrow></msub><annotation encoding="application/x-tex">G_{\mathrm{reg}}</annotation></semantics></math>
+[95% CI]</th>
+<th>verdict</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>WTBD-group</td>
+<td>0.63</td>
+<td>0.54</td>
+<td>+55.2 [+41.7, +66.4]</td>
+<td>+25.3 [+14.4, +33.9]</td>
+<td>dead</td>
+</tr>
+<tr>
+<td>WTBlade-group</td>
+<td>0.55</td>
+<td>0.37</td>
+<td>+49.3 [+45.0, +57.2]</td>
+<td>+31.0 [+26.8, +34.6]</td>
+<td>dead</td>
+</tr>
+</tbody>
+</table>
+<figure>
+<img src="figures/fig18_g28.png" style="width:98.0%"
+alt="Figure 23. G28. (a, c) ID and X on target test; dashed lines mark a trivial whole-image detector. (b, d) Class-agnostic precision–recall at IoU 0.5." />
+<figcaption aria-hidden="true">Figure 23. G28. (a, c) ID and X on target
+test; dashed lines mark a trivial whole-image detector. (b, d)
+Class-agnostic precision–recall at IoU 0.5.</figcaption>
+</figure>
+<figure>
+<img src="figures/fig19_predictions.jpg" style="width:100.0%"
+alt="Figure 24. Labels, ID and X on random test images (fixed seed), boxes with confidence ≥ 0.3. Left three columns: WTBD-group. Right three: WTBlade-group. X often has the right area or a nearby distractor; it also returns nothing on images where ID is correct. Black squares in WTBlade-group are offline cutout from the Roboflow export, which the frames retain." />
+<figcaption aria-hidden="true">Figure 24. Labels, ID and X on random
+test images (fixed seed), boxes with confidence ≥ 0.3. Left three
+columns: WTBD-group. Right three: WTBlade-group. X often has the right
+area or a nearby distractor; it also returns nothing on images where ID
+is correct. Black squares in WTBlade-group are offline cutout from the
+Roboflow export, which the frames retain.</figcaption>
+</figure>
+<p><strong>The direction fails on both targets.</strong> Table 15,
+Table 16 and Fig. 23 give the numbers, and Fig. 24 shows examples. With
+35× more images from other sources, X still loses to 745 target images
+by 55 AP50 points on WTBD-group. The convention explains about half of
+the gap there and about a third on WTBlade-group. The remainder is a
+real failure to find the defect. Without the residual pixel-twin images
+of Fig. 5, the decision stays the same (ratio 0.64 and 0.56, share 0.55
+and 0.39; ID AP50 71.9 and X 17.1 on WTBD-group).</p>
+<p><strong>The model did train.</strong> X-WTBD reached mAP50 72.2 on
+its own held-out images at its final epoch, and its region AP is above a
+trivial detector on both targets (43.6 against 14.0, 37.6 against 24.2).
+So it does carry information about where defects are. But it is not
+usable as a detector on an unseen dataset: X-WTBlade’s AP50 of 2.4 is
+barely above boxing the whole image (1.0).</p>
+<p><strong>Why recall and AP disagree on WTBD.</strong> X finds 79.6% of
+WTBD labels at IoU 0.5 while scoring 17.7 AP50. Fig. 23 (b) shows why:
+true boxes rank among many false ones. At recall 10%, precision is 54%
+against 100% for ID; at recall 30% it is 23% against 95%. At its best F1
+(0.30), X keeps about one box per image. On WTBlade-group, X’s precision
+at recall 10% is only 3%, against 90% for ID. AR50 is generous because
+it counts every output, up to 300 per image, and some false positives
+are genuine damage of kinds T does not label, as noted in the
+pre-registration, so this test is conservative for X.</p>
+<p><strong>Earlier evidence agrees.</strong> Models trained on one
+benchmark transfer poorly to the other (Table 17), and an
+open-vocabulary foundation detector finds almost nothing without
+training. Pooling many sources raises the WTBD number from 5.2 to 17.7,
+but these are different models and scoring scopes, not a paired
+comparison, and on WTBlade-group pooling does not help (2.2–4.0 against
+2.4).</p>
+<table>
+<caption>Table 17. Generalisation outside one dataset, earlier
+experiments (BladeYOLO-v2 models; class-agnostic, damage classes only
+for transfer).</caption>
+
+<thead>
+<tr>
+<th>setting</th>
+<th>result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>WTBlade model on WTBD-group test</td>
+<td>AP50 5.2 (in-domain 56.3, 58.0); difference −52.5 [−69.4,
+−32.9]</td>
+</tr>
+<tr>
+<td>WTBD models on WTBlade-group test</td>
+<td>AP50 4.0, 2.2 (in-domain 47.5); difference −43.9 [−49.6, −34.6]</td>
+</tr>
+<tr>
+<td>Mapped classes across datasets</td>
+<td>crack 0.0 both ways; thunderstrike / burn at most 7.3</td>
+</tr>
+<tr>
+<td>OWLv2 <span class="citation" data-cites="owlv2">[<a
+href="#ref-owlv2" role="doc-biblioref">41</a>]</span>, text queries, no
+training, WTBD-group</td>
+<td>mAP50 3.3 (class-agnostic 5.7); trained on 25%: 25.0–25.7</td>
+</tr>
+<tr>
+<td>OWLv2, few-shot prototypes from 25% labels</td>
+<td>mAP50 0.6 (class-agnostic 0.5)</td>
+</tr>
+</tbody>
+</table>
+<h1 data-number="9" id="sec:failed"><span
+class="header-section-number">9</span> What did not work</h1>
+<p>The leak-free gap motivated many attempts. Reporting them matters,
+since a reader should know which common ideas have been tried here and
+how they fared.</p>
+<h2 data-number="9.1" id="g27-one-recipe-for-all-protocols"><span
+class="header-section-number">9.1</span> G27: one recipe for all
+protocols</h2>
+<p>Diagnostics said that RF-DETR’s extent is at the annotator ceiling,
+that candidate recall is high and that rare-class scoring is the loss,
+with post hoc rescoring closed. So G27 changed what the model learns
+from, with three additions on one pre-registered path:</p>
+<ul>
+<li><strong>CP:</strong> copy-paste <span class="citation"
+data-cites="copypaste">[<a href="#ref-copypaste"
+role="doc-biblioref">33</a>]</span> of real boxes from the same training
+set to classes below the median count (Fig. 25).</li>
+<li><strong>D1:</strong> in-domain self-supervised adaptation of
+RF-DETR’s DINOv2 encoder by masked feature distillation <span
+class="citation" data-cites="data2vec">[<a href="#ref-data2vec"
+role="doc-biblioref">42</a>]</span>, on a leak-checked pool of 22,318
+images.</li>
+<li><strong>D2:</strong> a multi-dataset supervised stage 1 on the same
+pool, with partitioned class slots <span class="citation"
+data-cites="multidataset">[<a href="#ref-multidataset"
+role="doc-biblioref">31</a>]</span>.</li>
+</ul>
+<p>A-1 selected the recipe R on validation, seed 0: the best mean among
+arms beating A0 on both datasets. A-2 is the primary test claim on seeds
+0 and 1: R − A0 &gt; 0 on each dataset, with pooled P(&gt; 0) ≥
+0.95.</p>
+<figure>
+<img src="figures/fig25_cp_check.jpg" style="width:72.0%"
+alt="Figure 25. Visual check of copy-paste, as made before training. Some pastes land off the blade where SAM’s [43] largest mask includes sky, and box-level pastes carry their source background. These cases were kept, since the A1 − A0 comparison measures the recipe as it ran." />
+<figcaption aria-hidden="true">Figure 25. Visual check of copy-paste, as
+made before training. Some pastes land off the blade where SAM’s <span
+class="citation" data-cites="sam2">[<a href="#ref-sam2"
+role="doc-biblioref">43</a>]</span> largest mask includes sky, and
+box-level pastes carry their source background. These cases were kept,
+since the A1 − A0 comparison measures the recipe as it ran.</figcaption>
+</figure>
+<figure>
+<img src="figures/fig16_g27.png" style="width:94.0%"
+alt="Figure 26. G27. (a) A-1, validation deltas against A0, seed 0. (b) A-2, test by seed: the seed swing is as large as the effect." />
+<figcaption aria-hidden="true">Figure 26. G27. (a) A-1, validation
+deltas against A0, seed 0. (b) A-2, test by seed: the seed swing is as
+large as the effect.</figcaption>
+</figure>
+<table>
+<caption>Table 18. G27 A-2, R = A1 (copy-paste), R − A0, test mAP50-95,
+mean of seeds 0 and 1. The primary claim fails.</caption>
+<thead>
+<tr>
+<th></th>
+<th>R − A0</th>
+<th>95% CI</th>
+<th>P(&gt; 0)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>WTBD-group</td>
+<td>−0.99</td>
+<td>[−8.6, +1.2]</td>
+<td>0.193</td>
+</tr>
+<tr>
+<td>WTBlade-group</td>
+<td>+0.35</td>
+<td>[−0.5, +1.6]</td>
+<td>0.812</td>
+</tr>
+<tr>
+<td>mean over datasets</td>
+<td>−0.32</td>
+<td>[−4.1, +0.9]</td>
+<td>0.290</td>
+</tr>
+</tbody>
+</table>
+<p>As pre-registered, we also score without the residual pixel-twin
+images: R − A0 is −1.01 on WTBD-group and +0.40 on WTBlade-group, so the
+conclusion is unchanged.</p>
+<p>R = A1 was chosen by +0.04 points on WTBD-group validation, smaller
+than A0’s own seed-to-seed difference on validation. D1 and D2 were
+rejected on A-1 (−5.9 and −6.8 points against A1 on WTBD val), and a
+post hoc check found D1 halved the encoder’s last-stage effective rank
+(257 to 135), partial dimensional collapse. A seed swing of up to 2
+points on these test sets (A1 on WTBD: 30.7, 32.7) sets the smallest
+effect that can be claimed.</p>
+<p>Table 19 gives the validation scores that made the selection, with
+the test scores beside them.</p>
+<table>
+<caption>Table 19. All G27 arms, mAP50-95 from the G27 scorer.
+Validation decided R; test was not used for selection.</caption>
+
+<thead>
+<tr>
+<th>arm</th>
+<th>WTBD-group val, seed 0</th>
+<th>WTBD-group test, seeds 0 / 1</th>
+<th>WTBlade-group val, seed 0</th>
+<th>WTBlade-group test, seeds 0 / 1</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A0 plain</td>
+<td>40.11</td>
+<td>33.2 / 32.2</td>
+<td>15.68</td>
+<td>16.2 / 16.9</td>
+</tr>
+<tr>
+<td>A1 + CP</td>
+<td>40.15</td>
+<td>30.7 / 32.7</td>
+<td>17.10</td>
+<td>17.3 / 16.5</td>
+</tr>
+<tr>
+<td>A2 + CP + D1</td>
+<td>34.2</td>
+<td>27.4 / –</td>
+<td>15.6</td>
+<td>16.1 / –</td>
+</tr>
+<tr>
+<td>A3 + CP + D2</td>
+<td>33.4</td>
+<td>33.2 / –</td>
+<td>17.7</td>
+<td>16.6 / –</td>
+</tr>
+</tbody>
+</table>
+<h2 data-number="9.2" id="semi-supervised-learning-in-detail"><span
+class="header-section-number">9.2</span> Semi-supervised learning in
+detail</h2>
+<p>Label budgets suggested semi-supervision, and it took three rounds to
+rule out (Table 20). Seed noise alone is ±2.6 mAP50 at 25%, as wide as
+every effect measured. The class-balanced variant is significantly
+worse, partly through a confirmation-bias runaway: one seed produced up
+to about 2,300 pseudo-boxes per epoch from 24 images. Measured against
+hidden labels, even a good teacher’s pseudo-labels are 66% correct at
+threshold 0.5 and 40% at 0.25.</p>
+<table>
+<caption>Table 20. Teacher–student rounds at 25% of WTBD-group <span
+class="citation" data-cites="meanteacher">[<a href="#ref-meanteacher"
+role="doc-biblioref">44</a>]</span>. Top: one seed per arm, COCO-style
+evaluator. Bottom: three seeds per arm.</caption>
+
+<thead>
+<tr>
+<th>arm</th>
+<th>test mAP50 / mAP50-95</th>
+<th>val best mAP50 / mAP50-95</th>
+<th>pseudo-labels</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>supervised</td>
+<td>23.2 / 8.2</td>
+<td>44.4 / 22.6</td>
+<td>–</td>
+</tr>
+<tr>
+<td>synthetic views, unlabelled pool</td>
+<td>22.4 / 7.8</td>
+<td>44.8 / 22.0</td>
+<td>2,748</td>
+</tr>
+<tr>
+<td>real views, unlabelled pool</td>
+<td>19.2 / 7.7</td>
+<td>38.2 / 18.4</td>
+<td>961</td>
+</tr>
+<tr>
+<td>in-domain (the rest of train, labels hidden)</td>
+<td>20.9 / 8.0</td>
+<td>45.7 / 22.7</td>
+<td>1,294</td>
+</tr>
+<tr>
+<td>supervised, 3 seeds</td>
+<td>21.3 ± 2.6 / 7.9 ± 1.0</td>
+<td></td>
+<td>–</td>
+</tr>
+<tr>
+<td>class-balanced in-domain, 3 seeds</td>
+<td>16.3 ± 2.0 / 6.6 ± 0.6</td>
+<td></td>
+<td>5,957, 28,742, 4,372</td>
+</tr>
+</tbody>
+</table>
+<h2 data-number="9.3" id="the-ledger"><span
+class="header-section-number">9.3</span> The ledger</h2>
+<p>Table 21 lists the method hypotheses we ran or formally gated, with
+their results. Fig. 27 plots those with a test effect in points. Some
+effects are real but narrow (copy-paste on rare classes in a low-label
+setting), and few survive a second dataset or a replication.</p>
+<figure>
+<img src="figures/fig22_failed_tests.png" style="width:90.0%"
+alt="Figure 27. Effects of method tests on leak-free test sets, in points of mAP50-95 unless the ledger says otherwise. WTBD-group unless labelled. Hollow markers: no interval was logged in that form." />
+<figcaption aria-hidden="true">Figure 27. Effects of method tests on
+leak-free test sets, in points of mAP50-95 unless the ledger says
+otherwise. WTBD-group unless labelled. Hollow markers: no interval was
+logged in that form.</figcaption>
+</figure>
+<table class="long">
+<caption>Table 21. Ledger of method tests and diagnostics. WTBD-group,
+test mAP50-95 points unless noted. Pre-registered from late October;
+earlier rounds were decided in advance but not formally
+committed.</caption>
+
+<thead>
+<tr>
+<th>test</th>
+<th>idea</th>
+<th>result</th>
+<th>verdict</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Phases 22–24</td>
+<td>Teacher–student with synthetic or real views, in-domain,
+class-balanced <span class="citation" data-cites="meanteacher">[<a
+href="#ref-meanteacher" role="doc-biblioref">44</a>]</span>; 3
+seeds</td>
+<td>balanced in-domain 6.6 vs supervised 7.9; mAP50 −4.2 [−12.1, −0.3];
+confirmation-bias runaway on one seed</td>
+<td>fails</td>
+</tr>
+<tr>
+<td>Phase 24</td>
+<td>SAM 2.1 box refinement <span class="citation" data-cites="sam2">[<a
+href="#ref-sam2" role="doc-biblioref">43</a>]</span></td>
+<td>+0.3 to +0.5 at 25%, −0.2 at 100%</td>
+<td>fails</td>
+</tr>
+<tr>
+<td>Phases 18, 26</td>
+<td>Split-tolerant training; class-selective version, 2 seeds</td>
+<td>blanket not an improvement; corrosion +9.3 [−0.3, +24.6], mean
+−0.4</td>
+<td>targeted only</td>
+</tr>
+<tr>
+<td>H1</td>
+<td>Multi-view fusion at test time</td>
+<td>not testable on WTBD (26 images with a second view); WTBlade-group
+−0.8 [−1.5, 0.0]</td>
+<td>fails</td>
+</tr>
+<tr>
+<td>H2</td>
+<td>Normal-blade anomaly prior</td>
+<td>most anomalous patches not on defects; box recall below chance</td>
+<td>fails</td>
+</tr>
+<tr>
+<td>H3</td>
+<td>Retrieval prior as a detector input</td>
+<td>+0.1 [−2.0, +3.0]</td>
+<td>fails</td>
+</tr>
+<tr>
+<td>H4</td>
+<td>Test-time adaptation across real views</td>
+<td>gate failed: real views do not make better detections</td>
+<td>not run</td>
+</tr>
+<tr>
+<td>H5</td>
+<td>Reward fine-tuning, granularity-invariant reward; 4 seeds +
+WTBlade</td>
+<td>region AP +3.6 [−1.6, +6.0], P 0.896; WTBlade −0.6</td>
+<td>fails on replication</td>
+</tr>
+<tr>
+<td>H6</td>
+<td>Label-free scene selection by patch coverage</td>
+<td>+5.2 [+1.9, +10.5] over random; +2.1 [−1.2, +9.1] over FreeSel</td>
+<td>no gain over prior art</td>
+</tr>
+<tr>
+<td>H7</td>
+<td>Label-free property predicting subset quality</td>
+<td>no property survives correction</td>
+<td>fails</td>
+</tr>
+<tr>
+<td>H8, H9 (G8, G9)</td>
+<td>Feature upsampling; high-frequency cues</td>
+<td>−5.9; −0.1 (mean AP)</td>
+<td>fail</td>
+</tr>
+<tr>
+<td>H10</td>
+<td>Generated rare-class defects vs matched copy-paste</td>
+<td>synth − paste −2.5; paste − none +3.7 [+1.1, +8.1]</td>
+<td>generation fails; copy-paste helps here</td>
+</tr>
+<tr>
+<td>H12</td>
+<td>DINOv3 reduces subset luck</td>
+<td>it does not; draw quality carries over (ρ 0.71)</td>
+<td>fails</td>
+</tr>
+<tr>
+<td>G15, G15-R</td>
+<td>Prototype rescoring</td>
+<td>WTBD +1.1; WTBlade −0.7</td>
+<td>fails bar; prior art</td>
+</tr>
+<tr>
+<td>G16, G16-R</td>
+<td>Instance-level proximity law; explains subset luck?</td>
+<td>law holds at instance level; does not explain subset luck; on
+RF-DETR it holds for confidence, not for detection</td>
+<td>partial</td>
+</tr>
+<tr>
+<td>H16b</td>
+<td>Deployment-targeted scene selection</td>
+<td>gate failed</td>
+<td>not run</td>
+</tr>
+<tr>
+<td>G17</td>
+<td>Clicks as pseudo-boxes (bar: 60% at IoU ≥ 0.5)</td>
+<td>42.0%</td>
+<td>fails</td>
+</tr>
+<tr>
+<td>H18, -R, -W</td>
+<td>Learned coverage-aware re-ranker on RF-DETR</td>
+<td>WTBD +2.5, replicated on new models; WTBlade +0.2</td>
+<td>WTBD only</td>
+</tr>
+<tr>
+<td>H19-W</td>
+<td>Rescoring at the low-count boundary, WTBlade 8%</td>
+<td>−0.2 [−1.3, +0.7], P 0.286</td>
+<td>fails</td>
+</tr>
+<tr>
+<td>G20</td>
+<td>Query-consensus rescoring</td>
+<td>−4.6 WTBD; −2.1 WTBlade</td>
+<td>fails</td>
+</tr>
+<tr>
+<td>G21</td>
+<td>Flip agreement; plain flip TTA on RF-DETR</td>
+<td>−2.9 WTBD; −0.6 WTBlade</td>
+<td>fails; TTA hurts this DETR</td>
+</tr>
+<tr>
+<td>G22, -O</td>
+<td>Fine-tuning moves proximity from recall to ranking</td>
+<td>controlled confirmation on WTBD; not on WTBlade; holds only for
+generic-feature proximity</td>
+<td>does not replicate</td>
+</tr>
+<tr>
+<td>H20</td>
+<td>Subset luck as annotation-convention match</td>
+<td>no relation</td>
+<td>fails</td>
+</tr>
+<tr>
+<td>G24</td>
+<td>Input resolution 768 vs 576</td>
+<td>WTBD +1.0 (P 0.958); WTBlade −0.1</td>
+<td>dataset-specific</td>
+</tr>
+<tr>
+<td>V1</td>
+<td>RF-DETR replaces the frozen-feature detector at 25%</td>
+<td>+7.3 [+2.3, +11.9]; +8.3 [+4.5, +15.0]</td>
+<td>passes</td>
+</tr>
+<tr>
+<td>Box extent; crop re-classifier</td>
+<td>Better box refinement; re-classifying RF-DETR candidates</td>
+<td>prior-art and ceiling checks show little room</td>
+<td>discarded before any run</td>
+</tr>
+<tr>
+<td>G25, G26</td>
+<td>Official-protocol benchmark; tuned recipe</td>
+<td>Table 2, Table 5</td>
+<td>reported</td>
+</tr>
+<tr>
+<td>G27</td>
+<td>CP, D1, D2 recipe</td>
+<td>A-2 −0.32, P 0.290</td>
+<td>fails</td>
+</tr>
+<tr>
+<td>G28</td>
+<td>Leave-one-dataset-out</td>
+<td>dead on both targets</td>
+<td>fails</td>
+</tr>
+</tbody>
+</table>
+<h1 data-number="10" id="sec:history"><span
+class="header-section-number">10</span> A cautionary history: how our
+own numbers were wrong</h1>
+<p>We report this because the same traps face anyone working on these
+datasets. Fig. 28 gives the sequence, and Table 22 the original
+runs.</p>
+<figure>
+<img src="figures/fig23_score_history.png" style="width:92.0%"
+alt="Figure 28. Reported mAP50 at each stage of the project, in order. Every class-aware score above about 60 in this figure was measured on a split with train/test twins, including our own. Datasets differ between rows, so rows are not comparable as models; the point is the pattern." />
+<figcaption aria-hidden="true">Figure 28. Reported mAP50 at each stage
+of the project, in order. Every class-aware score above about 60 in this
+figure was measured on a split with train/test twins, including our own.
+Datasets differ between rows, so rows are not comparable as models; the
+point is the pattern.</figcaption>
+</figure>
+<table>
+<caption>Table 22. Early runs on the original Wind Surface split (2,856
+train / 714 val). Later analysis invalidated the conclusions drawn from
+them.</caption>
+
+<thead>
+<tr>
+<th>run</th>
+<th>architecture</th>
+<th>epochs</th>
+<th>mAP50</th>
+<th>mAP50-95</th>
+<th>outcome</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1–2</td>
+<td>paper-faithful: DINOv3 + Style Injection + WTConv + Cross-Mamba</td>
+<td>crash, ~200</td>
+<td></td>
+<td></td>
+<td>bf16, unfreezing and DDP failures; NaN from FFT gradients</td>
+</tr>
+<tr>
+<td>3</td>
+<td>paper-faithful, FFT detached, SGD</td>
+<td>~283</td>
+<td>~52.6</td>
+<td>~28</td>
+<td>stagnated; closest reproduction</td>
+</tr>
+<tr>
+<td>4</td>
+<td>BladeYOLO-S (8 M parameters)</td>
+<td>400</td>
+<td>64.3</td>
+<td>37.3</td>
+<td>apparent ceiling at about 64</td>
+</tr>
+<tr>
+<td>6</td>
+<td>BladeYOLO-L (57.2 M), AdamW</td>
+<td>400</td>
+<td>78.2</td>
+<td>46.9</td>
+<td>looked like a breakthrough</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Run 6 + “Cross-Scale Vision Mamba” + WIoU v3</td>
+<td>400</td>
+<td>77.0</td>
+<td>47.8</td>
+<td>“+0.9 from WIoU”</td>
+</tr>
+</tbody>
+</table>
+<p>The gap of 33.9 / 29.4 points between Run 3 and the published 86.5 /
+57.4 is far beyond run-to-run variance. These runs used a weakened
+feature extractor (below) and the leaky split, so they support “not
+reproducible from the published information”, and not “the published
+modules do not work”. The paper reports 3,790 images while the public
+copy has 3,570, and gives no split seed, image list or code.</p>
+<p><strong>Then we audited our own code.</strong> Run 7 was not the
+model we described:</p>
+<ul>
+<li><strong>WIoU never ran</strong>, because the patch reached the wrong
+namespace, so Run 7 trained with CIoU. Its “+0.9 mAP50-95 from WIoU” was
+invalid. The formula also had three errors.</li>
+<li><strong>The “Mamba” block did not perform a selective scan.</strong>
+It was replaced by a four-direction implementation that matches a
+reference recurrence to 1.8e-14.</li>
+<li><strong>The DINOv3 extractor skipped RoPE and fed unnormalised
+pixels</strong>, so every run before 9 October used weakened
+features.</li>
+<li><strong>The wavelet branch discarded high-frequency
+detail.</strong></li>
+</ul>
+<p><strong>Then we found the leak.</strong> Removing it took the numbers
+from about 78 to about 36–40 on a merged, deduplicated dataset (v2,
+2,606 unique images from 11,681), and a larger taxonomy-mapped v3 (5,777
+images) scored only 26–32. An exhaustive label review of 763 candidates
+was worth only +3 mAP50 points. v3’s limit was structural: its classes
+rest on few independent scenes, and one had a single training group.
+Only then did the audit lead us to WTBD alone, with its native
+classes.</p>
+<p>Table 23 in the appendix lists all conclusions we later corrected.
+Several were our own favourite explanations.</p>
+<h1 data-number="11" id="recommendations"><span
+class="header-section-number">11</span> Recommendations</h1>
+<ol type="1">
+<li><strong>Split by scene, and deduplicate before augmenting.</strong>
+Never augment before a split. Group by source photo, video and tile, and
+add a pixel test: retrieval and keypoints alone missed photometric
+copies in our own splits.</li>
+<li><strong>Publish image lists</strong>, not just ratios. The BladeYOLO
+0.87-ratio question cannot be settled without one.</li>
+<li><strong>Report a leaked / no-twin breakdown</strong> for any dataset
+with known copies. It takes minutes with cached predictions, and our
+tools are public.</li>
+<li><strong>Do not tune on a leaky test set.</strong> On these splits
+tuning measurably moved scores towards memorisation. Tune on a
+scene-separated validation set.</li>
+<li><strong>Use scene-level intervals.</strong> A 161-image test set
+with 58 scenes, and some classes in fewer than 3 scenes, cannot support
+per-class claims.</li>
+<li><strong>Report several labelled subsets for low-label
+claims.</strong> A factor of two between random draws is larger than any
+model effect we saw.</li>
+<li><strong>Report seeds.</strong> On these test sets, seed swings of up
+to 2 mAP50-95 points match the size of most claimed gains.</li>
+<li><strong>Calibrate on unseen scenes.</strong> A recall guarantee
+calibrated on seen scenes does not hold in the field.</li>
+<li><strong>Report a granularity-invariant score beside box AP</strong>
+for amorphous defects, and measure label self-consistency where copies
+exist.</li>
+<li><strong>Test every method on a second dataset.</strong> Several of
+our effects held on WTBD and vanished on WTBlade, and vice versa.</li>
+<li><strong>Check licences at the source</strong>, since export pages
+can misstate them.</li>
+</ol>
+<h1 data-number="12" id="sec:limits"><span
+class="header-section-number">12</span> Limitations</h1>
+<ul>
+<li><strong>Single wind farm per dataset; small test sets</strong> (58
+and 177 test scenes). Our leak-free numbers carry wide intervals.</li>
+<li><strong>Official-protocol runs are single seed</strong>, and their
+intervals are image-level.</li>
+<li><strong>The tuning analysis is post hoc and covers one
+step</strong>, with epochs confounded on two of three protocols.</li>
+<li><strong>Wind Surface’s “no twin” subset is not leak-free</strong>
+(it shares drone photos with train), and WTBD’s has too few boxes of
+three classes.</li>
+<li><strong>WTBlade-group frames retain Roboflow’s offline
+augmentation.</strong> We keep one copy per source, so some test frames
+are rotated or have black cutouts (Fig. 24). This is a remaining
+difference from clean imagery, not a leak.</li>
+<li><strong>YOLO12-L on WTBlade-group may be under-trained:</strong> 50
+epochs, the budget planned for BladeYOLO-v2 ViT-B on this set, with its
+best validation at epoch 43 after a nearly linear rise. Its 13.3 may
+understate it.</li>
+<li><strong>Our leak-free splits have a small residual leak</strong>
+(§ 4, Fig. 5): under a point on WTBD-group, negligible on WTBlade-group.
+G28’s ID arm benefits from it slightly.</li>
+<li><strong>G27 A-2 uses two seeds; G28 uses one.</strong> G28 X arms
+train for 12 epochs, as G27’s stage 1, at 640 px. X-WTBlade loses the
+largest source, and its pool is 45% smaller than X-WTBD’s, which may
+contribute to the difference between targets.</li>
+<li><strong>Hardware differs between seeds.</strong> G27 seed 0 ran on
+Kaggle (fp16) and seed 1 on an A100 (bf16). Arms are paired within a
+seed, but the seed effect includes hardware. An earlier A0 seed-1 run on
+Kaggle scored 31.2 on WTBD-group test against 32.2 on the A100.</li>
+<li><strong>Region AP depends on defect size.</strong> A trivial
+whole-image detector scores 14–24 here, so raw region AP must be read
+against that floor.</li>
+<li><strong>Claims about modules are for our components.</strong>
+BladeYOLO’s own modules were not rerun on a leak-free split after the
+code audit.</li>
+<li><strong>Deviations from pre-registration.</strong> The G26 rule
+formally selected RF-DETR-L (validation 63.4 against 62.0), which lost
+on test (−1.7), and we did not run L on the other protocols; this cannot
+inflate a reported number, but it is a deviation. G27’s phase B on the
+official protocols was not run, since the recipe failed A-2.</li>
+<li><strong>The literature check is not exhaustive</strong>, and “new
+for this domain” means that we did not find an earlier audit.</li>
+</ul>
+<h1 data-number="13" id="sec:availability"><span
+class="header-section-number">13</span> Data and code availability</h1>
+<p><strong>Code and records.</strong> All code, tests, split files,
+per-image flags and the full research log (<code>research_log.md</code>)
+are at <a href="https://github.com/bhavya-goel-11/BladeYOLO"
+class="uri">https://github.com/bhavya-goel-11/BladeYOLO</a>. To
+regenerate this paper’s numbers and figures, run
+<code>tools/official_leak_eval.py</code>,
+<code>tools/g27_score.py</code>, <code>tools/g28_score.py</code>,
+<code>tools/paper_evidence.py</code>,
+<code>tools/paper_figures.py</code>,
+<code>tools/paper_figures2.py</code> and
+<code>tools/build_paper.py</code>. The training queue is
+<code>tools/sessions.sh</code>.</p>
+<p><strong>Data.</strong> The datasets, leak-free splits and pools are
+assembled as <code>blade-defect-benchmark</code>, with per-folder
+licences in its <code>LICENSES.md</code>. WTBD is CC BY 4.0.
+WTBlade-Defect contains DTU NordTank images <span class="citation"
+data-cites="shihavuddin">[<a href="#ref-shihavuddin"
+role="doc-biblioref">5</a>]</span> under CC BY-NC, despite its Roboflow
+page, and derived folders inherit this, so they are for non-commercial
+research only. The Wind Surface licence is unclear from its source.
+Images in our figures are shown for scientific comment; sources are
+cited above.</p>
+<p><strong>Foundation models.</strong> We acknowledge DINOv3 <span
+class="citation" data-cites="dinov3">[<a href="#ref-dinov3"
+role="doc-biblioref">21</a>]</span>, used under the DINOv3 License, and
+DINOv2 <span class="citation" data-cites="dinov2">[<a href="#ref-dinov2"
+role="doc-biblioref">19</a>]</span> through RF-DETR <span
+class="citation" data-cites="rfdetr">[<a href="#ref-rfdetr"
+role="doc-biblioref">18</a>]</span>. Trained checkpoints containing
+DINOv3 weights must ship with that licence.</p>
+<h1 class="unnumbered" id="appendix">Appendix</h1>
+<h2 class="unnumbered" id="a.-corrections-to-our-own-conclusions">A.
+Corrections to our own conclusions</h2>
+<table class="long">
+<caption>Table 23. Conclusions we later corrected. Kept here because
+each was plausible at the time.</caption>
+
+<thead>
+<tr>
+<th>earlier conclusion</th>
+<th>status</th>
+<th>why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Runs 6–7 reach ~78 / ~47 on Wind Surface</td>
+<td>invalid</td>
+<td>75% of validation had train twins (first count)</td>
+</tr>
+<tr>
+<td>WIoU v3 gave +0.9 mAP50-95</td>
+<td>invalid</td>
+<td>never active; Run 7 trained with CIoU</td>
+</tr>
+<tr>
+<td>Mamba added global context</td>
+<td>invalid</td>
+<td>the block did not scan</td>
+</tr>
+<tr>
+<td>SGD → AdamW was the breakthrough</td>
+<td>confounded</td>
+<td>changed together with an 8 M → 57 M scale-up</td>
+</tr>
+<tr>
+<td>The remaining gap is locality bias</td>
+<td>superseded</td>
+<td>the gap was leakage and data structure</td>
+</tr>
+<tr>
+<td>v3 is better because it is larger</td>
+<td>superseded</td>
+<td>scenes matter, not files (Wind Surface 81; WTBD 550)</td>
+</tr>
+<tr>
+<td>Mislabelling explains poor v3 scores</td>
+<td>rejected</td>
+<td>the review was worth only +3 mAP50 points</td>
+</tr>
+<tr>
+<td>BladeYOLO-v2’s win shows the architecture generalises</td>
+<td>qualified</td>
+<td>it rests mainly on thunderstrike (3 test scenes)</td>
+</tr>
+<tr>
+<td>The advantage comes from the architecture</td>
+<td>rejected</td>
+<td>the frozen DINOv3 features carry it all</td>
+</tr>
+<tr>
+<td>Honest calibration costs 2.4 vs 1.0 false alarms per image</td>
+<td>corrected</td>
+<td>that column counted all predictions; real false alarms 0.2 vs
+0.1</td>
+</tr>
+<tr>
+<td>WTBD copies agree on 86.0%</td>
+<td>refined</td>
+<td>rotated copies inflate “loose”; axis-aligned 87.3%</td>
+</tr>
+<tr>
+<td>Part of the inflation is memorised box splitting</td>
+<td>not supported</td>
+<td>tolerant gain is not smaller on images with a twin</td>
+</tr>
+<tr>
+<td>At 25%, most lost defects are found but boxed differently</td>
+<td>refined</td>
+<td>near-misses (34–36%) and misses (19–27%) are of similar size</td>
+</tr>
+<tr>
+<td>Split tolerance helps corrosion</td>
+<td>replicated, not significant</td>
+<td>+9.3 [−0.3, +24.6]; aggregate unchanged</td>
+</tr>
+<tr>
+<td>The DINOv3 advantage is a low-data advantage</td>
+<td>corrected</td>
+<td>absolute gain does not shrink with data</td>
+</tr>
+<tr>
+<td>The gain grows with frozen backbone size</td>
+<td>partly supported</td>
+<td>ViT-B beats ViT-S; ViT-L does not beat ViT-B</td>
+</tr>
+<tr>
+<td>Teacher–student gives a small consistent gain</td>
+<td>qualified</td>
+<td>seed noise was as large; balanced variant significantly worse</td>
+</tr>
+<tr>
+<td>Leak-free mAP50-95 / mAP50 ratios are 0.42–0.47</td>
+<td>corrected</td>
+<td>full-label RF-DETR on WTBD-group reaches 0.60</td>
+</tr>
+</tbody>
+</table>
+<h2 class="unnumbered"
+id="b.-engineering-problems-that-affected-results">B. Engineering
+problems that affected results</h2>
+<table>
+<caption>Table 24. Defects we found and fixed. Several of them silently
+changed what was being measured. Mixed-precision overflow was the most
+frequent.</caption>
+
+<thead>
+<tr>
+<th>problem</th>
+<th>root cause</th>
+<th>fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>WIoU never active</td>
+<td>patched the wrong namespace</td>
+<td>patch the loss namespace</td>
+</tr>
+<tr>
+<td>NaN in selective scan (epoch 9)</td>
+<td>fp16 overflow before LayerNorm</td>
+<td>fp32 LayerNorm</td>
+</tr>
+<tr>
+<td>NaN at epoch 4</td>
+<td>poisoned WIoU running mean; aggressive warm-up</td>
+<td>finite-only mean; lr 0.001, bias warm-up 0</td>
+</tr>
+<tr>
+<td>NaN at epoch 17</td>
+<td>fp16 overflow from a conv into BN</td>
+<td>fp32 blocks for refinement</td>
+</tr>
+<tr>
+<td>NaN at epoch 99, validation at 0</td>
+<td>NaN batch poisons BN statistics and EMA</td>
+<td>per-batch BN repair and step skip, reported</td>
+</tr>
+<tr>
+<td>NaN late in training (epochs 99–149)</td>
+<td>YOLOv12 area attention forms scores in fp16 (~4e5, above the fp16
+maximum)</td>
+<td>scores and softmax in fp32</td>
+</tr>
+<tr>
+<td>Test metrics silently missing</td>
+<td><code>deform_conv2d</code> segfault on NaN offsets from the FLOPs
+probe’s uninitialised image</td>
+<td>finite, clamped offsets; test in a fresh process</td>
+</tr>
+<tr>
+<td>Silent resume from an old checkpoint</td>
+<td>training script reused any <code>last.pt</code></td>
+<td>explicit <code>--resume</code></td>
+</tr>
+<tr>
+<td>RF-DETR learning rate never decayed</td>
+<td>default step at epoch 100 never fires</td>
+<td>explicit cosine schedule (G26)</td>
+</tr>
+<tr>
+<td>Scorer read a stale result after a time-out</td>
+<td>an earlier output file had the same name</td>
+<td>rerun with no limit; check file freshness</td>
+</tr>
+</tbody>
+</table>
+<h2 class="unnumbered" id="c.-notation-and-experiment-names">C. Notation
+and experiment names</h2>
+<p>Names follow the research log: H<em>n</em> and G<em>n</em> are
+hypotheses and gates in order of registration. A0–A3 are the G27 arms:
+A0 plain recipe, A1 + copy-paste, A2 + copy-paste + D1, A3 + copy-paste
++ D2. ID and X are the G28 arms. “Points” are percentage points of AP.
+WTBD-official is WTBD’s own split.</p>
+<h2 class="unnumbered" id="d.-per-class-audit">D. Per-class audit</h2>
+<table class="long">
+<caption>Table 25. Content audit by native class
+(<code>runs/analysis/datasets/report.md</code>). <em>Learnable</em>
+boxes are those kept after deduplication. <em>Purity</em> is mutual crop
+retrieval within the class. Median box size is in pixels at 640. The
+check export of Beijing is omitted because it is the same
+data.</caption>
+
+<thead>
+<tr>
+<th>dataset</th>
+<th>class</th>
+<th>raw images</th>
+<th>raw boxes</th>
+<th>unique images</th>
+<th>scenes</th>
+<th>learnable boxes</th>
+<th>median box px</th>
+<th>purity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Wind Surface</td>
+<td>corrosion</td>
+<td>660</td>
+<td>2116</td>
+<td>90</td>
+<td>10</td>
+<td>294</td>
+<td>87.7</td>
+<td>0.894</td>
+</tr>
+<tr>
+<td>Wind Surface</td>
+<td>dirt</td>
+<td>1044</td>
+<td>1067</td>
+<td>487</td>
+<td>14</td>
+<td>488</td>
+<td>257.3</td>
+<td>0.923</td>
+</tr>
+<tr>
+<td>Wind Surface</td>
+<td>hide_craze</td>
+<td>1305</td>
+<td>2321</td>
+<td>272</td>
+<td>50</td>
+<td>491</td>
+<td>53.6</td>
+<td>0.719</td>
+</tr>
+<tr>
+<td>Wind Surface</td>
+<td>surface_eye</td>
+<td>108</td>
+<td>412</td>
+<td>9</td>
+<td>1</td>
+<td>40</td>
+<td>85.5</td>
+<td>0.0</td>
+</tr>
+<tr>
+<td>Wind Surface</td>
+<td>thunderstrike</td>
+<td>364</td>
+<td>478</td>
+<td>70</td>
+<td>10</td>
+<td>89</td>
+<td>55.5</td>
+<td>0.12</td>
+</tr>
+<tr>
+<td>WTBlade</td>
+<td>burn</td>
+<td>736</td>
+<td>1019</td>
+<td>116</td>
+<td>104</td>
+<td>166</td>
+<td>56.9</td>
+<td>0.65</td>
+</tr>
+<tr>
+<td>WTBlade</td>
+<td>crack</td>
+<td>1409</td>
+<td>2525</td>
+<td>177</td>
+<td>112</td>
+<td>335</td>
+<td>63.0</td>
+<td>0.573</td>
+</tr>
+<tr>
+<td>WTBlade</td>
+<td>deformity</td>
+<td>1801</td>
+<td>2291</td>
+<td>282</td>
+<td>231</td>
+<td>383</td>
+<td>130.7</td>
+<td>0.802</td>
+</tr>
+<tr>
+<td>WTBlade</td>
+<td>dirt</td>
+<td>5148</td>
+<td>8875</td>
+<td>585</td>
+<td>425</td>
+<td>928</td>
+<td>255.2</td>
+<td>0.683</td>
+</tr>
+<tr>
+<td>WTBlade</td>
+<td>oil</td>
+<td>539</td>
+<td>958</td>
+<td>97</td>
+<td>82</td>
+<td>167</td>
+<td>105.6</td>
+<td>0.428</td>
+</tr>
+<tr>
+<td>WTBlade</td>
+<td>peeling</td>
+<td>2307</td>
+<td>5715</td>
+<td>172</td>
+<td>80</td>
+<td>395</td>
+<td>96.5</td>
+<td>0.583</td>
+</tr>
+<tr>
+<td>WTBlade</td>
+<td>rust</td>
+<td>2043</td>
+<td>4188</td>
+<td>157</td>
+<td>123</td>
+<td>258</td>
+<td>95.2</td>
+<td>0.354</td>
+</tr>
+<tr>
+<td>Beijing</td>
+<td>corrosion</td>
+<td>789</td>
+<td>2565</td>
+<td>90</td>
+<td>10</td>
+<td>292</td>
+<td>86.9</td>
+<td>0.666</td>
+</tr>
+<tr>
+<td>Beijing</td>
+<td>craze</td>
+<td>57</td>
+<td>69</td>
+<td>9</td>
+<td>8</td>
+<td>12</td>
+<td>158.3</td>
+<td>0.108</td>
+</tr>
+<tr>
+<td>Beijing</td>
+<td>hide_craze</td>
+<td>1187</td>
+<td>2137</td>
+<td>283</td>
+<td>52</td>
+<td>499</td>
+<td>54.9</td>
+<td>0.545</td>
+</tr>
+<tr>
+<td>Beijing</td>
+<td>surface_eye</td>
+<td>3316</td>
+<td>5489</td>
+<td>900</td>
+<td>17</td>
+<td>1467</td>
+<td>227.3</td>
+<td>0.888</td>
+</tr>
+<tr>
+<td>Beijing</td>
+<td>surface_injure</td>
+<td>1662</td>
+<td>3285</td>
+<td>290</td>
+<td>45</td>
+<td>564</td>
+<td>85.3</td>
+<td>0.635</td>
+</tr>
+<tr>
+<td>Beijing</td>
+<td>surface_oil</td>
+<td>1588</td>
+<td>2242</td>
+<td>417</td>
+<td>27</td>
+<td>574</td>
+<td>249.9</td>
+<td>0.473</td>
+</tr>
+<tr>
+<td>Beijing</td>
+<td>thunderstrike</td>
+<td>270</td>
+<td>353</td>
+<td>69</td>
+<td>10</td>
+<td>87</td>
+<td>52.2</td>
+<td>0.153</td>
+</tr>
+<tr>
+<td>WTBs2025</td>
+<td>oil leakage</td>
+<td>512</td>
+<td>572</td>
+<td>28</td>
+<td>28</td>
+<td>35</td>
+<td>33.9</td>
+<td>0.486</td>
+</tr>
+<tr>
+<td>WTBs2025</td>
+<td>paint cracks</td>
+<td>458</td>
+<td>514</td>
+<td>398</td>
+<td>351</td>
+<td>235</td>
+<td>17.8</td>
+<td>0.666</td>
+</tr>
+<tr>
+<td>WTBs2025</td>
+<td>localized damage</td>
+<td>1027</td>
+<td>1254</td>
+<td>773</td>
+<td>655</td>
+<td>86</td>
+<td>6.5</td>
+<td>0.256</td>
+</tr>
+<tr>
+<td>WTBs2025</td>
+<td>lightning strikes</td>
+<td>285</td>
+<td>354</td>
+<td>89</td>
+<td>43</td>
+<td>96</td>
+<td>43.1</td>
+<td>0.56</td>
+</tr>
+<tr>
+<td>WTBs2025</td>
+<td>surface stains</td>
+<td>263</td>
+<td>294</td>
+<td>226</td>
+<td>211</td>
+<td>142</td>
+<td>23.5</td>
+<td>0.182</td>
+</tr>
+<tr>
+<td>WTBs2025</td>
+<td>erosion</td>
+<td>2798</td>
+<td>4517</td>
+<td>1132</td>
+<td>993</td>
+<td>1174</td>
+<td>21.4</td>
+<td>0.675</td>
+</tr>
+<tr>
+<td>WTBs2025</td>
+<td>coating detachment</td>
+<td>1085</td>
+<td>1906</td>
+<td>703</td>
+<td>566</td>
+<td>526</td>
+<td>15.3</td>
+<td>0.484</td>
+</tr>
+<tr>
+<td>WTBs2025</td>
+<td>protective film damage</td>
+<td>546</td>
+<td>632</td>
+<td>393</td>
+<td>350</td>
+<td>195</td>
+<td>14.2</td>
+<td>0.639</td>
+</tr>
+<tr>
+<td>WTBs2025</td>
+<td>pinholes</td>
+<td>522</td>
+<td>774</td>
+<td>377</td>
+<td>311</td>
+<td>45</td>
+<td>2.2</td>
+<td>0.136</td>
+</tr>
+<tr>
+<td>WTBD</td>
+<td>craze</td>
+<td>198</td>
+<td>257</td>
+<td>94</td>
+<td>86</td>
+<td>119</td>
+<td>206.5</td>
+<td>0.555</td>
+</tr>
+<tr>
+<td>WTBD</td>
+<td>corrosion</td>
+<td>172</td>
+<td>257</td>
+<td>105</td>
+<td>100</td>
+<td>149</td>
+<td>194.3</td>
+<td>0.723</td>
+</tr>
+<tr>
+<td>WTBD</td>
+<td>surface_injure</td>
+<td>264</td>
+<td>412</td>
+<td>164</td>
+<td>155</td>
+<td>247</td>
+<td>103.3</td>
+<td>0.723</td>
+</tr>
+<tr>
+<td>WTBD</td>
+<td>thunderstrike</td>
+<td>89</td>
+<td>92</td>
+<td>50</td>
+<td>47</td>
+<td>52</td>
+<td>138.0</td>
+<td>0.565</td>
+</tr>
+<tr>
+<td>WTBD</td>
+<td>crack</td>
+<td>177</td>
+<td>224</td>
+<td>47</td>
+<td>37</td>
+<td>55</td>
+<td>171.5</td>
+<td>0.842</td>
+</tr>
+<tr>
+<td>WTBD</td>
+<td>hide_craze</td>
+<td>249</td>
+<td>342</td>
+<td>182</td>
+<td>171</td>
+<td>244</td>
+<td>111.9</td>
+<td>0.785</td>
+</tr>
+</tbody>
+</table>
+<h2 class="unnumbered" id="e.-run-registry">E. Run registry</h2>
+<table class="long">
+<caption>Table 26. Runs of the final phase (G27, G28, YOLO12-L). Val
+best is the best EMA epoch (Ultralytics best epoch for YOLO12-L). Test
+values are from Table 7 and Table 15.</caption>
+
+<thead>
+<tr>
+<th>run</th>
+<th>data</th>
+<th>epochs (best)</th>
+<th>val best mAP50 / mAP50-95</th>
+<th>test mAP50 / mAP50-95</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rfdetrm768cos_wtbd_group_full</code></td>
+<td>WTBD-group, A0, s0</td>
+<td>100 (20)</td>
+<td>64.8 / 40.4</td>
+<td>55.3 / 33.2</td>
+</tr>
+<tr>
+<td><code>rfdetrm768cos_wtbd_group_full_s1</code></td>
+<td>WTBD-group, A0, s1</td>
+<td>100 (32)</td>
+<td>67.1 / 40.8</td>
+<td>54.8 / 32.2</td>
+</tr>
+<tr>
+<td><code>rfdetrm768cos_cp_wtbd_group_full</code></td>
+<td>WTBD-group, A1, s0</td>
+<td>100 (9)</td>
+<td>63.9 / 40.1</td>
+<td>51.5 / 30.7</td>
+</tr>
+<tr>
+<td><code>rfdetrm768cos_cp_wtbd_group_full_s1</code></td>
+<td>WTBD-group, A1, s1</td>
+<td>100 (31)</td>
+<td>70.7 / 41.8</td>
+<td>58.5 / 32.7</td>
+</tr>
+<tr>
+<td><code>rfdetrm768cos_cp_d1_wtbd_group_full</code></td>
+<td>WTBD-group, A2</td>
+<td>100 (63)</td>
+<td>59.6 / 34.4</td>
+<td>49.6 / 27.4</td>
+</tr>
+<tr>
+<td><code>rfdetrm768cos_cp_d2_wtbd_group_full</code></td>
+<td>WTBD-group, A3</td>
+<td>100 (40)</td>
+<td>56.8 / 33.8</td>
+<td>55.3 / 33.2</td>
+</tr>
+<tr>
+<td><code>rfdetrm640cos_wtblade_group_full</code></td>
+<td>WTBlade-group, A0, s0</td>
+<td>60 (11)</td>
+<td>38.4 / 15.7</td>
+<td>38.5 / 16.2</td>
+</tr>
+<tr>
+<td><code>rfdetrm640cos_wtblade_group_full_s1</code></td>
+<td>WTBlade-group, A0, s1</td>
+<td>60 (17)</td>
+<td>41.1 / 16.2</td>
+<td>41.0 / 16.9</td>
+</tr>
+<tr>
+<td><code>rfdetrm640cos_cp_wtblade_group_full</code></td>
+<td>WTBlade-group, A1, s0</td>
+<td>60 (13)</td>
+<td>41.6 / 17.1</td>
+<td>41.8 / 17.3</td>
+</tr>
+<tr>
+<td><code>rfdetrm640cos_cp_wtblade_group_full_s1</code></td>
+<td>WTBlade-group, A1, s1</td>
+<td>60 (16)</td>
+<td>41.3 / 16.9</td>
+<td>39.3 / 16.5</td>
+</tr>
+<tr>
+<td><code>rfdetrm640cos_cp_d1_wtblade_group_full</code></td>
+<td>WTBlade-group, A2</td>
+<td>60 (16)</td>
+<td>39.2 / 15.7</td>
+<td>40.1 / 16.1</td>
+</tr>
+<tr>
+<td><code>rfdetrm640cos_cp_d2_wtblade_group_full</code></td>
+<td>WTBlade-group, A3</td>
+<td>60 (8)</td>
+<td>44.2 / 17.8</td>
+<td>41.7 / 16.6</td>
+</tr>
+<tr>
+<td><code>rfdetrm640ag_id_wtbd_group</code></td>
+<td>ID-WTBD, class-agnostic</td>
+<td>100 (23)</td>
+<td>80.7 / 48.3</td>
+<td>72.9 / 41.9</td>
+</tr>
+<tr>
+<td><code>rfdetrm640ag_id_wtblade_group</code></td>
+<td>ID-WTBlade, class-agnostic</td>
+<td>60 (26)</td>
+<td>49.5 / 20.5</td>
+<td>51.7 / 21.5</td>
+</tr>
+<tr>
+<td><code>rfdetrm640ag_x_wtbd_group</code></td>
+<td>X-WTBD, class-agnostic</td>
+<td>12 (12)</td>
+<td>72.2 / 38.6 (own val)</td>
+<td>17.7 / 6.0</td>
+</tr>
+<tr>
+<td><code>rfdetrm640ag_x_wtblade_group</code></td>
+<td>X-WTBlade, class-agnostic</td>
+<td>12 (12)</td>
+<td>62.1 / 33.6 (own val)</td>
+<td>2.4 / 0.5</td>
+</tr>
+<tr>
+<td><code>yolo12l_wtblade_group</code></td>
+<td>WTBlade-group</td>
+<td>50 (43)</td>
+<td>33.6 / 12.5</td>
+<td>32.2 / 13.3</td>
+</tr>
+</tbody>
+</table>
+<table class="long">
+<caption>Table 27. Registry of earlier runs, as kept in the research log
+(§27 there; section references inside this table are to the log). Scores
+are fractions, not percent.</caption>
+
+<thead>
+<tr>
+<th>Run folder</th>
+<th>Data</th>
+<th>Model</th>
+<th>Epochs</th>
+<th>Val best (mAP50 / 50-95)</th>
+<th>Test (mAP50 / 50-95)</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Runs 1–5</td>
+<td>WS original</td>
+<td>Paper-faithful / BladeYOLO-S</td>
+<td>—</td>
+<td>see §2</td>
+<td>—</td>
+<td>Logs on Kaggle only</td>
+</tr>
+<tr>
+<td><code>bladeyolo_l_sota</code> (Run 6)</td>
+<td>WS original (<strong>leaky</strong>)</td>
+<td>BladeYOLO-L</td>
+<td>400</td>
+<td>0.781 / 0.469</td>
+<td>—</td>
+<td>Inflated</td>
+</tr>
+<tr>
+<td><code>bladeyolo_l_sota-2</code> (Run 7)</td>
+<td>WS original (<strong>leaky</strong>)</td>
+<td>BladeYOLO-L + “Mamba” + (inactive) WIoU</td>
+<td>400</td>
+<td>0.769 / 0.478</td>
+<td>—</td>
+<td>Inflated</td>
+</tr>
+<tr>
+<td><code>yolo12l_baseline</code></td>
+<td>v2</td>
+<td>YOLO12-L</td>
+<td>266</td>
+<td>0.290 / 0.122</td>
+<td>0.358 / 0.149</td>
+<td>lr0 0.002</td>
+</tr>
+<tr>
+<td><code>bladeyolo_l</code></td>
+<td>v2</td>
+<td>BladeYOLO-L (repaired)</td>
+<td>167 (stopped)</td>
+<td>0.344 / 0.123</td>
+<td>0.400 / 0.146 (epoch 124)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>yolo12l_v3</code></td>
+<td>v3</td>
+<td>YOLO12-L</td>
+<td>150</td>
+<td>0.290 / 0.141</td>
+<td>0.263 / 0.109</td>
+<td>Old harmful recipe</td>
+</tr>
+<tr>
+<td><code>bladeyolo_v3</code></td>
+<td>v3</td>
+<td>BladeYOLO-L v1</td>
+<td>150</td>
+<td>0.356 / 0.156</td>
+<td>0.317 / 0.124</td>
+<td></td>
+</tr>
+<tr>
+<td><code>bladeyolo2_v3</code></td>
+<td>v3</td>
+<td>BladeYOLO-v2</td>
+<td>100</td>
+<td>0.369 / 0.172</td>
+<td>0.296 / 0.123 (evaluator)</td>
+<td>Test lost on Kaggle (segfault)</td>
+</tr>
+<tr>
+<td>WBF ensemble</td>
+<td>v3 / v3.2</td>
+<td>3 models</td>
+<td>—</td>
+<td>—</td>
+<td>0.339 / 0.143 (v3); ~0.411 / 0.168 (merged)</td>
+<td>Fusion IoU chosen on val</td>
+</tr>
+<tr>
+<td><code>bladeyolo2_wtbd_group</code> (attempt 1)</td>
+<td>WTBD-group</td>
+<td>BladeYOLO-v2</td>
+<td>99 of 150</td>
+<td>0.649 / 0.379</td>
+<td>—</td>
+<td>NaN at epoch 99; folder lost</td>
+</tr>
+<tr>
+<td><strong><code>bladeyolo2_wtbd_group</code></strong></td>
+<td>WTBD-group (leak-free)</td>
+<td>BladeYOLO-v2</td>
+<td>150</td>
+<td>0.650 / 0.368 (epoch 124)</td>
+<td><strong>0.548 / 0.245</strong>; TTA 0.574 / 0.279</td>
+<td>Test run locally</td>
+</tr>
+<tr>
+<td><strong><code>bladeyolo2_wtbd_official</code></strong></td>
+<td>WTBD official (<strong>leaky</strong>)</td>
+<td>BladeYOLO-v2</td>
+<td>120</td>
+<td>0.845 / 0.475 (epoch 105)</td>
+<td><strong>0.840 / 0.493</strong>; TTA 0.830 / 0.517</td>
+<td>TTA run locally</td>
+</tr>
+<tr>
+<td><strong><code>bladeyolo2_wtbd_group_tolerant</code></strong></td>
+<td>WTBD-group (leak-free)</td>
+<td>BladeYOLO-v2, split-tolerant targets</td>
+<td>150</td>
+<td>0.609 / 0.352 (epoch 83)</td>
+<td><strong>0.523 / 0.249</strong>; TTA 0.552 / 0.282</td>
+<td>5 NaN batches dropped (attention overflow, since fixed)</td>
+</tr>
+<tr>
+<td><code>bladeyolo2_wtbd_group_f25</code></td>
+<td>WTBD-group, 25% of train scenes</td>
+<td>BladeYOLO-v2</td>
+<td>150</td>
+<td>0.444 / 0.226 (epoch 126)</td>
+<td><strong>0.232 / 0.082</strong>; TTA 0.269 / 0.105</td>
+<td>Learning curve</td>
+</tr>
+<tr>
+<td><code>bladeyolo2_wtbd_group_f50</code></td>
+<td>WTBD-group, 50% of train scenes</td>
+<td>BladeYOLO-v2</td>
+<td>150</td>
+<td>0.472 / 0.263 (epoch 140)</td>
+<td><strong>0.413 / 0.183</strong>; TTA 0.473 / 0.211</td>
+<td>Learning curve</td>
+</tr>
+<tr>
+<td><code>yolo12l_wtbd_group_f25</code></td>
+<td>WTBD-group, 25% of train scenes</td>
+<td>YOLO12-L</td>
+<td>150</td>
+<td>0.233 / 0.139 (epoch 150)</td>
+<td><strong>0.106 / 0.037</strong>; TTA 0.144 / 0.059</td>
+<td>Learning curve</td>
+</tr>
+<tr>
+<td><code>yolo12l_wtbd_group_f50</code></td>
+<td>WTBD-group, 50% of train scenes</td>
+<td>YOLO12-L</td>
+<td>150</td>
+<td>0.279 / 0.167 (epoch 120)</td>
+<td><strong>0.244 / 0.105</strong>; TTA 0.259 / 0.125</td>
+<td>Learning curve</td>
+</tr>
+<tr>
+<td><code>bladeyolo2_wtbd_group_f25_sslsyn</code></td>
+<td>WTBD-group 25% + view pool</td>
+<td>BladeYOLO-v2, synthetic-view teacher–student</td>
+<td>150</td>
+<td>0.427 / 0.203 (epoch 142)</td>
+<td><strong>0.221 / 0.071</strong>; TTA 0.233 / 0.089</td>
+<td>Phase 22</td>
+</tr>
+<tr>
+<td><code>bladeyolo2_wtbd_group_f25_sslreal</code></td>
+<td>WTBD-group 25% + view pool</td>
+<td>BladeYOLO-v2, real-view teacher–student</td>
+<td>150</td>
+<td>0.450 / 0.210 (epoch 107)</td>
+<td><strong>0.213 / 0.085</strong>; TTA 0.268 / 0.107</td>
+<td>Phase 22; teacher collapsed</td>
+</tr>
+<tr>
+<td><code>bladeyolo2_wtbd_group_f25_sslsyn2</code></td>
+<td>WTBD-group 25% + view pool</td>
+<td>BladeYOLO-v2, synthetic views (fixed)</td>
+<td>150</td>
+<td>0.448 / 0.220 (epoch 122)</td>
+<td><strong>0.224 / 0.078</strong>; TTA 0.259 / 0.106</td>
+<td>Phase 23</td>
+</tr>
+<tr>
+<td><code>bladeyolo2_wtbd_group_f25_sslreal2</code></td>
+<td>WTBD-group 25% + view pool</td>
+<td>BladeYOLO-v2, real views (fixed)</td>
+<td>150</td>
+<td>0.382 / 0.184 (epoch 127)</td>
+<td><strong>0.192 / 0.077</strong>; TTA 0.248 / 0.101</td>
+<td>Phase 23</td>
+</tr>
+<tr>
+<td><code>bladeyolo2_wtbd_group_f25_sslin</code></td>
+<td>WTBD-group 25% + other 75% unlabelled</td>
+<td>BladeYOLO-v2, in-domain teacher–student</td>
+<td>150</td>
+<td>0.457 / 0.227 (epoch 131)</td>
+<td><strong>0.209 / 0.080</strong>; TTA 0.245 / 0.101</td>
+<td>Phase 23</td>
+</tr>
+<tr>
+<td><code>bladeyolo2_wtbd_group_f25_s1</code></td>
+<td>WTBD-group, 25% of train scenes</td>
+<td>BladeYOLO-v2, seed 1</td>
+<td>150</td>
+<td>0.411 / 0.199 (epoch 129)</td>
+<td><strong>0.224 / 0.087</strong>; TTA 0.242 / 0.105</td>
+<td>Phase 24</td>
+</tr>
+<tr>
+<td><code>bladeyolo2_wtbd_group_f25_s2</code></td>
+<td>WTBD-group, 25% of train scenes</td>
+<td>BladeYOLO-v2, seed 2</td>
+<td>150</td>
+<td>0.435 / 0.203 (epoch 143)</td>
+<td><strong>0.184 / 0.068</strong>; TTA 0.229 / 0.096</td>
+<td>Phase 24</td>
+</tr>
+<tr>
+<td><code>bladeyolo2_wtbd_group_f25_sslinb_s0</code></td>
+<td>WTBD-group 25% + other 75% unlabelled</td>
+<td>BladeYOLO-v2, in-domain, class-balanced, seed 0</td>
+<td>150</td>
+<td>0.344 / 0.154 (epoch 75)</td>
+<td><strong>0.143 / 0.060</strong>; TTA 0.183 / 0.079</td>
+<td>Phase 24</td>
+</tr>
+<tr>
+<td><code>bladeyolo2_wtbd_group_f25_sslinb_s1</code></td>
+<td>WTBD-group 25% + other 75% unlabelled</td>
+<td>same, seed 1</td>
+<td>150</td>
+<td>0.352 / 0.167 (epoch 92)</td>
+<td><strong>0.163 / 0.065</strong>; TTA 0.180 / 0.075</td>
+<td>Phase 24; pseudo-label runaway, epochs 33–62</td>
+</tr>
+<tr>
+<td><code>bladeyolo2_wtbd_group_f25_sslinb_s2</code></td>
+<td>WTBD-group 25% + other 75% unlabelled</td>
+<td>same, seed 2</td>
+<td>150</td>
+<td>0.445 / 0.205 (epoch 148)</td>
+<td><strong>0.183 / 0.073</strong>; TTA 0.213 / 0.095</td>
+<td>Phase 24</td>
+</tr>
+<tr>
+<td><code>bladeyolo2nodino_wtbd_group_f25_s0</code></td>
+<td>WTBD-group, 25% of train scenes</td>
+<td>BladeYOLO-v2 without DINOv3, seed 0</td>
+<td>150</td>
+<td>0.229 / 0.126 (epoch 106)</td>
+<td><strong>0.114 / 0.044</strong>; TTA 0.153 / 0.063</td>
+<td>Phase 25</td>
+</tr>
+<tr>
+<td><code>bladeyolo2nodino_wtbd_group_f25_s1</code></td>
+<td>WTBD-group, 25% of train scenes</td>
+<td>BladeYOLO-v2 without DINOv3, seed 1</td>
+<td>150</td>
+<td>0.186 / 0.105 (epoch 89)</td>
+<td><strong>0.081 / 0.031</strong>; TTA 0.126 / 0.053</td>
+<td>Phase 25</td>
+</tr>
+<tr>
+<td><code>bladeyolo2_wtbd_group_s1</code></td>
+<td>WTBD-group (leak-free)</td>
+<td>BladeYOLO-v2, seed 1</td>
+<td>150</td>
+<td>0.630 / 0.370 (epoch 128)</td>
+<td><strong>0.554 / 0.245</strong>; TTA 0.559 / 0.269</td>
+<td>Phase 26; resumed at epoch 78</td>
+</tr>
+<tr>
+<td><code>bladeyolo2_wtbd_group_tolsel_s0</code></td>
+<td>WTBD-group (leak-free)</td>
+<td>BladeYOLO-v2, tolerance for corrosion + hide_craze, seed 0</td>
+<td>150</td>
+<td>0.656 / 0.381 (epoch 140)</td>
+<td><strong>0.567 / 0.245</strong>; TTA 0.568 / 0.258</td>
+<td>Phase 26</td>
+</tr>
+<tr>
+<td><code>bladeyolo2_wtbd_group_tolsel_s1</code></td>
+<td>WTBD-group (leak-free)</td>
+<td>same, seed 1</td>
+<td>150</td>
+<td>0.704 / 0.380 (epoch 119)</td>
+<td><strong>0.561 / 0.245</strong>; TTA 0.555 / 0.264</td>
+<td>Phase 26</td>
+</tr>
+<tr>
+<td><code>bladeyolo2b_wtbd_group_f25_s0</code></td>
+<td>WTBD-group, 25% of train scenes</td>
+<td>BladeYOLO-v2, frozen DINOv3 ViT-B/16, seed 0</td>
+<td>150</td>
+<td>0.383 / 0.176 (epoch 127)</td>
+<td><strong>0.252 / 0.102</strong>; TTA 0.313 / 0.127</td>
+<td>Phase 27</td>
+</tr>
+<tr>
+<td><code>bladeyolo2b_wtbd_group_f25_s1</code></td>
+<td>WTBD-group, 25% of train scenes</td>
+<td>same, seed 1</td>
+<td>150</td>
+<td>0.416 / 0.217 (epoch 146)</td>
+<td><strong>0.283 / 0.116</strong>; TTA 0.272 / 0.132</td>
+<td>Phase 27</td>
+</tr>
+<tr>
+<td><code>bladeyolo2l_wtbd_group_f25_s0</code></td>
+<td>WTBD-group, 25% of train scenes</td>
+<td>BladeYOLO-v2, frozen DINOv3 ViT-L/16, seed 0</td>
+<td>150</td>
+<td>0.438 / 0.219 (epoch 107)</td>
+<td><strong>0.337 / 0.115</strong>; TTA 0.357 / 0.153</td>
+<td>Phase 27</td>
+</tr>
+<tr>
+<td><code>bladeyolo2l_wtbd_group_f25_s1</code></td>
+<td>WTBD-group, 25% of train scenes</td>
+<td>same, seed 1</td>
+<td>150</td>
+<td>0.484 / 0.235 (epoch 81)</td>
+<td><strong>0.301 / 0.109</strong>; TTA 0.348 / 0.146</td>
+<td>Phase 27</td>
+</tr>
+<tr>
+<td><code>bladeyolo2nodino_wtbd_group_f50</code></td>
+<td>WTBD-group, 50% of train scenes</td>
+<td>BladeYOLO-v2 without DINOv3</td>
+<td>150</td>
+<td>0.293 / 0.166 (epoch 105)</td>
+<td><strong>0.225 / 0.093</strong>; TTA 0.244 / 0.111</td>
+<td>Phase 27</td>
+</tr>
+<tr>
+<td><code>bladeyolo2nodino_wtbd_group</code></td>
+<td>WTBD-group (leak-free)</td>
+<td>BladeYOLO-v2 without DINOv3</td>
+<td>150</td>
+<td>0.404 / 0.247 (epoch 108)</td>
+<td><strong>0.361 / 0.170</strong>; TTA 0.385 / 0.210</td>
+<td>Phase 27</td>
+</tr>
+<tr>
+<td><strong><code>yolo12l_wtbd_group</code></strong></td>
+<td>WTBD-group (leak-free)</td>
+<td>YOLO12-L</td>
+<td>150</td>
+<td>0.419 / 0.269 (epoch 130)</td>
+<td><strong>0.438 / 0.206</strong>; TTA 0.440 / 0.230</td>
+<td>Same recipe</td>
+</tr>
+<tr>
+<td><strong><code>yolo12l_wtbd_official</code></strong></td>
+<td>WTBD official (<strong>leaky</strong>)</td>
+<td>YOLO12-L</td>
+<td>120</td>
+<td>0.665 / 0.394 (epoch 104)</td>
+<td><strong>0.704 / 0.388</strong>; TTA 0.734 / 0.438</td>
+<td>Same recipe</td>
+</tr>
+</tbody>
+</table>
+<h1 class="unnumbered" id="references">References</h1>
+<div id="refs" class="references csl-bib-body" data-entry-spacing="0"
+role="list">
+<div id="ref-bladeyolo" class="csl-entry" role="listitem">
+[1] Xu, Y., Zhang, F., Wang, F., <em>et al.</em> <span>BladeYOLO</span>:
+Wind turbine blade defect detection with limited annotations and
+weak-saliency awareness. <em>IEEE Transactions on Geoscience and Remote
+Sensing</em>, 64, 5634215. 2026. doi:<a
+href="https://doi.org/10.1109/TGRS.2026.3717985">10.1109/TGRS.2026.3717985</a>.
+</div>
+<div id="ref-gfdyolox" class="csl-entry" role="listitem">
+[2] Liu, D., Liu, M. Wind turbine blades defect detection based on
+global and local attention with multi-feature fusion. <em>Applied Soft
+Computing</em>, 185, 113914. 2025. doi:<a
+href="https://doi.org/10.1016/j.asoc.2025.113914">10.1016/j.asoc.2025.113914</a>.
+</div>
+<div id="ref-gayolo" class="csl-entry" role="listitem">
+[3] Zhang, Y., Wang, L., Huang, C., Luo, X. Wind turbine blade defect
+detection based on the genetic algorithm-enhanced <span>YOLOv5</span>
+algorithm using synthetic data. <em>IEEE Transactions on Industry
+Applications</em>, 61(1), 653–665. 2025. doi:<a
+href="https://doi.org/10.1109/TIA.2024.3481190">10.1109/TIA.2024.3481190</a>.
+</div>
+<div id="ref-kgpyolo" class="csl-entry" role="listitem">
+[4] Li, X., Deng, B., He, Y., <em>et al.</em> Wind turbine blade surface
+defect detection via <span>UAV</span> high-resolution images. <em>IEEE
+Sensors Journal</em>, 26(2), 2678–2687. 2026. doi:<a
+href="https://doi.org/10.1109/JSEN.2025.3639650">10.1109/JSEN.2025.3639650</a>.
+</div>
+<div id="ref-shihavuddin" class="csl-entry" role="listitem">
+[5] Shihavuddin, A.S.M., Chen, X., Fedorov, V., <em>et al.</em> Wind
+turbine surface damage detection by deep learning aided drone inspection
+analysis. <em>Energies</em>, 12(4), 676. 2019. doi:<a
+href="https://doi.org/10.3390/en12040676">10.3390/en12040676</a>.
+</div>
+<div id="ref-foster" class="csl-entry" role="listitem">
+[6] Foster, A., Best, O., Gianni, M., Khan, A., Collins, K., Sharma, S.
+Drone footage wind turbine surface damage detection. <em>IEEE 14th
+image, video, and multidimensional signal processing workshop
+(IVMSP)</em>, 1–5. 2022. doi:<a
+href="https://doi.org/10.1109/IVMSP54334.2022.9816220">10.1109/IVMSP54334.2022.9816220</a>.
+</div>
+<div id="ref-yolov12" class="csl-entry" role="listitem">
+[7] Tian, Y., Ye, Q., Doermann, D. <span>YOLOv12</span>:
+Attention-centric real-time object detectors. <em>arXiv:2502.12524</em>.
+2025.
+</div>
+<div id="ref-dinoyolo" class="csl-entry" role="listitem">
+[8] Malaisree, P., Youwai, S., Kitkobsin, T., Janrungautai, S.
+<span>DINO-YOLO</span>: Self-supervised pre-training for data-efficient
+object detection in civil engineering applications.
+<em>arXiv:2510.25140</em>. 2025.
+</div>
+<div id="ref-wtbd" class="csl-entry" role="listitem">
+[9] Ji, L., Cheng, J., Wu, S. Multiclass dataset for intelligent
+detection of wind turbine blade defects using drone imagery.
+<em>Scientific Data</em>, 13, 396. 2026. doi:<a
+href="https://doi.org/10.1038/s41597-026-06762-x">10.1038/s41597-026-06762-x</a>.
+</div>
+<div id="ref-wtbs2025" class="csl-entry" role="listitem">
+[10] Zhang, R. <span>WTBs2025</span>. figshare dataset. 2025. <a
+href="https://figshare.com/articles/dataset/WTBs2025/28876391">https://figshare.com/articles/dataset/WTBs2025/28876391</a>.
+</div>
+<div id="ref-seeingunseen" class="csl-entry" role="listitem">
+[11] Zhang, Y., Zhou, Q., Imani, F., Tang, J. Seeing the unseen: Towards
+training-free inspection for wind turbine blades using
+knowledge-augmented vision language models. <em>arXiv:2510.22868</em>.
+2025.
+</div>
+<div id="ref-boxes2pixels" class="csl-entry" role="listitem">
+[12] Lendering, C., Akdag, E., Bondarev, E. <span>Boxes2Pixels</span>:
+Learning defect segmentation from noisy <span>SAM</span> masks.
+<em>arXiv:2604.11162</em>. 2026.
+</div>
+<div id="ref-barz" class="csl-entry" role="listitem">
+[13] Barz, B., Denzler, J. Do we train on test data? Purging
+<span>CIFAR</span> of near-duplicates. <em>Journal of Imaging</em>,
+6(6), 41. 2020.
+</div>
+<div id="ref-adimoolam" class="csl-entry" role="listitem">
+[14] Adimoolam, Y.K., Poullis, C., Averkiou, M. Data leakage detection
+and de-duplication in large scale geospatial image datasets.
+<em>arXiv:2304.02296</em>. 2023.
+</div>
+<div id="ref-kapoor" class="csl-entry" role="listitem">
+[15] Kapoor, S., Narayanan, A. Leakage and the reproducibility crisis in
+machine-learning-based science. <em>Patterns</em>, 4, 100804. 2023.
+doi:<a
+href="https://doi.org/10.1016/j.patter.2023.100804">10.1016/j.patter.2023.100804</a>.
+</div>
+<div id="ref-recht" class="csl-entry" role="listitem">
+[16] Recht, B., Roelofs, R., Schmidt, L., Shankar, V. Do
+<span>ImageNet</span> classifiers generalize to <span>ImageNet</span>?
+<em>ICML</em>. 2019.
+</div>
+<div id="ref-feldman" class="csl-entry" role="listitem">
+[17] Feldman, V., Zhang, C. What neural networks memorize and why:
+Discovering the long tail via influence estimation. <em>NeurIPS</em>.
+2020.
+</div>
+<div id="ref-rfdetr" class="csl-entry" role="listitem">
+[18] Robinson, I., Robicheaux, P., Popov, M., Ramanan, D., Peri, N.
+<span>RF-DETR</span>: Neural architecture search for real-time detection
+transformers. <em>arXiv:2511.09554</em>. 2025.
+</div>
+<div id="ref-dinov2" class="csl-entry" role="listitem">
+[19] Oquab, M., Darcet, T., Moutakanni, T., Vo, H., <em>et al.</em>
+<span>DINOv2</span>: Learning robust visual features without
+supervision. <em>Transactions on Machine Learning Research</em>. 2024.
+</div>
+<div id="ref-rf100vl" class="csl-entry" role="listitem">
+[20] Robicheaux, P., Popov, M., Madan, A., Robinson, I., <em>et al.</em>
+<span>Roboflow100-VL</span>: A multi-domain object detection benchmark
+for vision-language models. <em>arXiv:2505.20612</em>. 2025.
+</div>
+<div id="ref-dinov3" class="csl-entry" role="listitem">
+[21] Siméoni, O., Vo, H.V., Seitzer, M., Baldassarre, F., <em>et
+al.</em> <span>DINOv3</span>. <em>arXiv:2508.10104</em>. 2025.
+</div>
+<div id="ref-lpft" class="csl-entry" role="listitem">
+[22] Kumar, A., Raghunathan, A., Jones, R., Ma, T., Liang, P.
+Fine-tuning can distort pretrained features and underperform
+out-of-distribution. <em>ICLR</em>. 2022.
+</div>
+<div id="ref-tedeval" class="csl-entry" role="listitem">
+[23] Lee, C.Y., Baek, Y., Lee, H. <span>TedEval</span>: A fair
+evaluation metric for scene text detectors. <em>arXiv:1907.01227</em>.
+2019.
+</div>
+<div id="ref-murrugarra" class="csl-entry" role="listitem">
+[24] Murrugarra-Llerena, J., Kirsten, L.N., Jung, C.R. Can we trust
+bounding box annotations for object detection? <em>CVPR workshops</em>,
+4812–4821. 2022. doi:<a
+href="https://doi.org/10.1109/CVPRW56347.2022.00528">10.1109/CVPRW56347.2022.00528</a>.
+</div>
+<div id="ref-tschirschwitz" class="csl-entry" role="listitem">
+[25] Tschirschwitz, D., Benz, C., Florek, M., Norderhus, H., <em>et
+al.</em> Drawing the same bounding box twice? Coping noisy annotations
+in object detection with repeated labels. <em>arXiv:2309.09742</em>.
+2023.
+</div>
+<div id="ref-klloss" class="csl-entry" role="listitem">
+[26] He, Y., Zhu, C., Wang, J., Savvides, M., Zhang, X. Bounding box
+regression with uncertainty for accurate object detection.
+<em>CVPR</em>. 2019.
+</div>
+<div id="ref-crc" class="csl-entry" role="listitem">
+[27] Angelopoulos, A.N., Bates, S., Fisch, A., Lei, L., Schuster, T.
+Conformal risk control. <em>ICLR</em>. 2024.
+</div>
+<div id="ref-andeol" class="csl-entry" role="listitem">
+[28] Andéol, L., Fel, T., De Grancey, F., Mossina, L. Confident object
+detection via conformal prediction and conformal risk control: An
+application to railway signaling. <em>Conformal and probabilistic
+prediction with applications (COPA)</em>. 2023.
+</div>
+<div id="ref-tfa" class="csl-entry" role="listitem">
+[29] Wang, X., Huang, T.E., Darrell, T., Gonzalez, J.E., Yu, F.
+Frustratingly simple few-shot object detection. <em>ICML</em>. 2020.
+</div>
+<div id="ref-freesel" class="csl-entry" role="listitem">
+[30] Xie, Y., Ding, M., Tomizuka, M., Zhan, W. Towards free data
+selection with general-purpose models. <em>NeurIPS</em>. 2023.
+</div>
+<div id="ref-multidataset" class="csl-entry" role="listitem">
+[31] Zhou, X., Koltun, V., Krähenbühl, P. Simple multi-dataset
+detection. <em>CVPR</em>. 2022.
+</div>
+<div id="ref-domainbed" class="csl-entry" role="listitem">
+[32] Gulrajani, I., Lopez-Paz, D. In search of lost domain
+generalization. <em>ICLR</em>. 2021.
+</div>
+<div id="ref-copypaste" class="csl-entry" role="listitem">
+[33] Ghiasi, G., Cui, Y., Srinivas, A., Qian, R., <em>et al.</em> Simple
+copy-paste is a strong data augmentation method for instance
+segmentation. <em>CVPR</em>. 2021.
+</div>
+<div id="ref-fengche" class="csl-entry" role="listitem">
+[34] Roboflow Universe. fengChe (WTBlade-defect) object detection
+dataset. Roboflow Universe. <a
+href="https://universe.roboflow.com/detr-swsa0/fengche-evxno">https://universe.roboflow.com/detr-swsa0/fengche-evxno</a>.
+</div>
+<div id="ref-dcnv2" class="csl-entry" role="listitem">
+[35] Zhu, X., Hu, H., Lin, S., Dai, J. Deformable <span>ConvNets</span>
+v2: More deformable, better results. <em>CVPR</em>. 2019.
+</div>
+<div id="ref-vmamba" class="csl-entry" role="listitem">
+[36] Liu, Y., Tian, Y., Zhao, Y., Yu, H., <em>et al.</em>
+<span>VMamba</span>: Visual state space model. <em>NeurIPS</em>. 2024.
+</div>
+<div id="ref-mamba" class="csl-entry" role="listitem">
+[37] Gu, A., Dao, T. Mamba: Linear-time sequence modeling with selective
+state spaces. <em>arXiv:2312.00752</em>. 2023.
+</div>
+<div id="ref-wiou" class="csl-entry" role="listitem">
+[38] Tong, Z., Chen, Y., Xu, Z., Yu, R. <span>Wise-IoU</span>: Bounding
+box regression loss with dynamic focusing mechanism.
+<em>arXiv:2301.10051</em>. 2023.
+</div>
+<div id="ref-coco" class="csl-entry" role="listitem">
+[39] Lin, T.-Y., Maire, M., Belongie, S., Bourdev, L., <em>et al.</em>
+Microsoft <span>COCO</span>: Common objects in context. <em>ECCV</em>.
+2014.
+</div>
+<div id="ref-tide" class="csl-entry" role="listitem">
+[40] Bolya, D., Foley, S., Hays, J., Hoffman, J. <span>TIDE</span>: A
+general toolbox for identifying object detection errors. <em>ECCV</em>.
+2020.
+</div>
+<div id="ref-owlv2" class="csl-entry" role="listitem">
+[41] Minderer, M., Gritsenko, A., Houlsby, N. Scaling open-vocabulary
+object detection. <em>NeurIPS</em>. 2023.
+</div>
+<div id="ref-data2vec" class="csl-entry" role="listitem">
+[42] Baevski, A., Hsu, W.-N., Xu, Q., Babu, A., <em>et al.</em>
+data2vec: A general framework for self-supervised learning in speech,
+vision and language. <em>ICML</em>. 2022.
+</div>
+<div id="ref-sam2" class="csl-entry" role="listitem">
+[43] Ravi, N., Gabeur, V., Hu, Y.-T., Hu, R., <em>et al.</em> <span>SAM
+2</span>: Segment anything in images and videos. <em>ICLR</em>. 2025.
+</div>
+<div id="ref-meanteacher" class="csl-entry" role="listitem">
+[44] Tarvainen, A., Valpola, H. Mean teachers are better role models:
+Weight-averaged consistency targets improve semi-supervised deep
+learning results. <em>NeurIPS</em>. 2017.
+</div>
+</div>
+</body>
+</html>

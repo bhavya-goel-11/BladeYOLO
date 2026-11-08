@@ -3698,6 +3698,20 @@ YOLO12-L on WTBlade-group by Ultralytics' own metrics: mAP50 33.6, mAP50-95 13.9
 
 **Next, as pre-registered:** drop this direction. The named next candidate is defect detection without defect labels (normal-only anomaly detection). Before registering it, note that the anomaly prior of H2 (§24b) failed: distance from normal surface picked out edges and other unusual content, and box recall was below chance. It must not repeat that. Box-tolerant training is also closed (§15, §23): blanket split tolerance was not an improvement, and class-selective tolerance did not move the aggregate.
 
+### Paper draft (8 Nov)
+
+**Experimentation stops here (user, 8 Nov):** "let's leave it now, draft everything we have". The normal-only anomaly direction named by the G28 pre-registration is not started.
+
+- **Source and build:** `paper/paper.md` with `paper/references.bib`; `tools/build_paper.py` numbers figures and tables and writes `paper/paper.pdf` (via HTML and headless Chrome) and `paper/paper.tex`. No LaTeX engine exists on this machine, so the `.tex` has not been compiled.
+- **New numbers:** `tools/paper_evidence.py` → `runs/analysis/paper/evidence.json` (per-class leak-free AP of every model, class-agnostic PR curves, G28 pool composition). `tools/paper_figures2.py` → figures 7–28, images drawn with fixed seeds.
+- **Pre-registered item closed:** G27 promised WTBD-group test with and without the 6 pixel-twin images. `runs/analysis/g27/a2_without_twins.py` → `a2_without_twins.log`: R − A0 −1.01 (WTBD-group), +0.40 (WTBlade-group); G28 ratio 0.64 / 0.56, share 0.55 / 0.39. No decision changes.
+- **Found while writing (corrections):**
+  - leak-free mAP50-95 / mAP50 ratios are 0.41–0.60, not 0.42–0.47: full-label RF-DETR on WTBD-group reaches 0.60. BladeYOLO's 0.87 is still above all of them;
+  - YOLO12-L on WTBlade-group ran 50 epochs, with its best validation at epoch 43 after a nearly linear rise, so its 13.3 may understate it;
+  - BladeYOLO-v2's official and group runs used 120 and 150 epochs, so "same recipe" is not exact for them; RF-DETR-M's official and group runs on WTBD are 100 epochs each;
+  - X's recall against AP on WTBD is a ranking effect: precision 54% at recall 10% and 23% at recall 30%, best F1 0.30.
+- **Open before submission:** author affiliation; WTBs2025's *Sci. Data* 13:1310 citation could not be confirmed online (the bibliography cites its figshare record); image rights for Wind Surface and WTBlade-Defect examples; ask the BladeYOLO authors for their split; the Kaggle upload of `blade-defect-benchmark`.
+
 ---
 
 ## 25. Engineering problems solved

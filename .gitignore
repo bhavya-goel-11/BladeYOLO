@@ -48,4 +48,6 @@ Thumbs.db
 
 # Paper figures are generated, small, and versioned
 !paper/figures/*.pdf
+!paper/figures/*.png
+!paper/paper.pdf
 kaggle-blade-group-splits/

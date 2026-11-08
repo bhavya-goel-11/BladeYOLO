@@ -1,5 +1,7 @@
 # Preprint plan: framing, outline, and where every number comes from
 
+> **Status (8 Nov 2026): superseded by the draft.** The paper is now [`paper.md`](paper.md) (built PDF: [`paper.pdf`](paper.pdf); build with `.venv/bin/python tools/build_paper.py`). This file and [`tables.md`](tables.md) are the 4 Nov plan, kept for traceability. Numbers changed since: leak-free mAP50-95 / mAP50 ratios now span 0.41–0.60 (full-label RF-DETR), G27 failed and G28 is dead, and RF-DETR's full-label leak-free rows exist.
+
 Status (4 Nov 2026): experimentation stopped. Every number below exists in `research_log.md` and, for the new ones, in
 `runs/analysis/paper/`. Tables: [`tables.md`](tables.md). Figures: `figures/` (regenerate with
 `.venv/bin/python tools/paper_figures.py`).
