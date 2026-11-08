@@ -3649,6 +3649,55 @@ The recipe is unchanged everywhere (RF-DETR batch 4 × accum 4, cosine), so DGX 
 - ID-WTBD and ID-WTBlade together, about 6 h, one session.
 - Three sessions, all parallel.
 
+### G27 A-2 and G28 results: both pre-registered tests fail; YOLO12-L on WTBlade-group (8 Nov)
+
+**Queue.** `tools/sessions.sh` on one A100 (bf16), about 13 h from 02:07 to 14:56 IST, against the 10 h estimate. It stopped once at `g28x_wtbl` because the DGX copy of the data had no `pools/g28-x-wtblade` (the transferred `data.zip` predated that pool), which was copied over. X-WTBlade took about 2 h 50 min (about 14 min per epoch) against an estimate of 1.5 h; the cause is not recorded. All 12 epochs are logged and the final checkpoint is at step 10,812. Its folder also held a `last.ckpt` and a `checkpoint_best_ema.pth` from epoch 3 (step 2,703, 11:31) that training neither overwrote nor removed, also unexplained. Predictions use `checkpoint_best_total.pth`, so the leftovers do not affect scores and were deleted. The Kaggle A0 seed-1 runs are in `runs/analysis/archive/kaggle_a0s1/`; A-2 uses the A100 reruns, so each seed-1 pair shares a GPU.
+
+**G27 A-2 (`runs/analysis/g27/score.md`): the primary claim fails.** R = A1 (copy-paste), R − A0, test mAP50-95, mean of seeds 0 and 1:
+
+| | R − A0 | 95% CI | P(> 0) |
+|---|---|---|---|
+| WTBD-group | −0.99 | [−8.6, +1.2] | 0.193 |
+| WTBlade-group | +0.35 | [−0.5, +1.6] | 0.812 |
+| mean | −0.32 | [−4.1, +0.9] | 0.290 |
+
+Seed spread is as large as the effect (A1 on WTBD-group: 30.7 and 32.7). Copy-paste is not an improvement, and the G27 direction is closed.
+
+Architecture comparison, test mAP50-95, same evaluator (secondary):
+
+| model | WTBD-group | WTBlade-group |
+|---|---|---|
+| RF-DETR-M A0, seeds 0 / 1 | 33.2 / 32.2 | 16.2 / 16.9 |
+| BladeYOLO-v2 | 24.4 (ViT-S) | 18.0 (ViT-B) |
+| YOLO12-L | 18.5 | 13.3 |
+| BladeYOLO-v2 without DINOv3 | 15.2 | – |
+
+YOLO12-L on WTBlade-group by Ultralytics' own metrics: mAP50 33.6, mAP50-95 13.9.
+
+**G28 (`runs/analysis/g28/score.md`): dead on both targets by the pre-registered rule.** Class-agnostic, test, scene bootstrap:
+
+| target | arm | train images | AP50 | AP50-95 | tolerant AP50 | region AP | AR50 |
+|---|---|---|---|---|---|---|---|
+| WTBD-group | ID | 745 | 72.9 [57.6, 86.3] | 41.9 | 84.6 | 68.9 [61.3, 75.4] | 98.7 |
+| WTBD-group | X | 26,065 | 17.7 [11.9, 28.4] | 6.0 | 24.2 | 43.6 [37.4, 52.3] | 79.6 |
+| WTBlade-group | ID | 2,136 | 51.7 [48.0, 58.8] | 21.5 | 65.1 | 68.7 [62.6, 75.2] | 90.5 |
+| WTBlade-group | X | 14,405 | 2.4 [0.8, 3.5] | 0.5 | 3.2 | 37.6 [32.5, 45.1] | 38.2 |
+
+| target | X / ID region AP (bar ≥ 0.80) | convention share (bar ≥ 0.5) | G_std | G_reg | verdict |
+|---|---|---|---|---|---|
+| WTBD-group | 0.63 | 0.54 | +55.2 | +25.3 | dead |
+| WTBlade-group | 0.55 | 0.37 | +49.3 | +31.0 | dead |
+
+**Scope check (`runs/analysis/g28/scope_region_baseline.py`):** a trivial detector that boxes the whole image scores region AP 14.0 on WTBD-group and 24.2 on WTBlade-group, and standard AP50 0.0 and 1.0. X is above it in region AP (43.6 and 37.6), so it does carry defect information, but X-WTBlade's standard AP50 of 2.4 is barely above the trivial 1.0. Nothing here is usable as a detector on an unseen dataset.
+
+**Reading.**
+- Training volume from other sources does not replace target labels: 35× more images lost to 745 target images by 55 AP50 points on WTBD-group.
+- Annotation convention explains about half of the gap on WTBD-group and about a third on WTBlade-group, by the pre-registered measure.
+- X reached AP50 72 on its own held-out images at its final epoch on WTBD's pool, so training itself worked.
+- Not tested: why X's recall on WTBD-group (79.6) coexists with low AP. AR50 counts every prediction (up to about 300 per image) and so is generous. X also boxes things T does not label, as noted in the pre-registration.
+
+**Next, as pre-registered:** drop this direction. The named next candidate is defect detection without defect labels (normal-only anomaly detection). Before registering it, note that the anomaly prior of H2 (Phase with the normal-blade prior) failed: distance from normal surface picked out edges and other unusual content, and box recall was below chance. It must not repeat that. Box-tolerant training is also closed (§15, §23): tolerant metrics rise on the standard-vs-tolerant comparison, but split-tolerant and class-selective training did not move the aggregate.
+
 ---
 
 ## 25. Engineering problems solved
