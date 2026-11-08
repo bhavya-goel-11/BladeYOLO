@@ -3693,10 +3693,10 @@ YOLO12-L on WTBlade-group by Ultralytics' own metrics: mAP50 33.6, mAP50-95 13.9
 **Reading.**
 - Training volume from other sources does not replace target labels: 35× more images lost to 745 target images by 55 AP50 points on WTBD-group.
 - Annotation convention explains about half of the gap on WTBD-group and about a third on WTBlade-group, by the pre-registered measure.
-- X reached AP50 72 on its own held-out images at its final epoch on WTBD's pool, so training itself worked.
+- X-WTBD reached AP50 72 on its own held-out images at its final epoch, so training itself worked.
 - Not tested: why X's recall on WTBD-group (79.6) coexists with low AP. AR50 counts every prediction (up to about 300 per image) and so is generous. X also boxes things T does not label, as noted in the pre-registration.
 
-**Next, as pre-registered:** drop this direction. The named next candidate is defect detection without defect labels (normal-only anomaly detection). Before registering it, note that the anomaly prior of H2 (Phase with the normal-blade prior) failed: distance from normal surface picked out edges and other unusual content, and box recall was below chance. It must not repeat that. Box-tolerant training is also closed (§15, §23): tolerant metrics rise on the standard-vs-tolerant comparison, but split-tolerant and class-selective training did not move the aggregate.
+**Next, as pre-registered:** drop this direction. The named next candidate is defect detection without defect labels (normal-only anomaly detection). Before registering it, note that the anomaly prior of H2 (§24b) failed: distance from normal surface picked out edges and other unusual content, and box recall was below chance. It must not repeat that. Box-tolerant training is also closed (§15, §23): blanket split tolerance was not an improvement, and class-selective tolerance did not move the aggregate.
 
 ---
 
