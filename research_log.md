@@ -3712,6 +3712,113 @@ YOLO12-L on WTBlade-group by Ultralytics' own metrics: mAP50 33.6, mAP50-95 13.9
   - X's recall against AP on WTBD is a ranking effect: precision 54% at recall 10% and 23% at recall 30%, best F1 0.30.
 - **Open before submission:** author affiliation; WTBs2025's *Sci. Data* 13:1310 citation could not be confirmed online (the bibliography cites its figshare record); image rights for Wind Surface and WTBlade-Defect examples; ask the BladeYOLO authors for their split; the Kaggle upload of `blade-defect-benchmark`.
 
+### G29: RF-DETR with a frozen DINOv3 prior ("FP"), the final experiment. Pre-registered before any run (16 Nov)
+
+**Why this and nothing else.** The user asked for one last, targeted improvement over RF-DETR, chosen from what the log already shows, then tested on the leak-free and the official protocols. Three findings point to the same lever:
+- **Frozen DINOv3 is the one component that ever helped**, at every label fraction (§22, §24: +0.039 / +0.088 / +0.090 mAP50-95 at 25 / 50 / 100%), and ViT-B beats ViT-S (+40% at 25%).
+- **RF-DETR lacks what it carries.** On WTBlade-group the frozen-DINOv3 ViT-B YOLO beats fine-tuned RF-DETR-M (18.0 vs 16.2 / 16.9, G27 A-2). On WTBD, DINOv3 ViT-B box embeddings re-rank RF-DETR's own outputs (H18 / H18-R: +0.025 / +0.020, 8 models), i.e. its ranking deficit (error anatomy) is information that DINOv3 holds and RF-DETR does not use.
+- **That information cannot be written into RF-DETR's encoder.** Fine-tuning moves its features away from generic neighbourhoods (G22-O, ρ 0.36 on WTBD), and adapting the encoder further collapsed it (G27 D1: effective rank halved, −5.9 val) or did not help (D2).
+
+Everything else is closed: post-hoc rescoring (G15-R, H18-W, G20, G21), box extent (at the annotator ceiling), resolution on WTBlade (G24), copy-paste (G27 A-2), pooled data (G28), semi-supervision, SAM, priors as YOLO inputs (H3).
+
+**Method** (`tools/g29_prior.py`, `rfdetr_v1.py train --prior b`). A second, frozen encoder next to RF-DETR's fine-tuned one: DINOv3 ViT-B/16, blocks 4/8/12 with the final norm (BladeYOLO-v2 ViT-B's blocks), on RF-DETR's own ImageNet-normalised input. Both are patch 16, so the grids coincide. Its 2,304 channels are added to every projector output level, before the transformer encoder, the two-stage proposal selection and the decoder:
+
+  feat' = feat + Out(DW3×3(GELU(LN(Mix([feat, GELU(Reduce(LN(prior)))])))))
+
+- Out is a zero-initialised 1×1 conv, so step 0 is exactly RF-DETR.
+- 0.79M new parameters, trained at RF-DETR's base LR (1e-4).
+- DINOv3 lives in a process-wide cache, so it is not in the optimizer, the EMA or the checkpoints.
+- Recipe otherwise unchanged: the same arguments as each baseline twin, plus `--prior b`.
+
+**Novelty, stated honestly.** Fusing frozen foundation features into a detector is prior art (BladeYOLO, DINO-YOLO; DEIMv2 puts DINOv3 in a DETR). What is specific here is narrower:
+- a frozen generic encoder *beside* a fine-tuned one, chosen because of measured evidence that the fine-tuned one drifts from it (G22-O) and collapses when pushed further (G27 D1);
+- the leak-aware test: is the gain still there on images with no training twin?
+
+That is a defensible design, not a new module.
+
+**Arms and pairs** (Kaggle T4, fp16; each FP run is paired with an existing run of identical recipe on the same hardware type):
+
+| | FP run | baseline twin |
+|---|---|---|
+| P, seed 0 | `rfdetrm768cos_fp_wtbd_group_full`, `rfdetrm640cos_fp_wtblade_group_full` | `rfdetrm768cos_wtbd_group_full`, `rfdetrm640cos_wtblade_group_full` (G27 A0, T4) |
+| P, seed 1 | `…_full_s1` | `runs/analysis/archive/kaggle_a0s1/…_full_s1` (the T4 runs, not the A100 reruns) |
+| O, Wind Surface | `rfdetrm640cos_fp_windsurface_official` | `rfdetrm640cos_windsurface_official` (G26) |
+| O, WTBD-official | `rfdetrm768cos_fp_wtbd_official` (batch 2 × 8, as its twin) | `rfdetrm768cos_wtbd_official` (G26) |
+| S, 25% | `rfdetrmfp{,_rand1,_rand2,_rand3}_wtbd_group_f25` (576 px, RF-DETR's own constant schedule) | `rfdetrm{,_rand1,_rand2,_rand3}_wtbd_group_f25` (V1, seed 0) |
+
+**P, primary claim (leak-free; decides "a genuine improvement").** FP − A0 test mAP50-95, scene bootstrap, paired, mean of seeds 0 and 1, 2,000 replicates. It passes if:
+- the point estimate is > 0 on each dataset; and
+- the mean over the two datasets has P(> 0) ≥ 0.95.
+
+This is the G27 A-2 bar.
+
+Reported with it:
+- val in the same form;
+- WTBD-group without the 6 pixel twins;
+- per class;
+- the error anatomy (does the ranked-low share fall?);
+- "beats every architecture": FP's test mAP50-95 point estimate is above BladeYOLO-v2 (WTBD 24.4 ViT-S; WTBlade 18.0 ViT-B) and YOLO12-L (18.5; 13.3) on both leak-free tests.
+
+Predicted by the evidence above, reported and not gating:
+- the gain is larger on WTBlade-group than on WTBD-group;
+- on WTBD it sits in the rare, confusable classes (thunderstrike, crack).
+
+**S, secondary.** At 25%, FP − V1 over the 4 subsets, family mean. Reported as passing if mean > 0 with P ≥ 0.95 and it is positive on ≥ 3 of 4. It asks whether the gain is larger at low labels, as it was for DINOv3 in the YOLO family.
+
+**O, official protocols: benchmark entries, not hypothesis tests (as G25).**
+- Checkpoints are selected on val (Wind Surface: the seeded 10% carve, 2,570 / 286 / 714); test is scored once.
+- Reported: FP vs its G26 twin, paired image bootstrap, on all, leaked and no-twin test images (`tools/official_leak_eval.py`), beside the BladeYOLO paper (Wind Surface 86.5 / 57.4).
+- Rule fixed now: an official gain is described as more than memorisation only if FP − twin on the no-twin images is ≥ 0 (point estimate). G26 showed that tuning on these splits can buy leaked-image gains at the cost of the rest.
+- **Not run:** WTBlade-Defect official. Its 40-epoch twin (run on the A100) would need about 9.7 h on a T4 (14.6 min/epoch, G26), so with the prior it does not fit a 12 h T4 session. It is optional on the A100 (a few hours); `tools/sessions.sh` has no session for it yet.
+
+**If P fails:** one scope check (which dataset, which classes, val vs test), then G29 is reported as it is. No rescue runs (§30).
+
+**Compute.** Two Kaggle sessions (GPU T4 × 2), each running **two lanes in parallel, one per T4** (`tools/sessions.sh final1|final2`). Earlier sessions used one of the two GPUs.
+
+| session | GPU 0 | GPU 1 |
+|---|---|---|
+| final1 | `fp_ws` (est. 9–10.5 h) | `fp_s0`: WTBD-group, then WTBlade-group (est. 8–9 h) |
+| final2 | `fp_wtbdoff`, then `fp_f25` (est. 7.5–8.5 h) | `fp_s1` (est. 8–9 h) |
+
+- Estimates = the twins' measured T4 times × 1.3–1.4 for the frozen ViT-B forward (not yet measured on a GPU), plus some CPU contention between lanes.
+- **Time guard:** no run starts with less than 30 min left of an 11.3 h budget, and training is stopped (SIGINT) 15 min before it ends. A stopped run is renamed `<run>_STOPPED` and never predicted, so the session finishes inside Kaggle's 12 h with every completed run saved.
+- Lane logs: `runs/logs/lane{0,1}_*.log`; every run has `machine.txt`.
+
+**Tests (CPU, pass).** `tests/test_g29_prior.py`:
+- unit, ViT-B: grids equal at 320 / 768; the patched backbone is bit-identical to RF-DETR at initialisation; DINOv3 is in neither `parameters()` nor `state_dict()`; gradients reach the fusion layers and never DINOv3;
+- end to end: 1 epoch through `rfdetr_v1.train --prior`, the trained fusion weights saved and reloaded exactly, predictions written. This uses ViT-S, because ViT-B training was OOM-killed twice on this 6 GB machine; the code path is the same.
+
+`tools/sessions.sh` dry run with train/predict stubbed (`runs/tests/g29_session/bin/python`):
+- every arm's arguments equal its twin's;
+- prepared splits as the twins' (Wind Surface 2,570 / 286 / 714; WTBD-official 745 / 159 / 161; f25 189 images);
+- a rerun skips finished runs;
+- the guard stops a training run and renames it, and refuses to start one without time.
+
+### G29 Kaggle commands
+
+**Notebook settings:** accelerator **GPU T4 × 2**, Internet on, **Save Version → Save & Run All**.
+
+**Inputs:**
+- dataset `beegee11/blade-defect-benchmark`;
+- model `beegee11/vitb16`, the DINOv3 ViT-B/16 Hugging Face weights of Phase 27 (found automatically by `models/dino_weights.py`).
+
+**Setup cell (both sessions):**
+```
+!git clone https://github.com/bhavya-goel-11/BladeYOLO.git
+%cd BladeYOLO
+!pip install -q "rfdetr[train]==1.11.2"
+!pip install -q --no-deps "dinov3 @ git+https://github.com/facebookresearch/dinov3.git@6876159a11b4df116f30f667f8c9888617df0751"
+```
+
+**Then one line per session:**
+```
+!bash tools/sessions.sh final1      # account 1: Wind Surface official | FP seed 0 on both leak-free splits
+!bash tools/sessions.sh final2      # account 2: WTBD-official, 25% subsets | FP seed 1 on both leak-free splits
+```
+
+- The cell prints a status line per lane every 15 min. A session can be rerun as it is: finished runs are skipped.
+- Download `runs/` into the repository (`runs/detect/BladeYOLO_WindSurface/`, `runs/logs/`).
+
 ---
 
 ## 25. Engineering problems solved

@@ -115,7 +115,7 @@ def model_class(size):
 
 
 def train(dataset, out, size, epochs, batch, accum, seed, freeze_encoder=False, resolution=None, lr_schedule=None,
-          lr_drop=None, init=None, slot_mask=None, keep=()):
+          lr_drop=None, init=None, slot_mask=None, keep=(), prior=None):
     if any(os.path.exists(os.path.join(out, b)) for b in BEST):
         print(f"{out} already has a best checkpoint; not retraining")
         return
@@ -123,12 +123,16 @@ def train(dataset, out, size, epochs, batch, accum, seed, freeze_encoder=False, 
     opts = dict(dataset=os.path.abspath(dataset), size=size, epochs=epochs, batch_size=batch, grad_accum_steps=accum,
                 seed=seed, freeze_encoder=freeze_encoder, resolution=resolution, lr_schedule=lr_schedule, lr_drop=lr_drop,
                 init=os.path.abspath(init) if init else None, slot_mask=os.path.abspath(slot_mask) if slot_mask else None,
-                keep=list(keep))
+                keep=list(keep), prior=prior)
     json.dump(opts, open(os.path.join(out, "v1_options.json"), "w"), indent=2)
     if slot_mask:  # G27 direction 2, stage 1: each image's loss only on its own dataset's slots
         import g27_slots
 
         g27_slots.install(slot_mask)
+    if prior:  # G29: frozen DINOv3 prior fused into the projector output (tools/g29_prior.py)
+        import g29_prior
+
+        g29_prior.install(prior)
     # periodic checkpoints only at the end: four runs of 10-epoch checkpoints filled Kaggle's disk (v69)
     # G22 control: freeze_encoder keeps the DINOv2 encoder frozen (projector and decoder still train)
     # G27: init = an adapted RF-DETR checkpoint (direction 1 encoder, or the direction 2 stage-1 model) instead of COCO
@@ -188,7 +192,12 @@ def to_rows(xyxy, conf, cls, scale):
 
 def predict(run, data, size, splits, agnostic=False):
     opts = os.path.join(run, "v1_options.json")
-    size = json.load(open(opts)).get("size", size) if os.path.exists(opts) else size  # G26: Large runs
+    o = json.load(open(opts)) if os.path.exists(opts) else {}
+    size = o.get("size", size)  # G26: Large runs
+    if o.get("prior"):  # G29: the run was trained with the frozen prior; the checkpoint holds its fusion layers
+        import g29_prior
+
+        g29_prior.install(o["prior"])
     from PIL import Image
 
     names = ["defect"] if agnostic else yaml.safe_load(open(os.path.join(data, "data.yaml")))["names"]  # G28: 1 class
@@ -308,6 +317,7 @@ def main():
     a.add_argument("--init", default=None, help="G27: RF-DETR checkpoint to start from instead of COCO")
     a.add_argument("--slot-mask", default=None, help="G27 stage 1: slots.json of a multi-dataset pool")
     a.add_argument("--keep", nargs="*", default=[], help="checkpoint files to keep besides the best (e.g. last_ema.pth)")
+    a.add_argument("--prior", choices=["s", "b", "l"], default=None, help="G29: frozen DINOv3 ViT-S/B/L prior (FP)")
     a = sp.add_parser("predict")
     a.add_argument("--run", required=True)
     a.add_argument("--data", required=True)
@@ -326,7 +336,7 @@ def main():
         prepare_official(args.data, args.out, args.carve, agnostic=args.agnostic)
     elif args.cmd == "train":
         train(args.dataset, args.out, args.size, args.epochs, args.batch, args.accum, args.seed, args.freeze_encoder, args.resolution,
-              args.lr_schedule, args.lr_drop, args.init, args.slot_mask, args.keep)
+              args.lr_schedule, args.lr_drop, args.init, args.slot_mask, args.keep, args.prior)
     elif args.cmd == "predict":
         predict(args.run, args.data, args.size, args.splits, args.agnostic)
     elif args.cmd == "import":
