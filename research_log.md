@@ -3802,6 +3802,8 @@ Predicted by the evidence above, reported and not gating:
 - dataset `beegee11/blade-defect-benchmark`;
 - model `beegee11/vitb16`, the DINOv3 ViT-B/16 Hugging Face weights of Phase 27 (found automatically by `models/dino_weights.py`).
 
+**Kaggle inputs consolidated (17 Nov).** `data/blade-defect-benchmark` was uploaded as the private dataset `beegee11/blade-defect-benchmark` (`--dir-mode zip`, 223,624 files; `pools/g28-x-wtblade.zip`, a local zip of the folder beside it, left out). Five spot-checked files are byte-identical to the local copies. The older datasets it replaces were then deleted on Kaggle: `wind-surface-defect`, `blade-group-splits`, `blade-official-splits`, `g27-pool-l`, `g27-s1`. The Kaggle paths in earlier entries (G25–G27) refer to those deleted datasets; `tools/sessions.sh` reads only the new one.
+
 **Setup cell (both sessions):**
 ```
 !git clone https://github.com/bhavya-goel-11/BladeYOLO.git
