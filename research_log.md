@@ -3821,6 +3821,88 @@ Predicted by the evidence above, reported and not gating:
 - The cell prints a status line per lane every 15 min. A session can be rerun as it is: finished runs are skipped.
 - Download `runs/` into the repository (`runs/detect/BladeYOLO_WindSurface/`, `runs/logs/`).
 
+### G29 result: the primary claim passes narrowly on test, validation does not confirm it; on the official protocols FP gains mAP50 and loses mAP50-95, and does not reach BladeYOLO's Wind Surface numbers (17 Nov)
+
+**Runs.** Kaggle, 16–17 Nov, two sessions (`final1`, `final2`), each with two lanes in parallel (one per T4, fp16). All 10 runs finished: none was stopped by the time guard, there were no tracebacks and no NaN, and every `v1_options.json` matches its twin plus `prior: b`. Zips `runs_final1.zip` / `runs_final2.zip` were extracted into `runs/`; the lane logs are in `runs/logs/`.
+
+Wall time per run, with the other lane running beside it:
+
+| run | FP | twin |
+|---|---|---|
+| WTBD-group | 4.2 h | 2.5 h |
+| WTBlade-group | 5.5 h | ≈ 3.5 h |
+| Wind Surface | 10.8 h | 7 h |
+| WTBD-official | 4.9 h | 3 h |
+| each 25% run | ≈ 1 h | 35 min |
+
+So the frozen ViT-B plus a second job on the machine cost about 1.5–1.7×. Wind Surface finished 30 min inside the 11.3 h budget.
+
+Scored with `tools/g29_score.py` → `runs/analysis/g29/score.md` (+ `.json`, `score.log`). The official tables come from `tools/official_leak_eval.py` and `… paired` (G29 rows added) → `runs/analysis/paper/{official,paired}.md`; the pre-G29 versions are kept in `runs/analysis/g29/*_before_g29.md`.
+
+**P, primary (leak-free test, scene bootstrap, FP − A0, mean of seeds 0 and 1; mAP50-95 in points):**
+
+| | A0 s0 / s1 | FP s0 / s1 | FP − A0 [95% CI] | P(> 0) |
+|---|---|---|---|---|
+| WTBD-group test | 33.2 / 31.2 | 34.3 / 34.5 | +2.18 [−0.8, +4.4] | 0.916 |
+| WTBlade-group test | 16.2 / 16.9 | 17.3 / 17.2 | +0.72 [−0.6, +1.9] | 0.866 |
+| **mean, test** | | | **+1.45 [−0.2, +2.7]** | **0.958** |
+| WTBD-group val | 40.1 / 40.2 | 42.2 / 39.0 | +0.43 [−3.1, +3.3] | 0.569 |
+| WTBlade-group val | 15.7 / 16.6 | 16.1 / 16.1 | −0.02 [−2.8, +2.2] | 0.465 |
+| mean, val | | | +0.20 [−2.0, +1.9] | 0.526 |
+
+→ **By the pre-registered rule the primary claim passes**: positive on both datasets, mean P 0.958 against a 0.95 bar.
+
+**Honest strength: narrow.**
+- On test, both FP seeds are above both A0 seeds on both datasets.
+- **Validation does not confirm it** (+0.20, P 0.53). The rule is decided on test, as in G27 A-2, so this does not change the verdict, but it is the H5 pattern (§28: a narrow test pass with flat val that did not replicate).
+- The WTBD effect (+2.2) is about the size of A0's own seed spread there (33.2 vs 31.2).
+
+Further results:
+- **mAP50 rises more than mAP50-95:** WTBD-group 54.3 → 58.9, WTBlade-group 40.0 → 41.0.
+- **Without WTBD-group's 6 pixel-twin test images:** 31.7 → 33.6 (+1.97), so the gain is not carried by them.
+- **Per class (test AP50-95, mean of seeds).**
+  - WTBD: surface_injure +5.8, craze +3.8, crack +1.4, thunderstrike +1.1, corrosion +0.6, hide_craze +0.4.
+  - WTBlade: oil +1.9, peeling +1.6, dirt and rust +0.8, crack +0.5, deformity −0.2, burn −0.4.
+- **Error anatomy:** almost unchanged. WTBD hits 71.1 → 71.9%, ranked low 25.1 → 24.3%. WTBlade no-box 7.2 → 6.5%.
+- **Both mechanism predictions fail.**
+  - The gain was predicted to be larger on WTBlade than on WTBD; it is the reverse (+0.72 vs +2.18).
+  - On WTBD it was predicted to sit in the rare classes; it sits in surface_injure and craze, not thunderstrike and crack.
+  - So the effect is real-looking on test but not where the evidence that motivated it said it would be.
+- **Against the other architectures (test mAP50-95):**
+  - WTBD-group: FP 34.4 is above every other architecture (BladeYOLO-v2 24.4, YOLO12-L 18.5).
+  - WTBlade-group: FP 17.3 is still below the frozen-DINOv3 BladeYOLO-v2 ViT-B (18.0), single run, though above YOLO12-L (13.3). The "beats every architecture on both leak-free tests" condition is therefore **not met**.
+
+**S, secondary (25% of WTBD-group, FP − V1 seed 0):**
+- Test: class-matched +5.69, rand1 −0.05, rand2 +0.55, rand3 −0.69; family mean +1.38 [−1.8, +6.2], P 0.856, positive on 2 of 4 → **does not pass**.
+- Val: family mean +1.41, P 0.953, positive on 4 of 4.
+- So at 25% FP is not the low-label lever that frozen DINOv3 was for the YOLO family. Subset luck still dominates: the class-matched subset alone moves +5.7.
+
+**O, official protocols (benchmark entries; COCO evaluator, paired image bootstrap; FP − its G26 twin):**
+
+| protocol | twin | FP | Δ mAP50 / mAP50-95, all | Δ on no-twin images | Δ on leaked images |
+|---|---|---|---|---|---|
+| WTBD-official | 90.4 / 61.2 | **90.9 / 59.9** | +0.5 / −1.2 [−3.3, +1.0] | **+9.2 / +2.6** | +0.4 / −1.9 |
+| Wind Surface | 81.0 / 53.3 | 82.1 / 51.7 | +1.1 / **−1.5 [−2.9, −0.3]** | +1.8 / −2.3 | +1.5 / −1.3 |
+| BladeYOLO paper, Wind Surface | | 86.5 / 57.4 | | | |
+
+- **Opposite of the G26 tuning pattern.** G26's recipe changes gained on leaked images and lost on no-twin ones (interaction > 0 on all three protocols). FP's WTBD-official change sits on the **no-twin** images (+2.6 mAP50-95; +9.2 mAP50), and the interaction is negative (−4.5 [−9.0, +0.9], P(> 0) 0.048).
+  - By the rule fixed at pre-registration (no-twin Δ ≥ 0), FP's official change is not memorisation.
+  - It is also not a gain in the official mAP50-95, which falls on both protocols (significantly on Wind Surface).
+- **Wind Surface: the gap to BladeYOLO stays.** FP is −4.4 mAP50 / −5.7 mAP50-95 below the paper; the twin was −5.5 / −4.1. Per class (AP50, all / leaked / no twin): thunderstrike improves (69 → 76 overall), surface_eye falls (93 → 88).
+- **WTBD-official:** FP − our BladeYOLO-v2 reproduction is +9.3 mAP50 / +11.9 mAP50-95 overall, and +4.7 [−4.2, +23.4] mAP50-95 on the 36 no-twin images. The BladeYOLO paper reports no WTBD number.
+- **WTBlade-Defect official:** not run (pre-registered).
+
+**Fixed while scoring: the official-protocol tool had a path bug since the 8 Nov data migration.**
+- `official_leak_eval.leak_flags` read the split from the second path component of `runs/analysis/wtblade/split_groups.csv`. After the migration that component is `blade-defect-benchmark`, so every WTBlade-Defect subset came back empty and `main` / `paired` crashed.
+- The split is now the folder above `images/`.
+- The rerun reproduces every pre-existing row of `official.md` and `paired.md` exactly (diff of non-G29 rows empty). The paper's tables, built on 4 Nov before the migration, were unaffected.
+
+**Verdict.**
+- **G29 passes its pre-registered primary test, by a narrow margin that validation does not support.** It is reportable as the strongest leak-free RF-DETR result in this project: WTBD-group 34.4 mAP50-95, the best on that split by any model; WTBlade-group 17.3. The honest wording is "a small gain (+1.5 points mean) that passes on test and is not confirmed on validation".
+- It is **not** a low-label method (S fails), and its gain is not where the motivating evidence predicted (both predictions fail).
+- On the leaky official protocols it does **not** beat BladeYOLO's Wind Surface numbers, and it lowers official mAP50-95. What it changes there is mostly the no-twin images, the opposite of what tuning on the official splits did (G26).
+- Per §30, no rescue runs. The one scope check is above: the gain is in mAP50 more than mAP50-95, it is spread over the frequent classes, and the error-anatomy categories barely move.
+
 ---
 
 ## 25. Engineering problems solved

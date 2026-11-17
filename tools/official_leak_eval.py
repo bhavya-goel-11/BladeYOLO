@@ -49,10 +49,12 @@ PROTOCOLS = [  # name, data dir, test folder, runs (label, run)
     ("WTBD-official", os.path.join(ROOT, "data", "blade-defect-benchmark", "raw", "WTBD-official"), "test",
      [("YOLO12-L", "yolo12l_wtbd_official"), ("BladeYOLO-v2 (ours)", "bladeyolo2_wtbd_official"),
       ("RF-DETR-M 640, const", "rfdetrm640_wtbd_official"), ("RF-DETR-M 768, const", "rfdetrm768_wtbd_official"),
-      ("RF-DETR-M 768, cosine", "rfdetrm768cos_wtbd_official"), ("RF-DETR-L 704, cosine", "rfdetrl704cos_wtbd_official")]),
+      ("RF-DETR-M 768, cosine", "rfdetrm768cos_wtbd_official"), ("RF-DETR-L 704, cosine", "rfdetrl704cos_wtbd_official"),
+      ("RF-DETR-M 768, cosine + frozen DINOv3 (G29)", "rfdetrm768cos_fp_wtbd_official")]),
     ("Wind Surface Defect", os.path.join(ROOT, "data", "blade-defect-benchmark", "raw", "WindSurface-Defect"), "val",
      [("RF-DETR-M 640, 60 ep const", "rfdetrm640_windsurface_official"),
-      ("RF-DETR-M 640, 100 ep cosine", "rfdetrm640cos_windsurface_official")]),
+      ("RF-DETR-M 640, 100 ep cosine", "rfdetrm640cos_windsurface_official"),
+      ("RF-DETR-M 640, 100 ep cosine + frozen DINOv3 (G29)", "rfdetrm640cos_fp_windsurface_official")]),
     ("WTBlade-Defect", os.path.join(ROOT, "data", "blade-defect-benchmark", "raw", "WTBlade-Defect"), "test",
      [("RF-DETR-M 640, 25 ep const", "rfdetrm640_wtblade_defect_official"),
       ("RF-DETR-M 640, 40 ep cosine", "rfdetrm640cos_wtblade_defect_official")]),
@@ -110,7 +112,7 @@ def leak_flags(name, data, files):
         return ({base[n]: bool(b >= PIXEL_TWIN) for n, b in zip(z["names"], z["best_trained"])}, {},
                 f"pixel twin (corr >= {PIXEL_TWIN}, 8 flips/rotations) among the trained images")
     rows = list(csv.DictReader(open(os.path.join(ROOT, "runs", "analysis", "wtblade", "split_groups.csv"))))
-    split = lambda r: r["image"].split("/")[1]  # noqa: E731
+    split = lambda r: r["image"].split("/")[-3]  # noqa: E731  (<...>/<split>/images/<file>; paths moved under data/ on 8 Nov)
     src = lambda p: os.path.basename(p).split("_jpg.rf.")[0]  # noqa: E731
     g_tr = {r["group"] for r in rows if split(r) == "train"}
     s_tr = {src(r["image"]) for r in rows if split(r) == "train"}
@@ -235,9 +237,13 @@ def main():
 PAIRS = {  # protocol: [(label, run A, run B)]: reported as B − A
     "WTBD-official": [("G26 recipe: cosine − constant LR (M 768)", "rfdetrm768_wtbd_official", "rfdetrm768cos_wtbd_official"),
                       ("RF-DETR-M 768 cosine − BladeYOLO-v2", "bladeyolo2_wtbd_official", "rfdetrm768cos_wtbd_official"),
-                      ("BladeYOLO-v2 − YOLO12-L", "yolo12l_wtbd_official", "bladeyolo2_wtbd_official")],
+                      ("BladeYOLO-v2 − YOLO12-L", "yolo12l_wtbd_official", "bladeyolo2_wtbd_official"),
+                      ("G29: + frozen DINOv3 (M 768 cosine)", "rfdetrm768cos_wtbd_official", "rfdetrm768cos_fp_wtbd_official"),
+                      ("G29 FP − BladeYOLO-v2", "bladeyolo2_wtbd_official", "rfdetrm768cos_fp_wtbd_official")],
     "Wind Surface Defect": [("G26 recipe: 100 ep cosine − 60 ep constant", "rfdetrm640_windsurface_official",
-                             "rfdetrm640cos_windsurface_official")],
+                             "rfdetrm640cos_windsurface_official"),
+                            ("G29: + frozen DINOv3 (M 640, 100 ep cosine)", "rfdetrm640cos_windsurface_official",
+                             "rfdetrm640cos_fp_windsurface_official")],
     "WTBlade-Defect": [("G26 recipe: 40 ep cosine − 25 ep constant", "rfdetrm640_wtblade_defect_official",
                         "rfdetrm640cos_wtblade_defect_official")],
 }
