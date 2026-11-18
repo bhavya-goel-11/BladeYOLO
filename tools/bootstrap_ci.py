@@ -47,10 +47,16 @@ def load_yolo_split(data, split):
     return out
 
 
-def predict(run, imgs, cache_dir, batch=8):
+def predict(run, imgs, cache_dir, batch=8, split="test"):
     path = os.path.join(cache_dir, f"{os.path.basename(os.path.normpath(run))}.json")
     if os.path.exists(path):
         return {k: np.array(v).reshape(-1, 6) for k, v in json.load(open(path)).items()}
+    rf = os.path.join(run, f"preds_{split}.json")  # RF-DETR run (tools/rfdetr_v1.py predict): file-name keys, same frame
+    if not os.path.exists(os.path.join(run, "weights", "best.pt")) and os.path.exists(rf):
+        by_name = {os.path.basename(k): v for k, v in json.load(open(rf)).items()}
+        missing = [f for f in imgs if os.path.basename(f) not in by_name]
+        assert not missing, f"{rf}: no predictions for {len(missing)} images, e.g. {missing[0]}"
+        return {f: np.array(by_name[os.path.basename(f)]).reshape(-1, 6) for f in imgs}
     sys.path.insert(0, ROOT)
     import models  # noqa: F401  (BladeYOLO modules for unpickling)
     from ultralytics import YOLO
@@ -128,7 +134,7 @@ def score(matches, files, nc):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("runs", nargs="+", help="run folders (weights/best.pt); differences are taken against the first")
+    ap.add_argument("runs", nargs="+", help="run folders (YOLO: weights/best.pt; RF-DETR: preds_<split>.json); differences are taken against the first")
     ap.add_argument("--data", required=True, help="YOLO-layout dataset folder with data.yaml and test/")
     ap.add_argument("--split", default="test")
     ap.add_argument("--name", required=True)
@@ -155,7 +161,7 @@ def main():
 
     runs = [os.path.abspath(r) for r in args.runs]
     labels = [os.path.basename(r) for r in runs]
-    matches = [per_image_matches(imgs, predict(r, imgs, os.path.join(out, "preds")), nc) for r in runs]
+    matches = [per_image_matches(imgs, predict(r, imgs, os.path.join(out, "preds"), split=args.split), nc) for r in runs]
     point = [score(m, files, nc) for m in matches]
 
     rng = np.random.default_rng(args.seed)

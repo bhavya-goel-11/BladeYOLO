@@ -1,0 +1,109 @@
+\onecolumn
+\setlength{\LTpre}{4pt}\setlength{\LTpost}{4pt}
+\LTchunksize=200
+\section{Project Timeline}
+\label{app:timeline}
+Table~\ref{tab:timeline} lists the phases of the project as recorded in the research log, so that every result in this paper can be placed in its context.
+
+\begin{table*}[!htbp]
+\centering
+\caption{Project timeline (2026). Section numbers refer to the research log~\cite{repo}.}
+\label{tab:timeline}
+\footnotesize
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+Dates & Phase & Content and outcome \\
+\midrule
+3 Sep -- 6 Oct & 1--5 & Faithful BladeYOLO reimplementation (Runs 1--3, best 52.6/28.0); BladeYOLO-S and -L (64.3/37.3; 78.2/46.9 on the leaky split) \\
+9 Oct & 6 & Code audit: WIoU inactive, no selective scan, DINOv3 without RoPE or normalisation, wavelet detail lost; all repaired and tested \\
+9 Oct & 7 & Wind Surface leak found: 75\% of validation images have a pixel twin; tiles of 386 photographs on both sides \\
+9--12 Oct & 8--12 & Merged, deduplicated datasets v2 (2{,}606 images) and v3 (5{,}777); 26--40 \mfifty; label review worth $+3$; BladeYOLO-v2 designed; NaN root causes fixed; ceiling about 40--45 \mfifty on v3 \\
+12--13 Oct & 13 & Content audit of six datasets; WTBD chosen; WTBD-group split built and audited \\
+13--14 Oct & 14--15 & Same model on official vs.\ group WTBD split: $+29$ \mfifty inflation; YOLO12-L baselines; scene bootstrap \\
+14--15 Oct & 16--18 & Granularity-aware scores; cross-view label audit (84--87\% agreement); conformal recall failure under leaked calibration; split-tolerant training; YOLOv12 area attention fp16 overflow fixed \\
+15--18 Oct & 19--24 & Real-view teacher--student semi-supervision (three rounds, dropped); SAM 2.1 refinement (fails) \\
+18--21 Oct & 25--27 & DINOv3 ablation across 25/50/100\%; class-selective tolerance; backbone size (ViT-B best) \\
+21 Oct -- 2 Nov & 28--31 & Pre-registered hypotheses H1--H20 and gates G8--G24 on WTBD-group and WTBlade-group (Table~\ref{tab:ledger}); V1: RF-DETR at low labels passes \\
+2--4 Nov & G25, G26 & RF-DETR on the official protocols; tuned recipe; leaked vs.\ no-twin analysis; tuning rewards memorisation \\
+4--8 Nov & G27, G28 & One recipe for all protocols (copy-paste, encoder SSL, multi-dataset stage 1): fails. Leave-one-dataset-out: dead \\
+8 Nov & -- & First paper draft; residual pixel twins found in our own splits \\
+16--17 Nov & G29 & RF-DETR-FP pre-registered, run on two Kaggle sessions (four T4 lanes), scored: primary passes narrowly, secondary fails \\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+\section{Corrections to Our Own Conclusions}
+\label{app:corrections}
+Table~\ref{tab:corrections} lists the conclusions we later corrected. Several were our own favourite explanations.
+
+\begin{table*}[!htbp]
+\centering
+\caption{Conclusions we later corrected. Kept because each was plausible at the time.}
+\label{tab:corrections}
+\footnotesize
+\begin{tabularx}{\textwidth}{@{}X l X@{}}
+\toprule
+Earlier conclusion & Status & Why \\
+\midrule
+Runs 6--7 reach $\sim$78/$\sim$47 on Wind Surface & invalid & 75\% of validation had train twins (first count) \\
+WIoU v3 gave $+0.9$ \mcoco & invalid & never active; Run 7 trained with CIoU \\
+Mamba added global context & invalid & the block did not scan \\
+SGD $\rightarrow$ AdamW was the breakthrough & confounded & changed together with an 8\,M $\rightarrow$ 57\,M scale-up \\
+The remaining gap is locality bias & superseded & the gap was leakage and data structure \\
+v3 is better because it is larger & superseded & scenes matter, not files (Wind Surface 81 scenes; WTBD 550) \\
+Mislabelling explains poor v3 scores & rejected & the review was worth only $+3$ \mfifty \\
+BladeYOLO-v2's win shows the architecture generalises & qualified & it rests mainly on thunderstrike (3 test scenes) \\
+The advantage comes from the architecture & rejected & the frozen DINOv3 features carry it all \\
+Honest calibration costs 2.4 vs.\ 1.0 false alarms per image & corrected & that column counted all predictions; real false alarms 0.2 vs.\ 0.1 \\
+WTBD copies agree on 86.0\% & refined & rotated copies inflate ``loose''; axis-aligned 87.3\% \\
+Part of the inflation is memorised box splitting & not supported & tolerant gain is not smaller on images with a twin \\
+At 25\%, most lost defects are found but boxed differently & refined & near-misses (34--36\%) and misses (19--27\%) are of similar size \\
+Split tolerance helps corrosion & replicated, not significant & $+9.3$ \ci{-0.3}{+24.6}; aggregate unchanged \\
+The DINOv3 advantage is a low-data advantage & corrected & absolute gain does not shrink with data \\
+The gain grows with frozen backbone size & partly supported & ViT-B beats ViT-S; ViT-L does not beat ViT-B \\
+Teacher--student gives a small consistent gain & qualified & seed noise was as large; balanced variant significantly worse \\
+Leak-free \mcoco/\mfifty ratios are 0.42--0.47 & corrected & full-label RF-DETR on WTBD-group reaches 0.60 \\
+Our leak-free splits are twin-free & corrected & a pixel test found 6+6 WTBD-group and 1+1 WTBlade-group copies; effect under one point \\
+A frozen prior helps RF-DETR most on WTBlade and on rare classes (G29 prediction) & not supported & gain larger on WTBD, in frequent classes \\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+\section{Engineering Problems That Affected Results}
+\label{app:engineering}
+Table~\ref{tab:engineering} lists defects we found and fixed. Several silently changed what was being measured; mixed-precision overflow was the most frequent.
+
+\begin{table*}[!htbp]
+\centering
+\caption{Engineering defects found and fixed.}
+\label{tab:engineering}
+\footnotesize
+\begin{tabularx}{\textwidth}{@{}X X X@{}}
+\toprule
+Problem & Root cause & Fix \\
+\midrule
+WIoU never active & patched the wrong namespace & patch the loss namespace \\
+NaN in selective scan (epoch 9) & fp16 overflow before LayerNorm & fp32 LayerNorm \\
+NaN at epoch 4 & poisoned WIoU running mean; aggressive warm-up & finite-only mean; lr 0.001, bias warm-up 0 \\
+NaN at epoch 17 & fp16 overflow from a convolution into BatchNorm & fp32 blocks for refinement \\
+NaN at epoch 99, validation at 0 & a NaN batch poisons BatchNorm statistics and EMA & per-batch BatchNorm repair and step skip, reported \\
+NaN late in training (epochs 99--149) & YOLOv12 area attention forms scores in fp16 ($\sim$4e5, above the fp16 maximum) & scores and softmax in fp32 \\
+Test metrics silently missing & \texttt{deform\_conv2d} segfault on NaN offsets from the FLOPs probe's uninitialised image & finite, clamped offsets; test in a fresh process \\
+Silent resume from an old checkpoint & training script reused any \texttt{last.pt} & explicit \texttt{--resume} \\
+RF-DETR learning rate never decayed & default step at epoch 100 never fires & explicit cosine schedule (G26) \\
+Scorer read a stale result after a time-out & an earlier output file had the same name & rerun with no limit; check file freshness \\
+Official-protocol tool returned empty WTBlade subsets & split parsed from a path component that moved in a data migration & split taken from the folder above \texttt{images/}; earlier rows reproduce exactly \\
+Kaggle sessions cut at 12\,h & two runs per session, one per T4 & time guard: no start with $<$30\,min left, SIGINT 15\,min before the budget, stopped runs renamed and never scored \\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+\section{Notation and Experiment Names}
+Names follow the research log: H$n$ and G$n$ are hypotheses and gates in order of registration. A0--A3 are the G27 arms: A0 plain recipe, A1 + copy-paste, A2 + copy-paste + D1, A3 + copy-paste + D2. FP is RF-DETR-FP (G29). ID and X are the G28 arms. V1 is the 25\% RF-DETR comparison. ``Points'' are percentage points of AP. WTBD-official is WTBD's own split. BYv2 is BladeYOLO-v2.
+
+\section{Per-Class Audit and Run Registry}
+\label{app:registry}
+Table~\ref{tab:perclass-audit} gives the content audit by native class for every dataset we audited. Table~\ref{tab:newruns} lists every run of the final phase with its validation and test scores, and Table~\ref{tab:registry} the registry of all earlier runs as kept in the research log.
+\input{sections/gen_audit}
+\input{sections/gen_newruns}
+\input{sections/gen_registry}

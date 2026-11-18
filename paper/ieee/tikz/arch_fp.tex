@@ -1,0 +1,58 @@
+% RF-DETR-M with a frozen DINOv3 prior (G29, "FP"). tools/g29_prior.py
+\begin{tikzpicture}[
+  font=\scriptsize, >={Stealth[length=4pt]}, node distance=4mm and 5mm,
+  blk/.style={draw=black!70, rounded corners=1.5pt, align=center, minimum height=8mm, inner sep=2pt, fill=#1},
+  blk/.default=white,
+  op/.style={draw=black!70, circle, inner sep=0.5pt, minimum size=4.2mm, fill=white},
+  lab/.style={font=\tiny, text=black!70, align=center},
+  frozen/.style={blk=cyan!10, dashed, thick},
+  train/.style={blk=orange!12},
+  new/.style={blk=green!12},
+]
+% ---------- main RF-DETR path ----------
+\node[blk=gray!8, minimum width=12mm] (img) {Image\\[3pt]$I\in\mathbb{R}^{3\times H\times W}$};
+\node[train, right=6mm of img, minimum width=22mm] (enc) {RF-DETR encoder\\windowed DINOv2-S/16\\(fine-tuned)};
+\node[train, right=of enc, minimum width=15mm] (proj) {Projector\\$C{=}256$, stride 16};
+\node[op, right=7mm of proj] (add) {$+$};
+\node[train, right=7mm of add, minimum width=20mm] (qs) {Two-stage\\query selection\\(top-$K$ proposals)};
+\node[train, right=of qs, minimum width=20mm] (dec) {Deformable\\cross-attention\\decoder};
+\node[blk=gray!8, right=of dec, minimum width=12mm] (out) {Boxes,\\classes};
+\draw[->] (img) -- (enc);
+\draw[->] (enc) -- (proj);
+\draw[->] (proj) -- node[above, lab]{$F$} (add);
+\draw[->] (add) -- node[above, lab]{$F'$} (qs);
+\draw[->] (qs) -- (dec);
+\draw[->] (dec) -- (out);
+\draw[->, black!60] ($(add.east)!0.5!(qs.west)$) |- ([yshift=-3.5mm]qs.south) -| node[pos=0.75, right, lab]{memory $F'$} (dec.south);
+
+% ---------- frozen prior path ----------
+\node[frozen, below=17mm of enc, minimum width=22mm] (dino) {DINOv3 ViT-B/16\\\textbf{frozen}, no grad};
+\node[blk=cyan!5, right=of dino, minimum width=15mm] (cat) {blocks 4, 8, 12\\LN, concat\\$P\in\mathbb{R}^{2304\times\frac{H}{16}\times\frac{W}{16}}$};
+\draw[->] (img) |- (dino);
+\draw[->] (dino) -- (cat);
+
+% ---------- PriorFuse ----------
+\node[new, right=8mm of cat, minimum width=9mm] (red) {LN\\$1{\times}1$\\Reduce\\GELU};
+\node[op, right=3mm of red] (cc) {\tiny $\Vert$};
+\node[new, right=3mm of cc, minimum width=9mm] (mix) {$1{\times}1$\\Mix\\LN\\GELU};
+\node[new, right=3mm of mix, minimum width=9mm] (dw) {DW\\$3{\times}3$\\GELU};
+\node[new, right=3mm of dw, minimum width=11mm] (o) {$1{\times}1$ Out\\$W_o{=}0$\\$b_o{=}0$};
+\draw[->] (cat) -- (red);
+\draw[->] (red) -- (cc);
+\draw[->] (cc) -- (mix);
+\draw[->] (mix) -- (dw);
+\draw[->] (dw) -- (o);
+\draw[->] (proj.south) ++(2mm,0) |- ([yshift=4mm]cc.north) -- (cc.north);
+\draw[->, green!40!black, thick] (o.north) |- ([yshift=-7mm]add.south) -- node[left, lab]{$\Delta F$} (add.south);
+\begin{scope}[on background layer]
+  \node[draw=green!50!black, dotted, thick, rounded corners=3pt, fit=(red)(cc)(mix)(dw)(o), inner sep=2.2mm,
+        label={[lab, anchor=north]south:PriorFuse (0.79\,M trainable parameters; identity at initialisation)}] (pf) {};
+\end{scope}
+% legend
+\node[frozen, minimum height=3mm, minimum width=5mm, below=5mm of dino.south west, anchor=north west] (l1) {};
+\node[right=0.5mm of l1, lab, anchor=west] {frozen, outside optimizer, EMA and checkpoint};
+\node[train, minimum height=3mm, minimum width=5mm, below=1.5mm of l1] (l2) {};
+\node[right=0.5mm of l2, lab, anchor=west] {RF-DETR-M, fine-tuned};
+\node[new, minimum height=3mm, minimum width=5mm, below=1.5mm of l2] (l3) {};
+\node[right=0.5mm of l3, lab, anchor=west] {new layers};
+\end{tikzpicture}

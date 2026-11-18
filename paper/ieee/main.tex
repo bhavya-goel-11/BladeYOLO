@@ -1,0 +1,96 @@
+% Memorised Blades -- IEEE journal version.
+% Build:  cd paper/ieee && latexmk -pdf main.tex      (pdflatex + bibtex; figures from ../figures, diagrams in tikz/)
+% Every number is traceable to research_log.md and runs/analysis/ (see Section "Data and Code Availability").
+\documentclass[journal]{IEEEtran}
+
+\usepackage[T1]{fontenc}
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{longtable}
+\setlength{\LTcapwidth}{\textwidth}
+\usepackage[table]{xcolor}
+\usepackage{xspace}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,fit,backgrounds,calc}
+\usepackage{url}
+\usepackage[hidelinks]{hyperref}
+
+\graphicspath{{../figures/}}
+\hyphenation{Wind-Surface WTBlade WTBD RF-DETR Blade-YOLO}
+
+\newcommand{\mfifty}{mAP$_{50}$\xspace}
+\newcommand{\mcoco}{mAP$_{50:95}$\xspace}
+\newcommand{\apfifty}{AP$_{50}$\xspace}
+\newcommand{\ci}[2]{$[#1,\,#2]$}
+\newcommand{\pt}[1]{$#1$}
+% best and second best in a column (as in the BladeYOLO paper: red, then blue); shaded row = our method
+\newcommand{\best}[1]{\textcolor{red}{\textbf{#1}}}
+\newcommand{\second}[1]{\textcolor{blue}{\underline{#1}}}
+\newcommand{\ours}{\rowcolor{gray!14}}
+\newcommand{\hlnote}{\best{Red bold}: best; \second{blue underlined}: second best in each column.}
+\newcommand{\tabnote}[1]{\par\vspace{2pt}\begin{minipage}{\linewidth}\scriptsize #1\end{minipage}}
+\renewcommand{\arraystretch}{1.08}
+\renewcommand{\topfraction}{0.92}
+\renewcommand{\bottomfraction}{0.6}
+\renewcommand{\textfraction}{0.07}
+\renewcommand{\floatpagefraction}{0.75}
+\renewcommand{\dbltopfraction}{0.95}
+\renewcommand{\dblfloatpagefraction}{0.75}
+\setcounter{topnumber}{3}
+\setcounter{bottomnumber}{2}
+\setcounter{totalnumber}{5}
+\setcounter{dbltopnumber}{3}
+
+\begin{document}
+
+\title{Memorised Blades: Data Leakage Inflates Wind-Turbine Blade Defect Benchmarks, Leak-Free Splits Reset the Field, and a Frozen Foundation Prior for Detection Transformers}
+
+\author{Bhavya~Goel%
+\thanks{Manuscript prepared 17 November 2026. Affiliation and contact details to be added.}%
+\thanks{Code, split files, per-image leak flags and the full research log: \url{https://github.com/bhavya-goel-11/BladeYOLO}. Data: \url{https://www.kaggle.com/datasets/beegee11/blade-defect-benchmark}.}}
+
+\markboth{Preprint, November 2026}%
+{Goel: Memorised Blades: Leakage in Blade Defect Benchmarks and a Frozen Prior for Detection Transformers}
+
+\maketitle
+
+\begin{abstract}
+Public benchmarks for wind-turbine blade defect detection report 85--92\% \mfifty. We audit the three most used, WTBD, Wind Surface Defect and WTBlade-Defect, with image retrieval, keypoint verification and pixel correlation. We find that 78\%, 84\% and 92\% of their official test images have a near-copy or same-scene image in the training split, because the data were augmented or tiled before a random split. Our attempt to reproduce the published BladeYOLO detector stopped at 52.6/28.0 \mfifty/\mcoco against the reported 86.5/57.4 on Wind Surface; our later 78.2/46.9 turned out to rest on leaked validation images. A generic detection transformer (RF-DETR-M) with a standard recipe scores 90.4\% \mfifty on WTBD's official split, the best reported there, and 87.2\% on WTBlade-Defect, above BladeYOLO's 85.8\%, but below it on Wind Surface (81.0 vs.\ 86.5). The same runs lose 24 and 40 points on the Wind Surface and WTBlade-Defect test images that have no training twin: 98.2 on copies of training frames against 50.4 on images with none. Trained identically on a scene-grouped split of the same WTBD images, the detector falls from 90.4/61.2 to 55.3/33.2. One step of recipe tuning on the official numbers raised the score on leaked images and lowered it on unseen ones on all three datasets. We release two audited leak-free benchmarks with scene-level bootstrap intervals. On them, frozen DINOv3 features carry the entire advantage of a modern YOLO variant at every label budget, while its deformable, selective-scan and loss components add nothing measurable. Building on that evidence we propose RF-DETR-FP, which adds a frozen DINOv3 ViT-B prior beside RF-DETR's fine-tuned encoder through a zero-initialised fusion layer (0.79\,M parameters). In a pre-registered paired test over two seeds it improves leak-free test \mcoco by $+1.45$ points (P$(>0)=0.958$) and reaches 34.4 on WTBD-group, the best on that benchmark, but validation does not confirm the gain, it is not a low-label method, and it does not close the official Wind Surface gap. We further measure an annotation self-consistency ceiling of 84--87\%, a factor-of-two dependence of low-label results on which scenes are labelled, a conformal recall guarantee that fails when calibrated on seen scenes (31.5\% missed against a promised 10\%), and a leave-one-dataset-out test in which 26{,}065 twin-free external images reach 17.7 class-agnostic \apfifty against 72.9 for 745 target images. A ledger of more than thirty pre-registered method tests, most of them failures, completes the record.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Wind turbine blade inspection, defect detection, data leakage, benchmark audit, detection transformer, foundation models, DINOv3, RF-DETR, reproducibility, unmanned aerial vehicle imagery.
+\end{IEEEkeywords}
+
+\input{sections/01_intro}
+\input{sections/02_related}
+\input{sections/03_audit}
+\input{sections/04_benchmarks}
+\input{sections/05_models}
+\input{sections/06_official}
+\input{sections/07_leakfree}
+\input{sections/08_why}
+\input{sections/09_lodo}
+\input{sections/10_failed}
+\input{sections/11_discussion}
+
+% main-text floats are flushed before the appendices; appendices (one column), acknowledgment and references close the paper
+\clearpage
+\appendices
+\input{sections/12_appendix}
+
+\clearpage
+\twocolumn
+\input{sections/13_ack}
+
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+\end{document}

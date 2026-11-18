@@ -1,0 +1,51 @@
+% BladeYOLO-v2 (models/bladeyolo2-l.yaml; models/dino_fusion.py, morphology.py, ss2d.py, wiou.py)
+\begin{tikzpicture}[
+  font=\scriptsize, >={Stealth[length=4pt]}, node distance=3mm and 4mm,
+  blk/.style={draw=black!70, rounded corners=1.5pt, align=center, minimum height=7mm, inner sep=2pt, fill=#1},
+  blk/.default=white,
+  lab/.style={font=\tiny, text=black!70, align=center},
+  frozen/.style={blk=cyan!10, dashed, thick},
+  coco/.style={blk=orange!12},
+  new/.style={blk=green!12},
+]
+% backbone row
+\node[blk=gray!8, minimum width=10mm] (img) {Image\\640 px};
+\node[coco, right=of img, minimum width=13mm] (s1) {Stem\\P1, P2};
+\node[coco, right=of s1, minimum width=11mm] (p3) {C3k2\\P3 (1/8)};
+\node[coco, right=of p3, minimum width=11mm] (p4) {A2C2f\\P4 (1/16)};
+\node[coco, right=of p4, minimum width=11mm] (p5) {A2C2f\\P5 (1/32)};
+\draw[->] (img) -- (s1); \draw[->] (s1) -- (p3); \draw[->] (p3) -- (p4); \draw[->] (p4) -- (p5);
+% DINOv3 and fusion
+\foreach \k in {3,4,5} {
+  \node[new, below=4mm of p\k, minimum width=11mm, minimum height=5.5mm] (f\k) {DinoFuse};
+  \draw[->] (p\k) -- (f\k);
+}
+\node[frozen, below=9mm of f4, minimum height=6mm] (dino) {DINOv3 ViT-S/16 or ViT-B/16, \textbf{frozen}};
+\draw[->] (img) |- (dino.west);
+\foreach \k/\b in {3/4, 4/8, 5/12} {
+  \draw[->, cyan!50!black] (dino.north -| f\k) -- node[right, lab, pos=0.25]{blk \b} (f\k.south);
+}
+% neck
+\node[coco, right=9mm of p5, minimum width=19mm, minimum height=27mm, yshift=-8mm] (neck) {YOLOv12-L neck\\(PAN, A2C2f)\\top-down and\\bottom-up};
+\foreach \k/\d in {5/2.2, 4/4.2, 3/6.2} {
+  \draw[->, thick] (f\k.east) -- ++(1.4mm,0) |- ([yshift=-\d mm]f5.south -| neck.west);
+}
+% refinements after the neck
+\node[new, right=8mm of neck, minimum width=13mm, yshift=6mm] (r5) {SS2D\\4-dir scan};
+\node[new, below=1.5mm of r5, minimum width=13mm] (r4) {DCNv2\\refine};
+\node[new, below=1.5mm of r4, minimum width=13mm] (r3) {DCNv2\\refine};
+\draw[->] ([yshift=6mm]neck.east) -- node[above, lab]{P5} (r5.west);
+\draw[->] ([yshift=-2.5mm]neck.east) -- node[above, lab]{P4} (r4.west);
+\draw[->] ([yshift=-11mm]neck.east) -- node[above, lab]{P3} (r3.west);
+\node[coco, right=6mm of r4, minimum width=13mm, minimum height=24mm] (head) {Detect\\head\\(DFL,\\classes)};
+\foreach \k in {3,4,5} {\draw[->] (r\k.east) -- (r\k.east -| head.west);}
+\node[blk=gray!8, below=3mm of head, minimum width=13mm] (loss) {WIoU v3\\box loss};
+\draw[->, dashed] (head) -- (loss);
+% legend
+\node[frozen, minimum height=3mm, minimum width=5mm, below=3mm of dino.south west, anchor=north west] (l1) {};
+\node[right=0.5mm of l1, lab, anchor=west] {frozen};
+\node[coco, minimum height=3mm, minimum width=5mm, right=9mm of l1] (l2) {};
+\node[right=0.5mm of l2, lab, anchor=west] {COCO-pretrained YOLOv12-L};
+\node[new, minimum height=3mm, minimum width=5mm, right=33mm of l2] (l3) {};
+\node[right=0.5mm of l3, lab, anchor=west] {zero-initialised residual additions};
+\end{tikzpicture}

@@ -1,0 +1,87 @@
+\section{Detectors}
+\label{sec:models}
+
+We compare four detector families under shared splits, evaluator and bootstrap. Table~\ref{tab:recipes} lists the training settings.
+
+\subsection{YOLO12-L}
+The stock Ultralytics YOLO12-L~\cite{ultralytics,yolov12} is COCO-pretrained and uses the CIoU loss~\cite{diou} and AdamW~\cite{adamw} (learning rate 0.001, weight decay 0.01) with a cosine schedule~\cite{sgdr}. Training uses mosaic~\cite{yolov4}, vertical and horizontal flips and random quarter turns. A quarter turn maps an axis-aligned box onto an exactly tight box, and drone views have no canonical ``up''.
+
+\subsection{BladeYOLO-v2}
+\label{sec:byv2}
+BladeYOLO-v2 is our re-engineering of the BladeYOLO idea after a code audit (Section~\ref{sec:history}). It keeps the COCO-pretrained YOLOv12-L backbone, neck and head, so that 1{,}239 pretrained tensors transfer, and adds BladeYOLO's ingredients as zero-initialised residual branches (Fig.~\ref{fig:arch-byv2}). Training therefore starts exactly at the pretrained detector, and it learns how much of each addition to use:
+\begin{itemize}
+\item \textbf{DinoFuse.} Frozen DINOv3 features~\cite{dinov3} from blocks 4, 8 and 12 (ViT-S/16 by default; ViT-B/16 and ViT-L/16 in the ablations) are resized to the P3, P4 and P5 backbone levels. They are projected there and added through a zero-initialised $1\times1$ convolution: $X_\ell' = X_\ell + W_\ell\,\phi(\mathrm{Resize}(D_{b(\ell)}))$ with $W_\ell=0$ at initialisation.
+\item \textbf{Deformable refinement} of the P3 and P4 neck outputs with modulated deformable convolution (DCNv2~\cite{dcnv2}), for irregular contours such as cracks and erosion edges. Offsets start at zero and modulation at 0.5.
+\item \textbf{Selective-scan refinement} of the P5 neck output: a four-direction VMamba-style scan~\cite{vmamba,mamba} in the chunked Mamba-2 form, written in plain PyTorch. It matches a step-by-step reference recurrence to $1.8\times10^{-14}$.
+\item \textbf{WIoU v3}~\cite{wiou} box loss in place of CIoU. The assigner keeps CIoU.
+\end{itemize}
+With ViT-S/16 the model has 53.7\,M parameters (32.1\,M trainable) and 233.5 GFLOPs. Deformable and selective-scan blocks run in fp32 under mixed precision~\cite{mixedprecision}, and YOLOv12's area-attention scores are computed in fp32. Without these changes, fp16 overflows produced NaNs at epochs 9, 17 and 99--149 (Appendix~\ref{app:engineering}).
+
+\begin{figure*}[!t]
+\centering
+\resizebox{0.92\textwidth}{!}{\input{tikz/arch_byv2}}
+\caption{BladeYOLO-v2. A COCO-pretrained YOLOv12-L with three kinds of zero-initialised residual additions: frozen DINOv3 features fused into the backbone levels P3--P5 (DinoFuse), DCNv2 refinement of the P3/P4 neck outputs, and a four-direction selective scan (SS2D) on the P5 neck output. The box loss is WIoU v3. At initialisation the network computes exactly the pretrained YOLOv12-L. Section~\ref{sec:ablation} shows that the frozen DINOv3 features carry its entire advantage.}
+\label{fig:arch-byv2}
+\end{figure*}
+
+\subsection{RF-DETR}
+RF-DETR-M~\cite{rfdetr} (\texttt{rfdetr} 1.11.2) builds on LW-DETR~\cite{lwdetr}. It uses a windowed DINOv2-S/16 encoder~\cite{dinov2}, fine-tuned end to end, whose blocks 3, 6, 9 and 12 feed a single-level (P4, stride 16) projector with 256 channels. A two-stage head selects 300 queries from this memory, and four deformable cross-attention decoder layers~\cite{deformabledetr} refine them. Training uses group-DETR one-to-many assignment (13 groups) and IoU-aware BCE classification with GIoU and L1 box losses~\cite{giou}. We fine-tune from the COCO checkpoint with AdamW (base learning rate $10^{-4}$, encoder $1.5\times10^{-4}$ with layer-wise decay 0.8, weight decay $10^{-4}$), gradient clipping at 0.1 and per-batch multi-scale training. The effective batch is 16 (4 $\times$ 4 accumulation). An exponential moving average~\cite{polyak} of the weights (decay 0.993) is evaluated every epoch, and the best EMA checkpoint on validation is kept. RF-DETR's default learning-rate step at epoch 100 never fires in a 100-epoch run, so we use an explicit cosine schedule (``G26 recipe'').
+
+\subsection{RF-DETR-FP: A Frozen Foundation Prior Beside a Fine-Tuned Encoder}
+\label{sec:fp}
+
+\textbf{Motivation.} Three findings of this study, each made before RF-DETR-FP was designed, point to the same lever:
+\begin{enumerate}
+\item Frozen DINOv3 is the one component that ever helped in our YOLO-family ablations. It adds $+3.9$, $+8.8$ and $+9.0$ \mcoco at 25, 50 and 100\% labels, and ViT-B beats ViT-S (Section~\ref{sec:ablation}).
+\item RF-DETR lacks what DINOv3 carries. On WTBlade-group, the frozen-DINOv3 ViT-B YOLO beats fine-tuned RF-DETR-M (18.0 against 16.2/16.9). On WTBD, DINOv3 ViT-B box embeddings re-rank RF-DETR's own outputs for a gain (H18, Table~\ref{tab:ledger}), so its ranking deficit is information that DINOv3 holds and RF-DETR does not use.
+\item That information cannot simply be written into RF-DETR's encoder. Fine-tuning moves RF-DETR's features away from generic neighbourhoods (G22-O). Further self-supervised adaptation of its encoder halved the effective rank of its last stage (G27 D1, Section~\ref{sec:failed}), and multi-dataset pretraining did not help (D2).
+\end{enumerate}
+We therefore keep a second, \emph{frozen} encoder beside the fine-tuned one, rather than adapting either (Fig.~\ref{fig:arch-fp}).
+
+\begin{figure*}[!t]
+\centering
+\resizebox{\textwidth}{!}{\input{tikz/arch_fp}}
+\caption{RF-DETR-FP. A frozen DINOv3 ViT-B/16 runs beside RF-DETR-M's fine-tuned windowed DINOv2-S encoder on the same normalised input. Both have patch 16, so the frozen features from blocks 4, 8 and 12 (2{,}304 channels) lie on the projector's grid. PriorFuse adds them to the projector output $F$ before two-stage query selection and decoding. Its output convolution is zero-initialised, so the model at step 0 is exactly RF-DETR-M. DINOv3 sits outside the optimiser, the EMA copy and the checkpoint. Only PriorFuse (0.79\,M parameters) is new.}
+\label{fig:arch-fp}
+\end{figure*}
+
+\textbf{Architecture.} Let $I\in\mathbb{R}^{3\times H\times W}$ be the ImageNet-normalised input, which is also DINOv3's normalisation. Let $F=\mathrm{Proj}(E_\theta(I))\in\mathbb{R}^{C\times\frac{H}{16}\times\frac{W}{16}}$, with $C=256$, be RF-DETR's projector output. The frozen prior is
+\begin{equation}
+P=\big[\,\mathrm{LN}(\Phi_4(I));\ \mathrm{LN}(\Phi_8(I));\ \mathrm{LN}(\Phi_{12}(I))\,\big]\in\mathbb{R}^{2304\times\frac{H}{16}\times\frac{W}{16}},
+\label{eq:prior}
+\end{equation}
+where $\Phi_k$ is the patch-token map after block $k$ of DINOv3 ViT-B/16, computed without gradient, and LN is DINOv3's final layer norm~\cite{layernorm}. PriorFuse computes
+\begin{align}
+S &= \mathrm{GELU}\big(W_r\ast\mathrm{LN}(P)\big), \label{eq:reduce}\\
+Z &= \mathrm{GELU}\big(\mathrm{LN}(W_m\ast[F;S])\big), \label{eq:mix}\\
+F' &= F + W_o\ast\mathrm{GELU}\big(\mathrm{DW}_{3\times3}(Z)\big),\qquad W_o=0,\ b_o=0\ \text{at}\ t=0, \label{eq:fuse}
+\end{align}
+where $W_r$ ($2304\rightarrow C$), $W_m$ ($2C\rightarrow C$) and $W_o$ ($C\rightarrow C$) are $1\times1$ convolutions, $\mathrm{DW}_{3\times3}$ is a depthwise convolution~\cite{xception} and GELU is from~\cite{gelu}. $F'$ replaces $F$ as the memory from which the two-stage head selects queries and which the decoder attends to. Because the grids coincide on RF-DETR-M, no resampling is needed. For RF-DETR sizes with other projector levels, $P$ is resized bilinearly.
+
+\textbf{Properties.} (i) At initialisation the patched backbone returns bit-identical features to RF-DETR, which we verify in a unit test at 320 and 768\,px. (ii) The frozen model lives in a process-wide cache, not as a submodule, so it is not in \texttt{parameters()}, the optimiser, the EMA copy or \texttt{state\_dict()}. Checkpoints carry only the 0.79\,M fusion parameters, and gradients reach PriorFuse and never DINOv3, which a unit test also verifies. (iii) The recipe is otherwise unchanged: each FP run uses exactly the arguments of a baseline twin with the same hardware type, so that every comparison is paired. (iv) On a Tesla T4 the frozen ViT-B forward, plus a second job sharing the machine, costs 1.5--1.7$\times$ the baseline's wall time (Table~\ref{tab:recipes}).
+
+\textbf{Novelty, stated plainly.} Fusing frozen foundation features into a detector is prior art: BladeYOLO and DINO-YOLO do it in YOLO~\cite{bladeyolo,dinoyolo}, and DEIMv2 puts DINOv3 in a DETR~\cite{deimv2}. What is specific here is narrower. First, a frozen generic encoder is placed \emph{beside} a fine-tuned one, chosen because of measured evidence that the fine-tuned one drifts from it and collapses when pushed further. Second, the test is leak-aware: we ask whether the gain is still there on images with no training twin. This is a defensible design, not a new module, and we evaluate it as such.
+
+\begin{table*}[!t]
+\centering
+\caption{Training settings. All RF-DETR runs fine-tune the COCO checkpoint, select the best EMA checkpoint on validation and score test once. Wall times are per run on one Tesla T4 (fp16) unless noted.}
+\label{tab:recipes}
+\footnotesize
+\begin{tabularx}{\textwidth}{@{}l l l l l X@{}}
+\toprule
+Model & Data & Input & Epochs & Batch & Notes \\
+\midrule
+YOLO12-L, BladeYOLO-v2 & WTBD-group / WTBD-official & 640 & 150 / 120 & 16 & AdamW 0.001, wd 0.01, cosine, mosaic, flips, Rot90; Ultralytics \\
+YOLO12-L, BladeYOLO-v2 ViT-B & WTBlade-group & 640 & 50 & 16 & as above \\
+RF-DETR-M (A0) & WTBD-group & 768 & 100 & 4$\times$4 & cosine; 2.5\,h (FP: 4.2\,h) \\
+RF-DETR-M (A0) & WTBlade-group & 640 & 60 & 4$\times$4 & cosine; $\approx$3.5\,h (FP: 5.5\,h) \\
+RF-DETR-M (G26) & WTBD-official & 768 & 100 & 2$\times$8 & cosine; 3\,h (FP: 4.9\,h) \\
+RF-DETR-M (G26) & Wind Surface (2{,}570/286/714) & 640 & 100 & 4$\times$4 & cosine; 7\,h (FP: 10.8\,h) \\
+RF-DETR-M (G26) & WTBlade-Defect official & 640 & 40 & 4$\times$4 & cosine; A100 (bf16) \\
+RF-DETR-M (V1) & 25\% of WTBD-group, 4 subsets & 576 & 100 & 4$\times$4 & RF-DETR's constant schedule; 35\,min (FP: $\approx$1\,h) \\
+RF-DETR-M class-agnostic (G28) & ID / X pools & 640 & 100, 60 / 12 & 4$\times$4 & cosine; X selected on its own held-out 5\% \\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+\textbf{Hardware.} Runs used Kaggle Tesla T4 GPUs (fp16 mixed precision) and one A100 (bf16). Every RF-DETR-FP run and its twin ran on T4s. G27's seed-1 runs ran on the A100 and its seed-0 runs on Kaggle, so every pair of arms within a seed shares hardware. The G29 queue ran two lanes in parallel per Kaggle session, one per T4, under a time guard. The guard starts no run with less than 30\,min left of an 11.3\,h budget, stops training 15\,min before the budget ends and never predicts from a stopped run. All ten G29 runs finished inside the guard.

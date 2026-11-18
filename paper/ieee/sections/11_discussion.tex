@@ -1,0 +1,54 @@
+\section{Discussion}
+\label{sec:discussion}
+
+\subsection{What the Benchmarks Measure}
+On the official splits, a detector is largely asked to recognise images it has already seen in another orientation or exposure. The evidence is consistent across three independent measurements. The leaked and no-twin subsets differ by 24--48 \mfifty points on the two larger datasets. With the same model and recipe, swapping only the split halves \mcoco on WTBD. And a tuning step judged by the official numbers moved scores towards leaked images on all three datasets. The field's ``near-saturated'' 85--92 \mfifty therefore says little about inspection of new turbines. On leak-free splits the same detectors sit at 32--59 \mfifty and 13--35 \mcoco. That is the honest starting point for blade-defect detection on public data today.
+
+\subsection{What Helps, and How Much}
+Two things helped reliably: frozen foundation features in the YOLO family, and replacing the frozen-feature YOLO by a fine-tuned detection transformer at low label budgets (V1). Everything else we tried was either flat, dataset-specific or prior art. That covers semi-supervision, SAM refinement, split tolerance, reward fine-tuning, retrieval and anomaly priors, rescoring, flip agreement, resolution, copy-paste, encoder adaptation and pooled external data. RF-DETR-FP combines the two levers that worked. Its pre-registered test passes narrowly on test and is not confirmed on validation, so we report it as a small gain rather than a new state of the art. It does give the best leak-free WTBD result we have, and on the official protocol its change, unlike that of our tuning step, points towards unseen scenes.
+
+\subsection{What Limits the Score}
+Four ceilings stand out. (i) The annotators agree with themselves on only 84--87\% of labels on exact copies, and on 69\% for corrosion. (ii) Box granularity alone costs about 12 \apfifty points. (iii) Which 25\% of scenes are labelled changes the result by a factor of two. (iv) Detectors that see one site do not transfer to another, even from 35 times more images. At 25\% labels the dominant RF-DETR error is a correct box ranked low, not a missing box. On WTBlade, small cracks are missed at every budget.
+
+\subsection{Recommendations}
+\begin{enumerate}
+\item \textbf{Split by scene, and deduplicate before augmenting.} Never augment before a split. Group by source photograph, video and tile, and add a pixel test: retrieval and keypoints alone missed photometric copies in our own splits.
+\item \textbf{Publish image lists}, not just ratios. The question raised by BladeYOLO's 0.87 \mcoco/\mfifty ratio cannot be settled without one.
+\item \textbf{Report a leaked/no-twin breakdown} for any dataset with known copies. It takes minutes with cached predictions, and our tools are public~\cite{repo}.
+\item \textbf{Do not tune on a leaky test set.} On these splits, tuning measurably moved scores towards memorisation. Tune on a scene-separated validation set.
+\item \textbf{Use scene-level intervals.} A 161-image test set with 58 scenes, some classes in fewer than three scenes, cannot support per-class claims.
+\item \textbf{Report several labelled subsets for low-label claims.} A factor of two between random draws is larger than any model effect we saw.
+\item \textbf{Report seeds and validation.} On these test sets, seed swings of up to 2 \mcoco points match the size of most claimed gains, and a test-only pass can fail to replicate.
+\item \textbf{Calibrate on unseen scenes.} A recall guarantee calibrated on seen scenes does not hold in the field.
+\item \textbf{Report a granularity-invariant score beside box AP} for amorphous defects, and measure label self-consistency where copies exist.
+\item \textbf{Test every method on a second dataset.} Several of our effects held on WTBD and vanished on WTBlade, and the reverse.
+\item \textbf{Check licences at the source}, since export pages can misstate them.
+\end{enumerate}
+
+\subsection{Limitations}
+\label{sec:limits}
+\begin{itemize}
+\item \textbf{One wind farm per dataset, and small test sets} (58 and 177 test scenes), so our leak-free numbers carry wide intervals.
+\item \textbf{Official-protocol runs are single seed}, and their intervals are image-level.
+\item \textbf{The tuning analysis is post hoc and covers one step}, with epochs confounded on two of three protocols.
+\item \textbf{Wind Surface's no-twin subset is not leak-free}, since it shares drone photographs with train. WTBD's no-twin subset has too few boxes of three classes.
+\item \textbf{WTBlade-group frames retain Roboflow's offline augmentation.} We keep one copy per source, so some test frames are rotated or carry black cutouts (Fig.~\ref{fig:predictions}). This is a difference from clean imagery, not a leak.
+\item \textbf{YOLO12-L on WTBlade-group may be under-trained:} 50 epochs, with its best validation at epoch 43 after a nearly linear rise.
+\item \textbf{Our leak-free splits have a small residual leak}: under a point on WTBD-group, and negligible on WTBlade-group.
+\item \textbf{RF-DETR-FP rests on two seeds} per leak-free dataset, and its gain is not confirmed on validation. WTBlade-Defect's official protocol was not run with the prior, as pre-registered: its 40-epoch twin would not fit a 12\,h T4 session.
+\item \textbf{G27 A-2 uses two seeds, and G28 one.} G28's X arms train for 12 epochs at 640\,px, and X-WTBlade's pool is 45\% smaller than X-WTBD's.
+\item \textbf{Hardware differs between some seeds} (T4 fp16 and A100 bf16). Arms are always paired within a hardware type.
+\item \textbf{Claims about modules concern our components.} BladeYOLO's own modules were not rerun on a leak-free split after the code audit.
+\item \textbf{Deviations from pre-registration.} The G26 rule formally selected RF-DETR-L (validation 63.4 against 62.0), which lost on test ($-1.7$), and we did not run L on the other protocols; this cannot inflate a reported number. G27's phase B on the official protocols was not run, since the recipe failed A-2.
+\item \textbf{The literature check is not exhaustive}; ``new for this domain'' means that we did not find an earlier audit.
+\end{itemize}
+
+\section{Conclusion}
+The three public blade-defect benchmarks mostly test memorisation: 78--92\% of their official test images have a training twin, and their published 85--92 \mfifty fall to 32--59 on scene-grouped splits of the same images. Our attempt to reproduce BladeYOLO taught us this the hard way, through a 52.6 faithful reimplementation, a 78.2 that was itself leaked and a code audit that invalidated our own early conclusions. We release audited leak-free splits of WTBD and WTBlade-Defect with scene-level intervals, per-image leak flags for the official test sets and all evaluation tools. On these benchmarks, frozen foundation features are the one ingredient that reliably helps a YOLO detector. A fine-tuned detection transformer is stronger still at low labels on WTBD. Our RF-DETR-FP, which keeps a frozen DINOv3 prior beside RF-DETR's fine-tuned encoder, gives the best WTBD-group result (34.4 \mcoco) in a narrow, pre-registered pass. The larger lesson is about measurement. Without scene-level splits, leak breakdowns, seeds and pre-registration, every number in this field, including several of our own, would have pointed in the wrong direction.
+
+\section*{Data and Code Availability}
+\textbf{Code and records.} All code, tests, split files, per-image leak flags, cached predictions and the full research log (\texttt{research\_log.md}) are at \url{https://github.com/bhavya-goel-11/BladeYOLO}~\cite{repo}. To regenerate this paper's numbers and figures, run \texttt{tools/official\_leak\_eval.py}, \texttt{tools/g27\_score.py}, \texttt{tools/g28\_score.py}, \texttt{tools/g29\_score.py}, \texttt{tools/paper\_evidence.py}, \texttt{tools/paper\_figures.py}, \texttt{tools/paper\_figures2.py}, \texttt{tools/paper\_figures3.py} and \texttt{tools/build\_ieee\_tables.py}. The training queue is \texttt{tools/sessions.sh}. RF-DETR-FP is \texttt{tools/g29\_prior.py}, with unit and end-to-end tests in \texttt{tests/test\_g29\_prior.py}.
+
+\textbf{Data.} The datasets as audited, the leak-free splits (WTBD-group, WTBlade-group), the official splits used here and the twin-free pools are assembled as \texttt{blade-defect-benchmark} on Kaggle: \url{https://www.kaggle.com/datasets/beegee11/blade-defect-benchmark}~\cite{kaggleds}. Per-folder licences are in its \texttt{LICENSES.md}. WTBD is CC BY 4.0~\cite{wtbd}. WTBlade-Defect contains DTU NordTank images~\cite{shihavuddin,dtudata} under CC BY-NC, despite its Roboflow page, and derived folders inherit this, so they are for non-commercial research only. The Wind Surface licence is unclear from its source~\cite{gfdyolox}. Images in our figures are shown for scientific comment, and their sources are cited.
+
+\textbf{Foundation models.} We acknowledge DINOv3~\cite{dinov3}, used under the DINOv3 License, and DINOv2~\cite{dinov2} through RF-DETR~\cite{rfdetr} (Apache-2.0). Trained checkpoints that contain DINOv3 weights must ship with that licence; RF-DETR-FP checkpoints contain only the fusion layers.
