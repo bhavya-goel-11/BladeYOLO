@@ -580,7 +580,7 @@ you use:
 
 ```bibtex
 @misc{goel2026memorisedblades,
-  author = {Goel, Bhavya},
+  author = {Goel, Bhavya and Jain, Stuti},
   title  = {Memorised Blades: Data Leakage Inflates Wind-Turbine Blade Defect Benchmarks, Leak-Free Splits Reset the
             Field, and a Frozen Foundation Prior for Detection Transformers},
   year   = {2026},
